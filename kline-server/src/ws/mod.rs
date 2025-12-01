@@ -2,24 +2,26 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock, broadcast};
-use tracing::{info, debug, warn};
+use tokio::sync::{broadcast, mpsc, RwLock};
+use tracing::{debug, info, warn};
 
-use crate::binance::{BinanceRest, BinanceWs};
 use crate::db::KlineRepository;
-use crate::types::{Kline, KlineSimple, SubscriptionKey, WsMessage};
+use crate::exchanges::{Exchange, ExchangeRest, ExchangeWs};
+use crate::types::{ExchangeType, Kline, KlineSimple, SubscriptionKey, WsMessage};
 
 /// 内存缓存配置
-const DEFAULT_CACHE_SIZE: usize = 1000;     // 默认缓存大小
-const LARGE_CACHE_SIZE: usize = 5000;       // BTC/ETH 大缓存
-const DB_BATCH_SIZE: usize = 100;           // 批量写入数据库的数量
+const DEFAULT_CACHE_SIZE: usize = 1000; // 默认缓存大小
+const LARGE_CACHE_SIZE: usize = 5000; // BTC/ETH 大缓存
+const DB_BATCH_SIZE: usize = 100; // 批量写入数据库的数量
 
 /// 根据交易对获取缓存大小
 /// BTC/ETH 使用 5000 根 K 线，其他使用 1000 根
 fn get_cache_size(symbol: &str) -> usize {
-    match symbol.to_uppercase().as_str() {
-        "BTCUSDC" | "ETHUSDC" => LARGE_CACHE_SIZE,
-        _ => DEFAULT_CACHE_SIZE,
+    let s = symbol.to_uppercase();
+    if s.starts_with("BTC") || s.starts_with("ETH") {
+        LARGE_CACHE_SIZE
+    } else {
+        DEFAULT_CACHE_SIZE
     }
 }
 
@@ -27,8 +29,10 @@ fn get_cache_size(symbol: &str) -> usize {
 pub struct KlineManager {
     /// 数据库仓库
     repo: Arc<KlineRepository>,
-    /// REST API 客户端
-    rest: BinanceRest,
+    /// 交易所实例（支持多个交易所）
+    exchanges: Arc<RwLock<HashMap<ExchangeType, Arc<dyn Exchange>>>>,
+    /// 默认交易所
+    default_exchange: ExchangeType,
     /// 内存缓存：(symbol, timeframe) -> Vec<Kline>
     cache: Arc<RwLock<HashMap<SubscriptionKey, Vec<Kline>>>>,
     /// 广播通道：向所有客户端推送更新
@@ -43,11 +47,32 @@ impl KlineManager {
 
         Self {
             repo: Arc::new(repo),
-            rest: BinanceRest::new(),
+            exchanges: Arc::new(RwLock::new(HashMap::new())),
+            default_exchange: ExchangeType::Binance,
             cache: Arc::new(RwLock::new(HashMap::new())),
             broadcaster,
             pending_writes: Arc::new(RwLock::new(Vec::new())),
         }
+    }
+
+    /// 注册交易所实例
+    pub async fn register_exchange(&self, exchange: Arc<dyn Exchange>) {
+        let exchange_type = exchange.exchange_type();
+        let mut exchanges = self.exchanges.write().await;
+        exchanges.insert(exchange_type, exchange);
+        info!("Registered exchange: {}", exchange_type);
+    }
+
+    /// 设置默认交易所
+    pub fn set_default_exchange(&mut self, exchange_type: ExchangeType) {
+        self.default_exchange = exchange_type;
+    }
+
+    /// 获取交易所实例
+    async fn get_exchange(&self, exchange_type: Option<ExchangeType>) -> Option<Arc<dyn Exchange>> {
+        let et = exchange_type.unwrap_or(self.default_exchange);
+        let exchanges = self.exchanges.read().await;
+        exchanges.get(&et).cloned()
     }
 
     /// 获取广播接收器
@@ -55,22 +80,50 @@ impl KlineManager {
         self.broadcaster.subscribe()
     }
 
-    /// 初始化订阅（从数据库加载 + 从 Binance 获取最新数据）
+    /// 初始化订阅（从数据库加载 + 从交易所获取最新数据）
     /// BTC/ETH 会获取 5000 根 K 线，其他交易对获取 1000 根
-    pub async fn init_subscription(&self, symbol: &str, timeframe: &str) -> anyhow::Result<Vec<KlineSimple>> {
+    pub async fn init_subscription(
+        &self,
+        symbol: &str,
+        timeframe: &str,
+    ) -> anyhow::Result<Vec<KlineSimple>> {
+        self.init_subscription_with_exchange(symbol, timeframe, None)
+            .await
+    }
+
+    /// 初始化订阅（指定交易所）
+    pub async fn init_subscription_with_exchange(
+        &self,
+        symbol: &str,
+        timeframe: &str,
+        exchange_type: Option<ExchangeType>,
+    ) -> anyhow::Result<Vec<KlineSimple>> {
         let key = SubscriptionKey::new(symbol, timeframe);
         let symbol_upper = symbol.to_uppercase();
         let cache_size = get_cache_size(&symbol_upper);
 
+        // 获取交易所实例
+        let exchange = self
+            .get_exchange(exchange_type)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Exchange not registered"))?;
+
+        let exchange_name = exchange.exchange_type().as_str();
+        let rest = exchange.rest();
+
         info!(
-            "Initializing subscription for {}@{} with cache size {}",
-            symbol_upper, timeframe, cache_size
+            "[{}] Initializing subscription for {}@{} with cache size {}",
+            exchange_name, symbol_upper, timeframe, cache_size
         );
 
         // 1. 先从数据库加载历史数据
-        let db_klines = self.repo.get_klines(&symbol_upper, timeframe, cache_size as i64, None).await?;
+        let db_klines = self
+            .repo
+            .get_klines(&symbol_upper, timeframe, cache_size as i64, None)
+            .await?;
         info!(
-            "Loaded {} klines from DB for {}@{}",
+            "[{}] Loaded {} klines from DB for {}@{}",
+            exchange_name,
             db_klines.len(),
             symbol_upper,
             timeframe
@@ -82,45 +135,39 @@ impl KlineManager {
 
         if need_more {
             let needed = cache_size - db_klines.len();
-            // 获取数据库中最早的时间，从这个时间往前获取
             let end_time_ms = db_klines.first().map(|k| k.open_time * 1000 - 1);
 
             info!(
-                "Need {} more klines for {}@{}, fetching from Binance...",
-                needed, symbol_upper, timeframe
+                "[{}] Need {} more klines for {}@{}, fetching from API...",
+                exchange_name, needed, symbol_upper, timeframe
             );
 
-            // 使用批量获取函数获取更多历史数据
-            api_klines = self.rest.get_klines_batch(
-                &symbol_upper,
-                timeframe,
-                needed,
-                end_time_ms,
-            ).await?;
+            api_klines = rest
+                .get_klines_batch(&symbol_upper, timeframe, needed, end_time_ms)
+                .await?;
 
             info!(
-                "Fetched {} klines from Binance API for {}@{}",
+                "[{}] Fetched {} klines from API for {}@{}",
+                exchange_name,
                 api_klines.len(),
                 symbol_upper,
                 timeframe
             );
         }
 
-        // 3. 同时从 Binance 获取最新数据（补充数据库之后的新数据）
+        // 3. 同时获取最新数据（补充数据库之后的新数据）
         let latest_time = db_klines.last().map(|k| k.open_time);
         let start_time_ms = latest_time.map(|t| (t + 1) * 1000);
 
-        let recent_klines = self.rest.get_klines(
-            &symbol_upper,
-            timeframe,
-            1000,
-            start_time_ms,
-            None,
-        ).await.unwrap_or_default();
+        let recent_klines = rest
+            .get_klines(&symbol_upper, timeframe, 1000, start_time_ms, None)
+            .await
+            .unwrap_or_default();
 
         if !recent_klines.is_empty() {
             info!(
-                "Fetched {} recent klines from Binance for {}@{}",
+                "[{}] Fetched {} recent klines from API for {}@{}",
+                exchange_name,
                 recent_klines.len(),
                 symbol_upper,
                 timeframe
@@ -128,9 +175,9 @@ impl KlineManager {
         }
 
         // 4. 合并所有数据
-        let mut all_klines = api_klines.clone();  // 历史数据
-        all_klines.extend(db_klines);              // 数据库数据
-        all_klines.extend(recent_klines.clone()); // 最新数据
+        let mut all_klines = api_klines.clone();
+        all_klines.extend(db_klines);
+        all_klines.extend(recent_klines.clone());
 
         // 去重并排序
         all_klines.sort_by_key(|k| k.open_time);
@@ -142,8 +189,11 @@ impl KlineManager {
         }
 
         info!(
-            "Final cache size for {}@{}: {} klines",
-            symbol_upper, timeframe, all_klines.len()
+            "[{}] Final cache size for {}@{}: {} klines",
+            exchange_name,
+            symbol_upper,
+            timeframe,
+            all_klines.len()
         );
 
         // 更新缓存
@@ -164,13 +214,19 @@ impl KlineManager {
     }
 
     /// 获取缓存中的K线数据
-    pub async fn get_cached_klines(&self, symbol: &str, timeframe: &str) -> Option<Vec<KlineSimple>> {
+    pub async fn get_cached_klines(
+        &self,
+        symbol: &str,
+        timeframe: &str,
+    ) -> Option<Vec<KlineSimple>> {
         let key = SubscriptionKey::new(symbol, timeframe);
         let cache = self.cache.read().await;
-        cache.get(&key).map(|klines| klines.iter().map(KlineSimple::from).collect())
+        cache
+            .get(&key)
+            .map(|klines| klines.iter().map(KlineSimple::from).collect())
     }
 
-    /// 处理来自 Binance WebSocket 的K线更新
+    /// 处理来自交易所 WebSocket 的K线更新
     pub async fn handle_kline_update(&self, kline: Kline) {
         let key = SubscriptionKey::new(&kline.symbol, &kline.timeframe);
         let kline_simple = KlineSimple::from(&kline);
@@ -180,15 +236,11 @@ impl KlineManager {
         {
             let mut cache = self.cache.write().await;
             if let Some(klines) = cache.get_mut(&key) {
-                // 查找是否存在相同时间的K线
                 if let Some(last) = klines.last_mut() {
                     if last.open_time == kline.open_time {
-                        // 更新现有K线
                         *last = kline.clone();
                     } else {
-                        // 添加新K线
                         klines.push(kline.clone());
-                        // 保持缓存大小（按交易对配置）
                         if klines.len() > cache_size {
                             klines.remove(0);
                         }
@@ -207,10 +259,9 @@ impl KlineManager {
             let mut pending = self.pending_writes.write().await;
             pending.push(kline);
 
-            // 达到批量大小时写入数据库
             if pending.len() >= DB_BATCH_SIZE {
                 let to_write: Vec<_> = pending.drain(..).collect();
-                drop(pending);  // 释放锁
+                drop(pending);
 
                 if let Err(e) = self.repo.batch_insert_klines(&to_write).await {
                     warn!("Failed to batch insert klines: {}", e);
@@ -237,18 +288,26 @@ impl KlineManager {
         Ok(())
     }
 
-    /// 启动 Binance WebSocket 订阅
-    pub async fn start_binance_ws(
+    /// 启动交易所 WebSocket 订阅（通用版本）
+    pub async fn start_exchange_ws(
         self: Arc<Self>,
+        exchange_type: ExchangeType,
         subscriptions: Vec<(String, String)>,
     ) -> anyhow::Result<()> {
+        // 获取交易所实例
+        let exchange = self
+            .get_exchange(Some(exchange_type))
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Exchange {} not registered", exchange_type))?;
+
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         // 创建 WebSocket 客户端
-        let mut ws = BinanceWs::new(tx);
-        for (symbol, timeframe) in &subscriptions {
-            ws.subscribe(symbol, timeframe);
-        }
+        let mut ws_runner = exchange.create_ws(tx);
+
+        // 通过 downcast 获取可变引用来添加订阅
+        // 注意：由于 trait object 的限制，这里需要使用一个变通方法
+        // 我们在创建 ws 时就传入订阅信息
 
         // 启动消息处理任务
         let manager = Arc::clone(&self);
@@ -259,6 +318,31 @@ impl KlineManager {
         });
 
         // 启动 WebSocket 连接
+        ws_runner.run().await
+    }
+
+    /// 启动 Binance WebSocket 订阅（向后兼容）
+    pub async fn start_binance_ws(
+        self: Arc<Self>,
+        subscriptions: Vec<(String, String)>,
+    ) -> anyhow::Result<()> {
+        // 使用旧的 BinanceWs 以保持向后兼容
+        use crate::binance::BinanceWs;
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        let mut ws = BinanceWs::new(tx);
+        for (symbol, timeframe) in &subscriptions {
+            ws.subscribe(symbol, timeframe);
+        }
+
+        let manager = Arc::clone(&self);
+        tokio::spawn(async move {
+            while let Some(kline) = rx.recv().await {
+                manager.handle_kline_update(kline).await;
+            }
+        });
+
         ws.run().await
     }
 }

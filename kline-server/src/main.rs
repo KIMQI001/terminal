@@ -1,12 +1,20 @@
 //! K线数据服务器
 //!
 //! 提供 K 线数据的持久化存储、实时更新和 WebSocket 推送服务
+//!
+//! ## 架构说明
+//! - exchanges/ 模块：交易所抽象层，支持多个 CEX（Binance, OKX, Bybit）
+//! - 使用 trait object 实现交易所接口的多态
+//! - 支持未来扩展 DEX（Uniswap, Raydium 等）
 
 mod api;
-mod binance;
 mod db;
+mod exchanges;
 mod types;
 mod ws;
+
+// 保留旧的 binance 模块用于向后兼容
+mod binance;
 
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
@@ -36,12 +44,15 @@ async fn main() -> anyhow::Result<()> {
     // 初始化日志
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
-        .with(tracing_subscriber::EnvFilter::from_default_env()
-            .add_directive("kline_server=info".parse()?)
-            .add_directive("tower_http=debug".parse()?))
+        .with(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive("kline_server=info".parse()?)
+                .add_directive("tower_http=debug".parse()?),
+        )
         .init();
 
     info!("Starting K-line Server...");
+    info!("Exchange abstraction layer enabled - supporting multiple exchanges");
 
     // 初始化数据库
     let database_url = std::env::var("DATABASE_URL")
@@ -53,6 +64,14 @@ async fn main() -> anyhow::Result<()> {
     let repo = KlineRepository::new(pool);
     let manager = Arc::new(KlineManager::new(repo));
 
+    // 注册 Binance 交易所（使用新的抽象层）
+    // 未来可以在这里添加更多交易所：
+    // - manager.register_exchange(Arc::new(OkxExchange::new(...))).await;
+    // - manager.register_exchange(Arc::new(BybitExchange::new(...))).await;
+    let binance_exchange = exchanges::binance::BinanceExchange::default_futures();
+    manager.register_exchange(Arc::new(binance_exchange)).await;
+    info!("Registered Binance Futures exchange");
+
     // 初始化默认订阅
     for (symbol, timeframe) in DEFAULT_SUBSCRIPTIONS {
         if let Err(e) = manager.init_subscription(symbol, timeframe).await {
@@ -61,6 +80,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // 启动 Binance WebSocket（后台任务）
+    // 使用旧的 start_binance_ws 方法以保持向后兼容
+    // 未来可以改用：manager.start_exchange_ws(ExchangeType::Binance, subscriptions)
     let ws_manager = Arc::clone(&manager);
     let subscriptions: Vec<_> = DEFAULT_SUBSCRIPTIONS
         .iter()
@@ -101,7 +122,11 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!("Server listening on {}", addr);
     info!("WebSocket endpoint: ws://{}/ws", addr);
-    info!("REST API endpoint: http://{}/api/klines/:symbol/:timeframe", addr);
+    info!(
+        "REST API endpoint: http://{}/api/klines/:symbol/:timeframe",
+        addr
+    );
+    info!("Supported exchanges: Binance (OKX and Bybit coming soon)");
 
     axum::serve(listener, app).await?;
 

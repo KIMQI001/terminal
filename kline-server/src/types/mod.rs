@@ -1,6 +1,46 @@
 //! K线数据类型定义
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
+
+/// 交易所类型枚举
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ExchangeType {
+    #[default]
+    Binance,
+    Okx,
+    Bybit,
+    // DEX 预留
+    // Uniswap,
+    // Raydium,
+    // Jupiter,
+}
+
+impl ExchangeType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ExchangeType::Binance => "binance",
+            ExchangeType::Okx => "okx",
+            ExchangeType::Bybit => "bybit",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "binance" => Some(ExchangeType::Binance),
+            "okx" => Some(ExchangeType::Okx),
+            "bybit" => Some(ExchangeType::Bybit),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for ExchangeType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
 
 /// K线数据
 #[derive(Debug, Clone, Serialize, Deserialize)]

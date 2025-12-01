@@ -37,3 +37,9 @@ thiserror = "1"
 anyhow = "1"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
+
+# 异步 trait
+async-trait = "0.1"
+
+# 配置
+toml = "0.8"
