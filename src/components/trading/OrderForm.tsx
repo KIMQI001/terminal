@@ -51,8 +51,14 @@ export function OrderForm() {
     const sl = parseFloat(stopLoss) || 0;
     const tp = parseFloat(takeProfit) || 0;
 
+    // 入场价格清空时，清除所有线条
+    if (entry <= 0) {
+      setTradingLines([]);
+      return;
+    }
+
     const lines: TradingLine[] = [];
-    if (entry > 0) lines.push({ price: entry, type: "entry", side: selectedSide });
+    lines.push({ price: entry, type: "entry", side: selectedSide });
     if (sl > 0) lines.push({ price: sl, type: "stopLoss", side: selectedSide });
     if (tp > 0) lines.push({ price: tp, type: "takeProfit", side: selectedSide });
 
