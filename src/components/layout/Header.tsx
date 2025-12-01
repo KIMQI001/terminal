@@ -8,8 +8,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown";
-import { Toggle } from "@/components/ui/toggle";
 import { useChartStore } from "@/stores/chartStore";
+import { cn } from "@/lib/utils";
 import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useOrderStore } from "@/stores/orderStore";
 import { useMeasurementStore } from "@/stores/measurementStore";
@@ -27,18 +27,22 @@ const timeframes: { value: Timeframe; label: string }[] = [
 ];
 
 const indicators: { key: keyof IndicatorState; label: string }[] = [
+  { key: "swingPoints", label: "Swing Points" },
   { key: "orderBlocks", label: "Order Blocks" },
   { key: "fvg", label: "FVG" },
   { key: "bos", label: "BOS" },
   { key: "choch", label: "CHoCH" },
   { key: "liquidityZones", label: "Liquidity" },
   { key: "killzones", label: "Killzones" },
+  { key: "ote", label: "OTE" },
+  { key: "breakerBlocks", label: "Breaker" },
+  { key: "inducement", label: "Inducement" },
 ];
 
 export function Header() {
   const { symbol, timeframe, setSymbol, setTimeframe } = useChartStore();
   const { enabled, toggleIndicator } = useIndicatorStore();
-  const { isPanelOpen, togglePanel } = useOrderStore();
+  const { isModalOpen, togglePanel } = useOrderStore();
   const { isToolActive, toggleToolActive } = useMeasurementStore();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -133,10 +137,10 @@ export function Header() {
 
         {/* 交易按钮 */}
         <Button
-          variant={isPanelOpen ? "default" : "outline"}
+          variant={isModalOpen ? "default" : "outline"}
           size="sm"
           onClick={togglePanel}
-          className={isPanelOpen ? "bg-[var(--accent)] hover:bg-[var(--accent)]/90" : ""}
+          className={isModalOpen ? "bg-[var(--accent)] hover:bg-[var(--accent)]/90" : ""}
         >
           <ArrowLeftRight className="w-3 h-3 mr-1.5" />
           交易
@@ -160,11 +164,21 @@ export function Header() {
                 }}
               >
                 <span>{ind.label}</span>
-                <Toggle
-                  pressed={enabled[ind.key]}
-                  size="sm"
-                  className="h-5 w-8 data-[state=on]:bg-[var(--bullish)]"
-                />
+                <div
+                  className={cn(
+                    "w-8 h-4 rounded-full transition-colors",
+                    enabled[ind.key]
+                      ? "bg-[var(--bullish)]"
+                      : "bg-[var(--bg-tertiary)]"
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "w-3 h-3 rounded-full bg-white shadow transition-transform mt-0.5",
+                      enabled[ind.key] ? "translate-x-4 ml-0.5" : "translate-x-0.5"
+                    )}
+                  />
+                </div>
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>

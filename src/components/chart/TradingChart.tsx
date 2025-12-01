@@ -7,11 +7,14 @@ import {
   ISeriesApi,
   CandlestickData,
   Time,
+  SeriesMarker,
 } from "lightweight-charts";
 import { useChartStore } from "@/stores/chartStore";
 import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useMeasurementStore } from "@/stores/measurementStore";
 import { MeasurementTool } from "./MeasurementTool";
+import { ICTOverlay } from "./ICTOverlay";
+import { OTEPanel } from "./OTEPanel";
 import { fetchKlines } from "@/lib/binance/api";
 import { BinanceWebSocket } from "@/lib/binance/websocket";
 import { detectSwingPoints } from "@/lib/chart/indicators/swingPoints";
@@ -20,12 +23,31 @@ import { detectFVGs } from "@/lib/chart/indicators/fvg";
 import { detectStructure } from "@/lib/chart/indicators/structure";
 import { detectLiquidityZones } from "@/lib/chart/indicators/liquidity";
 import { Candle } from "@/types/chart";
+import {
+  OrderBlockPrimitive,
+  FVGPrimitive,
+  LiquidityPrimitive,
+  KillzonePrimitive,
+  OTEPrimitive,
+  BreakerBlockPrimitive,
+} from "@/lib/chart/primitives";
+import { detectOTEZones } from "@/lib/chart/indicators/ote";
+import { detectBreakerBlocks } from "@/lib/chart/indicators/breakerBlocks";
+import { detectInducements } from "@/lib/chart/indicators/inducement";
 
 export function TradingChart() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const wsRef = useRef<BinanceWebSocket | null>(null);
+
+  // ICT Primitives
+  const orderBlockPrimitiveRef = useRef<OrderBlockPrimitive | null>(null);
+  const fvgPrimitiveRef = useRef<FVGPrimitive | null>(null);
+  const liquidityPrimitiveRef = useRef<LiquidityPrimitive | null>(null);
+  const killzonePrimitiveRef = useRef<KillzonePrimitive | null>(null);
+  const otePrimitiveRef = useRef<OTEPrimitive | null>(null);
+  const breakerBlockPrimitiveRef = useRef<BreakerBlockPrimitive | null>(null);
 
   // Shift 键状态
   const [isShiftPressed, setIsShiftPressed] = useState(false);
@@ -40,8 +62,25 @@ export function TradingChart() {
     setConnected,
   } = useChartStore();
 
-  const { enabled, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones } =
-    useIndicatorStore();
+  const {
+    enabled,
+    swingPoints,
+    orderBlocks,
+    fvgs,
+    liquidityZones,
+    oteZones,
+    breakerBlocks,
+    setSwingPoints,
+    setOrderBlocks,
+    setFVGs,
+    setBOSSignals,
+    setCHoCHSignals,
+    setLiquidityZones,
+    setOTEZones,
+    setBreakerBlocks,
+    setInducements,
+    setMultiTimeframeOTE,
+  } = useIndicatorStore();
 
   const {
     phase,
@@ -76,7 +115,9 @@ export function TradingChart() {
       if (candleData.length < 10) return;
 
       // Swing points (needed for other indicators)
-      const swingPoints = detectSwingPoints(candleData, 3);
+      // 使用 leftBars=10, rightBars=10, minSwingPercent=1.5%（TradingView 风格）
+      const detectedSwingPoints = detectSwingPoints(candleData);
+      setSwingPoints(detectedSwingPoints);
 
       if (enabled.orderBlocks) {
         const obs = detectOrderBlocks(candleData);
@@ -90,17 +131,42 @@ export function TradingChart() {
 
       if (enabled.bos || enabled.choch) {
         const lastPrice = candleData[candleData.length - 1].close;
-        const { bos, choch } = detectStructure(swingPoints, lastPrice);
+        const { bos, choch } = detectStructure(detectedSwingPoints, lastPrice);
         if (enabled.bos) setBOSSignals(bos);
         if (enabled.choch) setCHoCHSignals(choch);
       }
 
       if (enabled.liquidityZones) {
-        const zones = detectLiquidityZones(candleData, swingPoints);
+        const zones = detectLiquidityZones(candleData, detectedSwingPoints);
         setLiquidityZones(zones);
       }
+
+      // OTE zones
+      if (enabled.ote) {
+        const lastPrice = candleData[candleData.length - 1].close;
+        const otes = detectOTEZones(detectedSwingPoints, lastPrice, candleData);
+        setOTEZones(otes);
+        // 保存到多周期 OTE 存储（只保存最新的一个）
+        const targetTimeframes = ['5m', '15m', '1h', '4h', '1d', '1w'] as const;
+        if (targetTimeframes.includes(timeframe as typeof targetTimeframes[number])) {
+          setMultiTimeframeOTE(timeframe, otes[0] || null);
+        }
+      }
+
+      // Breaker blocks (need order blocks first)
+      if (enabled.breakerBlocks) {
+        const obs = detectOrderBlocks(candleData); // Need all OBs including mitigated
+        const breakers = detectBreakerBlocks(candleData, obs);
+        setBreakerBlocks(breakers);
+      }
+
+      // Inducement
+      if (enabled.inducement) {
+        const inducements = detectInducements(candleData, detectedSwingPoints);
+        setInducements(inducements);
+      }
     },
-    [enabled, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones]
+    [enabled, timeframe, setSwingPoints, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setMultiTimeframeOTE]
   );
 
   // Initialize chart
@@ -143,6 +209,22 @@ export function TradingChart() {
         timeVisible: true,
         secondsVisible: false,
       },
+      localization: {
+        timeFormatter: (timestamp: number) => {
+          // 转换为上海时间 (UTC+8)
+          const date = new Date(timestamp * 1000);
+          const shanghaiOffset = 8 * 60; // UTC+8 in minutes
+          const localOffset = date.getTimezoneOffset();
+          const shanghaiTime = new Date(date.getTime() + (shanghaiOffset + localOffset) * 60 * 1000);
+
+          const month = String(shanghaiTime.getMonth() + 1).padStart(2, '0');
+          const day = String(shanghaiTime.getDate()).padStart(2, '0');
+          const hours = String(shanghaiTime.getHours()).padStart(2, '0');
+          const minutes = String(shanghaiTime.getMinutes()).padStart(2, '0');
+
+          return `${month}-${day} ${hours}:${minutes}`;
+        },
+      },
     });
 
     // 阳K：白色内部 + 黑色边框
@@ -165,6 +247,29 @@ export function TradingChart() {
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
+
+    // Initialize ICT Primitives
+    const obPrimitive = new OrderBlockPrimitive();
+    const fvgPrimitive = new FVGPrimitive();
+    const liquidityPrimitive = new LiquidityPrimitive();
+    const killzonePrimitive = new KillzonePrimitive();
+    const otePrimitive = new OTEPrimitive();
+    const breakerBlockPrimitive = new BreakerBlockPrimitive();
+
+    // Attach primitives in order (bottom layer first)
+    candleSeries.attachPrimitive(killzonePrimitive);
+    candleSeries.attachPrimitive(otePrimitive);
+    candleSeries.attachPrimitive(breakerBlockPrimitive);
+    candleSeries.attachPrimitive(obPrimitive);
+    candleSeries.attachPrimitive(fvgPrimitive);
+    candleSeries.attachPrimitive(liquidityPrimitive);
+
+    orderBlockPrimitiveRef.current = obPrimitive;
+    fvgPrimitiveRef.current = fvgPrimitive;
+    liquidityPrimitiveRef.current = liquidityPrimitive;
+    killzonePrimitiveRef.current = killzonePrimitive;
+    otePrimitiveRef.current = otePrimitive;
+    breakerBlockPrimitiveRef.current = breakerBlockPrimitive;
 
     // Handle resize
     const handleResize = () => {
@@ -251,16 +356,117 @@ export function TradingChart() {
     };
   }, [symbol, timeframe, setCandles, updateCandle, setLoading, setConnected, calculateIndicators]);
 
-  // Draw indicators on chart
+  // 初始化所有周期的 OTE 数据
   useEffect(() => {
-    if (!chartRef.current || !candleSeriesRef.current || candles.length === 0) return;
+    const allTimeframes = ['5m', '15m', '1h', '4h', '1d', '1w'] as const;
 
-    // Clear existing markers and lines
-    candleSeriesRef.current.setMarkers([]);
+    const loadAllTimeframesOTE = async () => {
+      for (const tf of allTimeframes) {
+        // 跳过当前周期（已经由主数据加载处理）
+        if (tf === timeframe) continue;
 
-    // We'll add indicator visualization in future iterations
-    // For now, the indicators are calculated and stored in the store
-  }, [candles, enabled]);
+        try {
+          const limit = (symbol === "BTCUSDC" || symbol === "ETHUSDC") ? 5000 : 1000;
+          const data = await fetchKlines(symbol, tf, limit);
+
+          if (data.length > 0) {
+            // 检测 swing points
+            const swings = detectSwingPoints(data);
+            // 检测 OTE
+            const lastPrice = data[data.length - 1].close;
+            const otes = detectOTEZones(swings, lastPrice, data);
+            // 保存到 store
+            setMultiTimeframeOTE(tf, otes[0] || null);
+          }
+        } catch (error) {
+          console.error(`Failed to load OTE for ${tf}:`, error);
+        }
+      }
+    };
+
+    // 只在 OTE 指标启用时加载
+    if (enabled.ote) {
+      loadAllTimeframesOTE();
+    }
+  }, [symbol, enabled.ote, timeframe, setMultiTimeframeOTE]);
+
+  // Update ICT Primitives with data
+  useEffect(() => {
+    // Update Order Blocks Primitive
+    if (orderBlockPrimitiveRef.current) {
+      if (enabled.orderBlocks) {
+        orderBlockPrimitiveRef.current.setData(orderBlocks);
+      } else {
+        orderBlockPrimitiveRef.current.setData([]);
+      }
+    }
+
+    // Update FVG Primitive
+    if (fvgPrimitiveRef.current) {
+      if (enabled.fvg) {
+        fvgPrimitiveRef.current.setData(fvgs);
+      } else {
+        fvgPrimitiveRef.current.setData([]);
+      }
+    }
+
+    // Update Liquidity Primitive
+    if (liquidityPrimitiveRef.current) {
+      if (enabled.liquidityZones) {
+        liquidityPrimitiveRef.current.setData(liquidityZones);
+      } else {
+        liquidityPrimitiveRef.current.setData([]);
+      }
+    }
+
+    // Update Killzone Primitive
+    if (killzonePrimitiveRef.current) {
+      killzonePrimitiveRef.current.setEnabled(enabled.killzones);
+      // Set candle interval based on timeframe
+      const intervalMap: Record<string, number> = {
+        '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800,
+        '1h': 3600, '2h': 7200, '4h': 14400, '6h': 21600, '8h': 28800,
+        '12h': 43200, '1d': 86400, '1w': 604800,
+      };
+      killzonePrimitiveRef.current.setCandleInterval(intervalMap[timeframe] || 3600);
+    }
+
+    // Update OTE Primitive
+    if (otePrimitiveRef.current) {
+      if (enabled.ote) {
+        otePrimitiveRef.current.setData(oteZones);
+      } else {
+        otePrimitiveRef.current.setData([]);
+      }
+    }
+
+    // Update Breaker Block Primitive
+    if (breakerBlockPrimitiveRef.current) {
+      if (enabled.breakerBlocks) {
+        breakerBlockPrimitiveRef.current.setData(breakerBlocks);
+      } else {
+        breakerBlockPrimitiveRef.current.setData([]);
+      }
+    }
+  }, [orderBlocks, fvgs, liquidityZones, oteZones, breakerBlocks, enabled.orderBlocks, enabled.fvg, enabled.liquidityZones, enabled.killzones, enabled.ote, enabled.breakerBlocks, timeframe]);
+
+  // Update Swing Points Markers
+  useEffect(() => {
+    if (!candleSeriesRef.current) return;
+
+    if (enabled.swingPoints && swingPoints.length > 0) {
+      const markers: SeriesMarker<Time>[] = swingPoints.map((sp) => ({
+        time: sp.time as Time,
+        position: sp.type === "high" ? "aboveBar" : "belowBar",
+        color: sp.type === "high" ? "#22c55e" : "#ef4444",
+        shape: sp.type === "high" ? "arrowDown" : "arrowUp",
+        text: sp.type === "high" ? "HH" : "LL",
+      }));
+      candleSeriesRef.current.setMarkers(markers);
+    } else {
+      candleSeriesRef.current.setMarkers([]);
+    }
+  }, [swingPoints, enabled.swingPoints]);
 
   // 测量模式或 Shift 按下时禁用图表拖动
   const shouldDisableChartInteraction = phase === "drawing" || (canStartMeasure && phase === "idle");
@@ -384,6 +590,12 @@ export function TradingChart() {
       onClick={handleClick}
       onMouseMove={handleMouseMove}
     >
+      <ICTOverlay
+        chartRef={chartRef}
+        seriesRef={candleSeriesRef}
+        containerRef={chartContainerRef}
+      />
+      <OTEPanel />
       <MeasurementTool />
     </div>
   );

@@ -3,7 +3,7 @@ import { Order, OrderFormData, OrderStatus } from "@/types/order";
 
 interface OrderState {
   orders: Order[];
-  isPanelOpen: boolean;
+  isModalOpen: boolean;
 
   // Actions
   openModal: () => void;
@@ -18,11 +18,11 @@ interface OrderState {
 
 export const useOrderStore = create<OrderState>((set, get) => ({
   orders: [],
-  isPanelOpen: false,
+  isModalOpen: false,
 
-  openModal: () => set({ isPanelOpen: true }),
-  closeModal: () => set({ isPanelOpen: false }),
-  togglePanel: () => set((state) => ({ isPanelOpen: !state.isPanelOpen })),
+  openModal: () => set({ isModalOpen: true }),
+  closeModal: () => set({ isModalOpen: false }),
+  togglePanel: () => set((state) => ({ isModalOpen: !state.isModalOpen })),
 
   addOrder: (data, symbol) => {
     const newOrder: Order = {

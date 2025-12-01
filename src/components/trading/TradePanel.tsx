@@ -10,10 +10,10 @@ import { PositionList } from "./PositionList";
 import { OpenOrderList } from "./OpenOrderList";
 
 export function TradePanel() {
-  const { isPanelOpen, closeModal } = useOrderStore();
+  const { isModalOpen, closeModal } = useOrderStore();
   const { symbol } = useChartStore();
 
-  if (!isPanelOpen) return null;
+  if (!isModalOpen) return null;
 
   return (
     <div className="w-80 h-full flex flex-col border-l border-[var(--border)] bg-[var(--bg-secondary)]">

@@ -49,10 +49,14 @@ export interface Killzone {
 }
 
 export interface IndicatorState {
+  swingPoints: boolean;
   orderBlocks: boolean;
   fvg: boolean;
   bos: boolean;
   choch: boolean;
   liquidityZones: boolean;
   killzones: boolean;
+  ote: boolean;
+  breakerBlocks: boolean;
+  inducement: boolean;
 }
