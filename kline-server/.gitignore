@@ -1,0 +1,17 @@
+# Rust
+/target/
+Cargo.lock
+
+# SQLite database
+*.db
+*.db-shm
+*.db-wal
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env

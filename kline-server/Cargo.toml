@@ -1,0 +1,39 @@
+[package]
+name = "kline-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Web 框架
+axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# 数据库
+sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite"] }
+
+# 序列化
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# WebSocket
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+futures-util = "0.3"
+tokio-socks = "0.5"  # SOCKS5 代理支持
+native-tls = "0.2"
+tokio-native-tls = "0.3"
+
+# HTTP 客户端（用于 REST API 获取历史数据）
+reqwest = { version = "0.11", features = ["json"] }
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# 工具
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1"
+anyhow = "1"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
