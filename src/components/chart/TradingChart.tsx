@@ -8,10 +8,12 @@ import {
   CandlestickData,
   Time,
   SeriesMarker,
+  IPriceLine,
 } from "lightweight-charts";
 import { useChartStore } from "@/stores/chartStore";
 import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useMeasurementStore } from "@/stores/measurementStore";
+import { useOrderStore } from "@/stores/orderStore";
 import { MeasurementTool } from "./MeasurementTool";
 import { ICTOverlay } from "./ICTOverlay";
 import { OTEPanel } from "./OTEPanel";
@@ -48,6 +50,9 @@ export function TradingChart() {
   const killzonePrimitiveRef = useRef<KillzonePrimitive | null>(null);
   const otePrimitiveRef = useRef<OTEPrimitive | null>(null);
   const breakerBlockPrimitiveRef = useRef<BreakerBlockPrimitive | null>(null);
+
+  // Trading price lines
+  const priceLinesRef = useRef<IPriceLine[]>([]);
 
   // Shift 键状态
   const [isShiftPressed, setIsShiftPressed] = useState(false);
@@ -89,6 +94,8 @@ export function TradingChart() {
     updateDrawing,
     clearMeasurement,
   } = useMeasurementStore();
+
+  const { tradingLines } = useOrderStore();
 
   // 监听 Shift 键
   useEffect(() => {
@@ -467,6 +474,49 @@ export function TradingChart() {
       candleSeriesRef.current.setMarkers([]);
     }
   }, [swingPoints, enabled.swingPoints]);
+
+  // Update Trading Lines (Entry, Stop Loss, Take Profit)
+  useEffect(() => {
+    if (!candleSeriesRef.current) return;
+
+    // 清除旧的价格线
+    priceLinesRef.current.forEach((line) => {
+      candleSeriesRef.current?.removePriceLine(line);
+    });
+    priceLinesRef.current = [];
+
+    // 绘制新的价格线
+    if (tradingLines.length > 0) {
+      tradingLines.forEach((line) => {
+        if (!candleSeriesRef.current) return;
+
+        // 根据类型设置颜色和标签
+        let color: string;
+        let title: string;
+        if (line.type === "entry") {
+          color = line.side === "buy" ? "#3b82f6" : "#a855f7"; // 蓝色/紫色
+          title = "Entry";
+        } else if (line.type === "stopLoss") {
+          color = "#ef4444"; // 红色
+          title = "SL";
+        } else {
+          color = "#22c55e"; // 绿色
+          title = "TP";
+        }
+
+        const priceLine = candleSeriesRef.current.createPriceLine({
+          price: line.price,
+          color,
+          lineWidth: 1,
+          lineStyle: 2, // 虚线
+          axisLabelVisible: true,
+          title,
+        });
+
+        priceLinesRef.current.push(priceLine);
+      });
+    }
+  }, [tradingLines]);
 
   // 测量模式或 Shift 按下时禁用图表拖动
   const shouldDisableChartInteraction = phase === "drawing" || (canStartMeasure && phase === "idle");

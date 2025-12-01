@@ -82,7 +82,7 @@ export function detectOTEZones(
 
       zones.push({
         type: "bullish",
-        startTime: prev.time,
+        startTime: current.time,  // 从 pivot high 开始绘制
         swingHigh,
         swingLow,
         fib618,

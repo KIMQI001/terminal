@@ -3,6 +3,8 @@
 import { useState, useMemo } from "react";
 import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useChartStore } from "@/stores/chartStore";
+import { useOrderStore, OTEPrefillData, TradingLine } from "@/stores/orderStore";
+import { OTEZone } from "@/lib/chart/indicators/ote";
 
 const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d', '1w'] as const;
 
@@ -10,6 +12,7 @@ export function OTEPanel() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const { oteZones, multiTimeframeOTE, enabled } = useIndicatorStore();
   const { candles } = useChartStore();
+  const { setPrefillData, setTradingLines, openModal } = useOrderStore();
 
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
 
@@ -34,6 +37,38 @@ export function OTEPanel() {
     return nearest;
   }, [multiTimeframeOTE, currentPrice]);
 
+  // 点击OTE条目，填充交易参数
+  const handleOTEClick = (ote: OTEZone) => {
+    const isBullish = ote.type === "bullish";
+    const side = isBullish ? "buy" : "sell";
+    const entry = ote.fib675;
+    const stopLoss = ote.fib786;
+    const size = Math.abs(ote.fib786 - ote.fib618);
+
+    // 止盈 = size的5倍
+    const takeProfit = isBullish
+      ? entry + size * 5  // 看涨: 向上5倍
+      : entry - size * 5; // 看跌: 向下5倍
+
+    const prefillData: OTEPrefillData = {
+      side,
+      entry,
+      stopLoss,
+      takeProfit,
+    };
+
+    // 设置图表上的水平线
+    const lines: TradingLine[] = [
+      { price: entry, type: "entry", side },
+      { price: stopLoss, type: "stopLoss", side },
+      { price: takeProfit, type: "takeProfit", side },
+    ];
+    setTradingLines(lines);
+
+    setPrefillData(prefillData);
+    openModal();
+  };
+
   if (!enabled.ote) return null;
 
   return (
@@ -52,7 +87,7 @@ export function OTEPanel() {
         <div className="flex">
           {/* 左侧: Multi-TF */}
           <div className="px-2 py-2 min-w-[180px]">
-            <div className="text-[10px] font-semibold text-gray-500 mb-1">Multi-TF</div>
+            <div className="text-[10px] font-semibold text-gray-500 mb-1">Multi-TF (点击开单)</div>
             <div className="space-y-0.5">
               <div className="grid grid-cols-4 gap-1 text-[9px] text-gray-400 font-medium pb-0.5 border-b">
                 <span>TF</span>
@@ -101,7 +136,8 @@ export function OTEPanel() {
                 return (
                   <div
                     key={tf}
-                    className={`relative grid grid-cols-4 gap-1 text-[9px] py-0.5 items-center rounded border border-dashed ${borderColor} overflow-hidden`}
+                    onClick={() => handleOTEClick(ote)}
+                    className={`relative grid grid-cols-4 gap-1 text-[9px] py-0.5 items-center rounded border border-dashed ${borderColor} overflow-hidden cursor-pointer hover:bg-gray-100 transition-colors`}
                   >
                     {/* 填充背景 - 从左到右填充 */}
                     {isNearest && fillPercent > 0 && (
@@ -135,6 +171,7 @@ export function OTEPanel() {
                   const isBullish = zone.type === "bullish";
                   const color = isBullish ? "text-cyan-600" : "text-orange-500";
                   const bgColor = isBullish ? "bg-cyan-50" : "bg-orange-50";
+                  const hoverColor = isBullish ? "hover:bg-cyan-100" : "hover:bg-orange-100";
                   const label = isBullish ? "BUY" : "SELL";
                   const zoneHeight = Math.abs(zone.fib786 - zone.fib618);
                   const midPrice = (zone.fib786 + zone.fib618) / 2;
@@ -152,7 +189,11 @@ export function OTEPanel() {
                   }
 
                   return (
-                    <div key={index} className={`${bgColor} rounded p-1 text-[9px]`}>
+                    <div
+                      key={index}
+                      onClick={() => handleOTEClick(zone)}
+                      className={`${bgColor} ${hoverColor} rounded p-1 text-[9px] cursor-pointer transition-colors`}
+                    >
                       <div className="flex items-center justify-between">
                         <span className={`font-bold ${color}`}>{label}</span>
                         <span className="text-gray-500">.675:{zone.fib675.toFixed(1)}</span>

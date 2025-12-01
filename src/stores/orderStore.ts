@@ -1,14 +1,34 @@
 import { create } from "zustand";
-import { Order, OrderFormData, OrderStatus } from "@/types/order";
+import { Order, OrderFormData, OrderStatus, OrderSide } from "@/types/order";
+
+// OTE预填充数据
+export interface OTEPrefillData {
+  side: OrderSide;
+  entry: number;
+  stopLoss: number;
+  takeProfit: number;
+}
+
+// 图表上显示的交易线条
+export interface TradingLine {
+  price: number;
+  type: "entry" | "stopLoss" | "takeProfit";
+  side: OrderSide;
+}
 
 interface OrderState {
   orders: Order[];
   isModalOpen: boolean;
+  prefillData: OTEPrefillData | null;
+  tradingLines: TradingLine[];
 
   // Actions
   openModal: () => void;
   closeModal: () => void;
   togglePanel: () => void;
+  setPrefillData: (data: OTEPrefillData | null) => void;
+  setTradingLines: (lines: TradingLine[]) => void;
+  clearTradingLines: () => void;
   addOrder: (data: OrderFormData, symbol: string) => Order;
   updateOrderStatus: (id: string, status: OrderStatus, filledQuantity?: number) => void;
   cancelOrder: (id: string) => void;
@@ -19,10 +39,15 @@ interface OrderState {
 export const useOrderStore = create<OrderState>((set, get) => ({
   orders: [],
   isModalOpen: false,
+  prefillData: null,
+  tradingLines: [],
 
   openModal: () => set({ isModalOpen: true }),
-  closeModal: () => set({ isModalOpen: false }),
+  closeModal: () => set({ isModalOpen: false, prefillData: null, tradingLines: [] }),
   togglePanel: () => set((state) => ({ isModalOpen: !state.isModalOpen })),
+  setPrefillData: (data) => set({ prefillData: data }),
+  setTradingLines: (lines) => set({ tradingLines: lines }),
+  clearTradingLines: () => set({ tradingLines: [] }),
 
   addOrder: (data, symbol) => {
     const newOrder: Order = {

@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useChartStore } from "@/stores/chartStore";
-import { useOrderStore } from "@/stores/orderStore";
+import { useOrderStore, TradingLine } from "@/stores/orderStore";
 import { usePositionStore } from "@/stores/positionStore";
 import { OrderType, OrderSide } from "@/types/order";
 
@@ -15,29 +15,62 @@ const orderTypes: { value: OrderType; label: string }[] = [
 
 export function OrderForm() {
   const { symbol, candles } = useChartStore();
-  const { addOrder, closeModal } = useOrderStore();
+  const { addOrder, closeModal, prefillData, setPrefillData, setTradingLines } = useOrderStore();
   const { getBalance } = usePositionStore();
 
   const [orderType, setOrderType] = useState<OrderType>("limit");
+  const [selectedSide, setSelectedSide] = useState<OrderSide | null>(null);
   const [price, setPrice] = useState<string>("");
-  const [quantity, setQuantity] = useState<string>("");
+  const [amountUSD, setAmountUSD] = useState<string>("");
+  const [stopLoss, setStopLoss] = useState<string>("");
+  const [takeProfit, setTakeProfit] = useState<string>("");
 
   const lastPrice = candles[candles.length - 1]?.close || 0;
-  const baseAsset = symbol.replace("USDT", "");
-  const usdtBalance = getBalance("USDT");
+  const baseAsset = symbol.replace("USDT", "").replace("USDC", "");
 
-  const totalValue = useMemo(() => {
+  // 根据交易对判断使用 USDC 还是 USDT
+  const quoteAsset = symbol.endsWith("USDC") ? "USDC" : "USDT";
+  const quoteBalance = getBalance(quoteAsset);
+
+  // 监听prefillData变化，自动填充表单
+  useEffect(() => {
+    if (prefillData) {
+      setOrderType("limit");
+      setSelectedSide(prefillData.side);
+      setPrice(prefillData.entry.toFixed(2));
+      setStopLoss(prefillData.stopLoss.toFixed(2));
+      setTakeProfit(prefillData.takeProfit.toFixed(2));
+    }
+  }, [prefillData]);
+
+  // 监听价格输入变化，同步更新图表线条
+  useEffect(() => {
+    if (!selectedSide) return;
+
+    const entry = parseFloat(price) || 0;
+    const sl = parseFloat(stopLoss) || 0;
+    const tp = parseFloat(takeProfit) || 0;
+
+    const lines: TradingLine[] = [];
+    if (entry > 0) lines.push({ price: entry, type: "entry", side: selectedSide });
+    if (sl > 0) lines.push({ price: sl, type: "stopLoss", side: selectedSide });
+    if (tp > 0) lines.push({ price: tp, type: "takeProfit", side: selectedSide });
+
+    setTradingLines(lines);
+  }, [price, stopLoss, takeProfit, selectedSide, setTradingLines]);
+
+  // 计算币数量
+  const coinQuantity = useMemo(() => {
     const p = orderType === "market" ? lastPrice : parseFloat(price) || 0;
-    const q = parseFloat(quantity) || 0;
-    return p * q;
-  }, [orderType, price, quantity, lastPrice]);
+    const usd = parseFloat(amountUSD) || 0;
+    if (p <= 0) return 0;
+    return usd / p;
+  }, [orderType, price, amountUSD, lastPrice]);
 
   const handlePercentage = (percent: number) => {
-    if (!usdtBalance) return;
-    const p = orderType === "market" ? lastPrice : parseFloat(price) || lastPrice;
-    if (p <= 0) return;
-    const maxQty = (usdtBalance.free * percent) / 100 / p;
-    setQuantity(maxQty.toFixed(6));
+    if (!quoteBalance) return;
+    const maxUSD = (quoteBalance.free * percent) / 100;
+    setAmountUSD(maxUSD.toFixed(2));
   };
 
   const handleSubmit = (side: OrderSide) => {
@@ -45,13 +78,18 @@ export function OrderForm() {
       type: orderType,
       side,
       price: orderType !== "market" ? parseFloat(price) : undefined,
-      quantity: parseFloat(quantity),
+      stopPrice: stopLoss ? parseFloat(stopLoss) : undefined,
+      quantity: coinQuantity, // 使用计算出的币数量
     };
 
     addOrder(orderData, symbol);
 
     // Reset form
-    setQuantity("");
+    setAmountUSD("");
+    setStopLoss("");
+    setTakeProfit("");
+    setSelectedSide(null);
+    setPrefillData(null);
   };
 
   return (
@@ -73,13 +111,24 @@ export function OrderForm() {
         ))}
       </div>
 
+      {/* 方向指示 (来自OTE) */}
+      {selectedSide && (
+        <div className={`text-xs font-medium px-2 py-1 rounded ${
+          selectedSide === 'buy'
+            ? 'bg-blue-100 text-blue-700'
+            : 'bg-purple-100 text-purple-700'
+        }`}>
+          OTE {selectedSide === 'buy' ? '看涨 (BUY)' : '看跌 (SELL)'}
+        </div>
+      )}
+
       {/* 价格输入 */}
       {orderType !== "market" && (
         <div className="space-y-1.5">
-          <label className="text-xs text-[var(--text-secondary)]">价格</label>
+          <label className="text-xs text-[var(--text-secondary)]">入场价格</label>
           <Input
             type="number"
-            placeholder="价格"
+            placeholder="入场价格"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
             suffix="USDT"
@@ -87,23 +136,47 @@ export function OrderForm() {
         </div>
       )}
 
-      {/* 数量输入 */}
+      {/* 止损输入 */}
+      <div className="space-y-1.5">
+        <label className="text-xs text-[var(--text-secondary)]">止损 (SL)</label>
+        <Input
+          type="number"
+          placeholder="止损价格"
+          value={stopLoss}
+          onChange={(e) => setStopLoss(e.target.value)}
+          suffix="USDT"
+        />
+      </div>
+
+      {/* 止盈输入 */}
+      <div className="space-y-1.5">
+        <label className="text-xs text-[var(--text-secondary)]">止盈 (TP)</label>
+        <Input
+          type="number"
+          placeholder="止盈价格"
+          value={takeProfit}
+          onChange={(e) => setTakeProfit(e.target.value)}
+          suffix="USDT"
+        />
+      </div>
+
+      {/* 金额输入 */}
       <div className="space-y-1.5">
         <div className="flex justify-between">
-          <label className="text-xs text-[var(--text-secondary)]">数量</label>
+          <label className="text-xs text-[var(--text-secondary)]">金额</label>
           <span className="text-xs text-[var(--text-secondary)]">
-            可用: {usdtBalance?.free.toLocaleString() || 0} USDT
+            可用: {quoteBalance?.free.toLocaleString() || 0} {quoteAsset}
           </span>
         </div>
         <Input
           type="number"
-          placeholder="数量"
-          value={quantity}
-          onChange={(e) => setQuantity(e.target.value)}
-          suffix={baseAsset}
+          placeholder="金额"
+          value={amountUSD}
+          onChange={(e) => setAmountUSD(e.target.value)}
+          suffix={quoteAsset}
         />
         <div className="text-xs text-[var(--text-secondary)]">
-          ≈ {totalValue.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDT
+          ≈ {coinQuantity.toLocaleString(undefined, { maximumFractionDigits: 6 })} {baseAsset}
         </div>
         <div className="flex gap-1">
           {[25, 50, 75, 100].map((percent) => (
@@ -122,15 +195,23 @@ export function OrderForm() {
       <div className="grid grid-cols-2 gap-2">
         <Button
           onClick={() => handleSubmit("buy")}
-          disabled={!quantity || parseFloat(quantity) <= 0}
-          className="bg-[var(--positive)] hover:bg-[var(--positive)]/90 text-white"
+          disabled={!amountUSD || parseFloat(amountUSD) <= 0 || coinQuantity <= 0}
+          className={`text-white ${
+            selectedSide === 'buy'
+              ? 'bg-blue-600 hover:bg-blue-700 ring-2 ring-blue-300'
+              : 'bg-[var(--positive)] hover:bg-[var(--positive)]/90'
+          }`}
         >
           买入 / 做多
         </Button>
         <Button
           onClick={() => handleSubmit("sell")}
-          disabled={!quantity || parseFloat(quantity) <= 0}
-          className="bg-[var(--negative)] hover:bg-[var(--negative)]/90 text-white"
+          disabled={!amountUSD || parseFloat(amountUSD) <= 0 || coinQuantity <= 0}
+          className={`text-white ${
+            selectedSide === 'sell'
+              ? 'bg-purple-600 hover:bg-purple-700 ring-2 ring-purple-300'
+              : 'bg-[var(--negative)] hover:bg-[var(--negative)]/90'
+          }`}
         >
           卖出 / 做空
         </Button>
