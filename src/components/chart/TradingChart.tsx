@@ -18,6 +18,7 @@ import { MeasurementTool } from "./MeasurementTool";
 import { ICTOverlay } from "./ICTOverlay";
 import { OTEPanel } from "./OTEPanel";
 import { FVGPanel } from "./FVGPanel";
+import { LiquidationPanel } from "./LiquidationPanel";
 import { OBPanel } from "./OBPanel";
 import { fetchKlines } from "@/lib/binance/api";
 import { BinanceWebSocket } from "@/lib/binance/websocket";
@@ -731,6 +732,7 @@ export function TradingChart() {
         <OTEPanel />
         <FVGPanel />
         <OBPanel />
+        <LiquidationPanel />
       </div>
       <MeasurementTool />
     </div>

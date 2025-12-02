@@ -8,6 +8,7 @@
 //! - 支持未来扩展 DEX（Uniswap, Raydium 等）
 
 mod api;
+mod coinank_relay;
 mod db;
 mod exchanges;
 mod types;
@@ -108,14 +109,21 @@ async fn main() -> anyhow::Result<()> {
     // 创建应用状态
     let state = Arc::new(AppState { manager });
 
+    // 创建 CoinAnk 中转状态
+    let coinank_state = Arc::new(coinank_relay::CoinankRelayState::new());
+    info!("CoinAnk relay service initialized");
+
     // 配置 CORS
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
 
-    // 创建路由
-    let app = create_router(state).layer(cors);
+    // 创建路由 (合并 K线路由和 CoinAnk 中转路由)
+    let coinank_router = coinank_relay::create_coinank_router(Arc::clone(&coinank_state));
+    let app = create_router(state)
+        .merge(coinank_router)
+        .layer(cors);
 
     // 启动服务器
     let addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3001".to_string());
@@ -127,6 +135,10 @@ async fn main() -> anyhow::Result<()> {
         addr
     );
     info!("Supported exchanges: Binance (OKX and Bybit coming soon)");
+    info!("CoinAnk relay endpoints:");
+    info!("  - Tampermonkey: ws://{}/ws/coinank/tampermonkey", addr);
+    info!("  - API: ws://{}/ws/coinank/api", addr);
+    info!("  - Status: http://{}/ws/coinank/status", addr);
 
     axum::serve(listener, app).await?;
 
