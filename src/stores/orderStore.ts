@@ -17,8 +17,24 @@ export interface TradingLine {
   side: OrderSide;
 }
 
+// 真实挂单数据
+export interface RealOrder {
+  id: string;
+  symbol: string;
+  side: string;
+  positionSide: string;
+  type: string;
+  quantity: number;
+  price?: number;
+  stopPrice?: number;
+  status: string;
+  time: number;
+}
+
 interface OrderState {
   orders: Order[];
+  realOrders: RealOrder[];
+  isLoadingOrders: boolean;
   isModalOpen: boolean;
   prefillData: OTEPrefillData | null;
   tradingLines: TradingLine[];
@@ -36,12 +52,15 @@ interface OrderState {
   placeOrder: (data: OrderFormData, symbol: string) => Promise<{ success: boolean; error?: string }>;
   updateOrderStatus: (id: string, status: OrderStatus, filledQuantity?: number) => void;
   cancelOrder: (id: string, symbol: string) => Promise<boolean>;
+  fetchOpenOrders: (symbol?: string) => Promise<void>;
   getOpenOrders: () => Order[];
   getOrderHistory: () => Order[];
 }
 
 export const useOrderStore = create<OrderState>((set, get) => ({
   orders: [],
+  realOrders: [],
+  isLoadingOrders: false,
   isModalOpen: false,
   prefillData: null,
   tradingLines: [],
@@ -186,6 +205,37 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     } catch (error) {
       console.error('取消订单失败:', error);
       return false;
+    }
+  },
+
+  fetchOpenOrders: async (symbol?: string) => {
+    const token = useUserStore.getState().token;
+    if (!token) {
+      return;
+    }
+
+    set({ isLoadingOrders: true });
+
+    try {
+      const url = symbol
+        ? `/api/user/orders?symbol=${symbol}`
+        : '/api/user/orders';
+
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        set({ realOrders: result.orders });
+      }
+    } catch (error) {
+      console.error('Failed to fetch open orders:', error);
+    } finally {
+      set({ isLoadingOrders: false });
     }
   },
 
