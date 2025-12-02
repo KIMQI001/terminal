@@ -65,11 +65,17 @@ export function OpenOrderList() {
   // 分组订单 - 必须在所有条件返回之前
   const orderGroups = useMemo(() => groupOrders(realOrders), [realOrders]);
 
-  // 获取真实挂单
+  // 获取真实挂单 + 5秒轮询
   useEffect(() => {
-    if (symbol) {
+    if (!symbol) return;
+
+    fetchOpenOrders(symbol);
+
+    const interval = setInterval(() => {
       fetchOpenOrders(symbol);
-    }
+    }, 5000);
+
+    return () => clearInterval(interval);
   }, [symbol, fetchOpenOrders]);
 
   const handleCancel = async (orderId: string, orderSymbol: string) => {

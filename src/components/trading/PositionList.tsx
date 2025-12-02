@@ -1,12 +1,39 @@
 "use client";
 
+import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { usePositionStore } from "@/stores/positionStore";
+import { useChartStore } from "@/stores/chartStore";
 
 export function PositionList() {
-  const { positions, closePosition } = usePositionStore();
+  const { positions, isLoadingPositions, fetchPositions, closePosition } = usePositionStore();
+  const { symbol } = useChartStore();
 
-  if (positions.length === 0) {
+  // 获取真实持仓 + 3秒轮询
+  useEffect(() => {
+    fetchPositions();
+
+    const interval = setInterval(() => {
+      fetchPositions();
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [fetchPositions]);
+
+  // 过滤当前交易对的持仓
+  const currentPositions = symbol
+    ? positions.filter(p => p.symbol === symbol.replace('/', ''))
+    : positions;
+
+  if (isLoadingPositions && positions.length === 0) {
+    return (
+      <div className="py-8 text-center text-sm text-[var(--text-secondary)]">
+        加载中...
+      </div>
+    );
+  }
+
+  if (currentPositions.length === 0) {
     return (
       <div className="py-8 text-center text-sm text-[var(--text-secondary)]">
         暂无持仓
@@ -16,7 +43,7 @@ export function PositionList() {
 
   return (
     <div className="space-y-2">
-      {positions.map((position) => (
+      {currentPositions.map((position) => (
         <div
           key={position.id}
           className="p-3 bg-[var(--bg-tertiary)] rounded-lg space-y-2"
@@ -33,6 +60,11 @@ export function PositionList() {
               >
                 {position.side === "long" ? "多" : "空"}
               </span>
+              {position.leverage && (
+                <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-700">
+                  {position.leverage}x
+                </span>
+              )}
             </div>
             <Button
               variant="outline"
@@ -44,7 +76,7 @@ export function PositionList() {
             </Button>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 text-xs">
+          <div className="grid grid-cols-4 gap-2 text-xs">
             <div>
               <div className="text-[var(--text-secondary)]">数量</div>
               <div>{position.quantity}</div>
@@ -52,6 +84,10 @@ export function PositionList() {
             <div>
               <div className="text-[var(--text-secondary)]">均价</div>
               <div>{position.entryPrice.toLocaleString()}</div>
+            </div>
+            <div>
+              <div className="text-[var(--text-secondary)]">标记</div>
+              <div>{position.currentPrice.toLocaleString()}</div>
             </div>
             <div>
               <div className="text-[var(--text-secondary)]">盈亏</div>
@@ -64,13 +100,15 @@ export function PositionList() {
               >
                 {position.unrealizedPnl >= 0 ? "+" : ""}
                 {position.unrealizedPnl.toFixed(2)}
-                <span className="ml-1">
-                  ({position.unrealizedPnlPercent >= 0 ? "+" : ""}
-                  {position.unrealizedPnlPercent.toFixed(2)}%)
-                </span>
               </div>
             </div>
           </div>
+
+          {position.liquidationPrice && position.liquidationPrice > 0 && (
+            <div className="text-xs text-[var(--text-secondary)] pt-1 border-t border-[var(--border)]">
+              强平价: <span className="text-[var(--negative)]">{position.liquidationPrice.toLocaleString()}</span>
+            </div>
+          )}
         </div>
       ))}
     </div>

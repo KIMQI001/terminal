@@ -30,6 +30,8 @@ export interface Position {
   unrealizedPnlPercent: number;
   stopLoss?: number;
   takeProfit?: number;
+  leverage?: number;
+  liquidationPrice?: number;
 }
 
 // 下单表单数据

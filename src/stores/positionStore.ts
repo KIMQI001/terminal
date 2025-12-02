@@ -6,6 +6,7 @@ interface PositionState {
   positions: Position[];
   balances: Balance[];
   isLoadingBalances: boolean;
+  isLoadingPositions: boolean;
   currentLeverage: number;
   isLoadingLeverage: boolean;
 
@@ -17,6 +18,7 @@ interface PositionState {
   setBalances: (balances: Balance[]) => void;
   getBalance: (asset: string) => Balance | undefined;
   fetchBalances: () => Promise<void>;
+  fetchPositions: () => Promise<void>;
   fetchLeverage: (symbol: string) => Promise<void>;
   setLeverage: (symbol: string, leverage: number) => Promise<boolean>;
 }
@@ -25,6 +27,7 @@ export const usePositionStore = create<PositionState>((set, get) => ({
   positions: [],
   balances: [],
   isLoadingBalances: false,
+  isLoadingPositions: false,
   currentLeverage: 20,
   isLoadingLeverage: false,
 
@@ -115,6 +118,56 @@ export const usePositionStore = create<PositionState>((set, get) => ({
       console.error('Failed to fetch balances:', error);
     } finally {
       set({ isLoadingBalances: false });
+    }
+  },
+
+  fetchPositions: async () => {
+    const token = useUserStore.getState().token;
+    if (!token) {
+      console.log('No token found, skipping positions fetch');
+      return;
+    }
+
+    set({ isLoadingPositions: true });
+
+    try {
+      const response = await fetch('/api/user/positions', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.positions) {
+        const positions: Position[] = data.positions.map((p: {
+          symbol: string;
+          side: string;
+          positionSide: string;
+          quantity: number;
+          entryPrice: number;
+          markPrice: number;
+          unrealizedPnl: number;
+          leverage: number;
+          liquidationPrice: number;
+        }) => ({
+          id: `${p.symbol}_${p.positionSide}`,
+          symbol: p.symbol,
+          side: p.side as 'long' | 'short',
+          quantity: p.quantity,
+          entryPrice: p.entryPrice,
+          currentPrice: p.markPrice,
+          unrealizedPnl: p.unrealizedPnl,
+          unrealizedPnlPercent: p.entryPrice > 0 ? (p.unrealizedPnl / (p.entryPrice * p.quantity)) * 100 : 0,
+          leverage: p.leverage,
+          liquidationPrice: p.liquidationPrice,
+        }));
+        set({ positions });
+      }
+    } catch (error) {
+      console.error('Failed to fetch positions:', error);
+    } finally {
+      set({ isLoadingPositions: false });
     }
   },
 
