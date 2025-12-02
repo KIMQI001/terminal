@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { Candle, Timeframe } from "@/types/chart";
+import type { LiquidationHillData } from "@/lib/chart/primitives";
 
 interface ChartState {
   symbol: string;
@@ -8,6 +9,7 @@ interface ChartState {
   isLoading: boolean;
   error: string | null;
   isConnected: boolean;
+  liquidationData: LiquidationHillData | null;
 
   setSymbol: (symbol: string) => void;
   setTimeframe: (timeframe: Timeframe) => void;
@@ -16,6 +18,7 @@ interface ChartState {
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setConnected: (connected: boolean) => void;
+  setLiquidationData: (data: LiquidationHillData | null) => void;
 }
 
 export const useChartStore = create<ChartState>((set) => ({
@@ -25,6 +28,7 @@ export const useChartStore = create<ChartState>((set) => ({
   isLoading: false,
   error: null,
   isConnected: false,
+  liquidationData: null,
 
   setSymbol: (symbol) => set({ symbol }),
   setTimeframe: (timeframe) => set({ timeframe }),
@@ -46,4 +50,5 @@ export const useChartStore = create<ChartState>((set) => ({
   setLoading: (isLoading) => set({ isLoading }),
   setError: (error) => set({ error }),
   setConnected: (isConnected) => set({ isConnected }),
+  setLiquidationData: (liquidationData) => set({ liquidationData }),
 }));

@@ -35,6 +35,7 @@ import {
   KillzonePrimitive,
   OTEPrimitive,
   BreakerBlockPrimitive,
+  LiquidationHillPrimitive,
 } from "@/lib/chart/primitives";
 import { detectOTEZones } from "@/lib/chart/indicators/ote";
 import { detectBreakerBlocks } from "@/lib/chart/indicators/breakerBlocks";
@@ -53,6 +54,7 @@ export function TradingChart() {
   const killzonePrimitiveRef = useRef<KillzonePrimitive | null>(null);
   const otePrimitiveRef = useRef<OTEPrimitive | null>(null);
   const breakerBlockPrimitiveRef = useRef<BreakerBlockPrimitive | null>(null);
+  const liquidationHillPrimitiveRef = useRef<LiquidationHillPrimitive | null>(null);
 
   // Trading price lines
   const priceLinesRef = useRef<IPriceLine[]>([]);
@@ -64,6 +66,7 @@ export function TradingChart() {
     symbol,
     timeframe,
     candles,
+    liquidationData,
     setCandles,
     updateCandle,
     setLoading,
@@ -288,6 +291,7 @@ export function TradingChart() {
     const killzonePrimitive = new KillzonePrimitive();
     const otePrimitive = new OTEPrimitive();
     const breakerBlockPrimitive = new BreakerBlockPrimitive();
+    const liquidationHillPrimitive = new LiquidationHillPrimitive();
 
     // Attach primitives in order (bottom layer first)
     candleSeries.attachPrimitive(killzonePrimitive);
@@ -296,6 +300,7 @@ export function TradingChart() {
     candleSeries.attachPrimitive(obPrimitive);
     candleSeries.attachPrimitive(fvgPrimitive);
     candleSeries.attachPrimitive(liquidityPrimitive);
+    candleSeries.attachPrimitive(liquidationHillPrimitive);
 
     orderBlockPrimitiveRef.current = obPrimitive;
     fvgPrimitiveRef.current = fvgPrimitive;
@@ -303,6 +308,7 @@ export function TradingChart() {
     killzonePrimitiveRef.current = killzonePrimitive;
     otePrimitiveRef.current = otePrimitive;
     breakerBlockPrimitiveRef.current = breakerBlockPrimitive;
+    liquidationHillPrimitiveRef.current = liquidationHillPrimitive;
 
     // Handle resize
     const handleResize = () => {
@@ -538,7 +544,12 @@ export function TradingChart() {
         breakerBlockPrimitiveRef.current.setData([]);
       }
     }
-  }, [orderBlocks, fvgs, liquidityZones, oteZones, breakerBlocks, enabled.orderBlocks, enabled.fvg, enabled.liquidityZones, enabled.killzones, enabled.ote, enabled.breakerBlocks, timeframe]);
+
+    // Update Liquidation Hill Primitive
+    if (liquidationHillPrimitiveRef.current) {
+      liquidationHillPrimitiveRef.current.setData(liquidationData);
+    }
+  }, [orderBlocks, fvgs, liquidityZones, oteZones, breakerBlocks, liquidationData, enabled.orderBlocks, enabled.fvg, enabled.liquidityZones, enabled.killzones, enabled.ote, enabled.breakerBlocks, timeframe]);
 
   // Update Swing Points Markers
   useEffect(() => {

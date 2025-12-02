@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useChartStore } from "@/stores/chartStore";
+import type { LiquidationBar } from "@/lib/chart/primitives";
 
 interface LiquidationLevel {
   price: number;
@@ -28,7 +29,7 @@ export function LiquidationPanel() {
   const [selectedInterval, setSelectedInterval] = useState<string>("1d");
   const [relayStatus, setRelayStatus] = useState<"connected" | "disconnected" | "unknown">("unknown");
 
-  const { symbol } = useChartStore();
+  const { symbol, setLiquidationData } = useChartStore();
 
   // Extract base coin from symbol (e.g., "BTCUSDC" -> "BTC")
   const baseCoin = symbol.replace(/USDC?|USDT?|BUSD?/i, "");
@@ -108,14 +109,23 @@ export function LiquidationPanel() {
           }
         }
 
+        const currentPrice = rawData.lastPrice || 0;
         setData({
           symbol: result.symbol || baseCoin,
           interval: result.interval || selectedInterval,
           levels,
-          currentPrice: rawData.lastPrice || 0,
+          currentPrice,
           timestamp: result.timestamp || new Date().toISOString(),
         });
         setRelayStatus("connected");
+
+        // Send data to store for chart primitive
+        const chartLevels: LiquidationBar[] = levels.map(l => ({
+          price: l.price,
+          amount: l.volume,
+          side: l.side,
+        }));
+        setLiquidationData({ levels: chartLevels, currentPrice });
       } else {
         setError(result.error || "Failed to fetch data");
         setRelayStatus("disconnected");
@@ -126,7 +136,7 @@ export function LiquidationPanel() {
     } finally {
       setIsLoading(false);
     }
-  }, [baseCoin, selectedInterval]);
+  }, [baseCoin, selectedInterval, setLiquidationData]);
 
   // Initial status check
   useEffect(() => {
