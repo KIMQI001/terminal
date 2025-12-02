@@ -260,7 +260,7 @@ export function OrderForm() {
                 onClick={() => setIsEditingPresets(true)}
                 className="text-xs text-blue-500 hover:text-blue-600"
               >
-                编辑
+                ✏️
               </button>
             )}
           </div>

@@ -14,9 +14,10 @@ const orderTypeLabels: Record<string, string> = {
 };
 
 export function OpenOrderList() {
-  const { realOrders, isLoadingOrders, fetchOpenOrders, cancelOrder } = useOrderStore();
+  const { realOrders, isLoadingOrders, fetchOpenOrders, cancelOrder, cancelAllOrders } = useOrderStore();
   const { symbol } = useChartStore();
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [isCancellingAll, setIsCancellingAll] = useState(false);
 
   // 获取真实挂单
   useEffect(() => {
@@ -37,6 +38,16 @@ export function OpenOrderList() {
 
   const handleRefresh = () => {
     fetchOpenOrders(symbol);
+  };
+
+  const handleCancelAll = async () => {
+    if (!confirm('确定取消所有挂单吗？')) return;
+    setIsCancellingAll(true);
+    const success = await cancelAllOrders(symbol);
+    if (success) {
+      fetchOpenOrders(symbol);
+    }
+    setIsCancellingAll(false);
   };
 
   if (isLoadingOrders) {
@@ -60,7 +71,16 @@ export function OpenOrderList() {
 
   return (
     <div className="space-y-2">
-      <div className="flex justify-end mb-2">
+      <div className="flex justify-end gap-2 mb-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-6 text-xs text-red-500 hover:text-red-600 hover:border-red-300"
+          onClick={handleCancelAll}
+          disabled={isCancellingAll || realOrders.length === 0}
+        >
+          {isCancellingAll ? '取消中...' : '全部取消'}
+        </Button>
         <Button variant="outline" size="sm" className="h-6 text-xs" onClick={handleRefresh}>
           刷新
         </Button>

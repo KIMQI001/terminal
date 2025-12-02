@@ -52,6 +52,7 @@ interface OrderState {
   placeOrder: (data: OrderFormData, symbol: string) => Promise<{ success: boolean; error?: string }>;
   updateOrderStatus: (id: string, status: OrderStatus, filledQuantity?: number) => void;
   cancelOrder: (id: string, symbol: string) => Promise<boolean>;
+  cancelAllOrders: (symbol: string) => Promise<boolean>;
   fetchOpenOrders: (symbol?: string) => Promise<void>;
   getOpenOrders: () => Order[];
   getOrderHistory: () => Order[];
@@ -204,6 +205,37 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       }
     } catch (error) {
       console.error('取消订单失败:', error);
+      return false;
+    }
+  },
+
+  cancelAllOrders: async (symbol) => {
+    const token = useUserStore.getState().token;
+    if (!token) {
+      console.error('未登录，无法取消订单');
+      return false;
+    }
+
+    try {
+      const response = await fetch(`/api/user/order?symbol=${symbol}&cancelAll=true`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // 清空本地挂单
+        set({ realOrders: [] });
+        return true;
+      } else {
+        console.error('取消全部订单失败:', result.error);
+        return false;
+      }
+    } catch (error) {
+      console.error('取消全部订单失败:', error);
       return false;
     }
   },

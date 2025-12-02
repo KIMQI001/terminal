@@ -273,6 +273,42 @@ async function cancelBinanceOrder(
   };
 }
 
+// 取消所有订单
+async function cancelAllBinanceOrders(
+  apiKey: string,
+  apiSecret: string,
+  isTestnet: boolean,
+  symbol: string
+) {
+  const baseUrl = isTestnet
+    ? 'https://testnet.binancefuture.com'
+    : 'https://fapi.binance.com';
+
+  const timestamp = Date.now();
+  const queryString = `symbol=${symbol}&timestamp=${timestamp}`;
+  const signature = generateBinanceSignature(queryString, apiSecret);
+
+  const url = `${baseUrl}/fapi/v1/allOpenOrders?${queryString}&signature=${signature}`;
+
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: {
+      'X-MBX-APIKEY': apiKey,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.msg || '取消全部订单失败');
+  }
+
+  return {
+    success: true,
+    message: '全部订单已取消',
+  };
+}
+
 // POST /api/user/order - 下单
 export async function POST(request: NextRequest) {
   const user = await authenticateUser(request);
@@ -337,18 +373,32 @@ export async function DELETE(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const symbol = searchParams.get('symbol');
     const orderId = searchParams.get('orderId');
+    const cancelAll = searchParams.get('cancelAll');
 
     if (!symbol) {
       return NextResponse.json({ error: '请指定交易对' }, { status: 400 });
-    }
-    if (!orderId) {
-      return NextResponse.json({ error: '请指定订单ID' }, { status: 400 });
     }
 
     // 获取解密后的 API 配置
     const config = await getDecryptedApiConfig(user.userId, 'binance');
     if (!config) {
       return NextResponse.json({ error: '未找到 Binance API 配置' }, { status: 404 });
+    }
+
+    // 取消全部订单
+    if (cancelAll === 'true') {
+      const result = await cancelAllBinanceOrders(
+        config.apiKey,
+        config.apiSecret,
+        config.isTestnet,
+        symbol
+      );
+      return NextResponse.json(result);
+    }
+
+    // 取消单个订单
+    if (!orderId) {
+      return NextResponse.json({ error: '请指定订单ID' }, { status: 400 });
     }
 
     const result = await cancelBinanceOrder(
