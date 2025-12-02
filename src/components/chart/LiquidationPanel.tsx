@@ -61,29 +61,34 @@ export function LiquidationPanel() {
         const rawData = result.data;
         const levels: LiquidationLevel[] = [];
 
-        // CoinAnk data has priceList and liquidationList arrays
-        if (rawData.priceList && rawData.liquidationList) {
-          const prices = rawData.priceList as number[];
-          const liquidations = rawData.liquidationList as Array<{ long?: number; short?: number }>;
+        // CoinAnk API returns: { prices: [...], Binance: [...], Bybit: [...], lastPrice, lastIndex }
+        // Each exchange array has format: [long1, short1, 0, 0, 0, long2, short2, 0, 0, 0, ...]
+        // Every 5 elements represent one price level: [long, short, 0, 0, 0]
+        const prices = rawData.prices as number[] | undefined;
+        const binanceData = rawData.Binance as number[] | undefined;
 
-          prices.forEach((price, index) => {
-            const liq = liquidations[index];
-            if (liq) {
-              if (liq.long && liq.long > 0) {
-                levels.push({ price, volume: liq.long, side: "long" });
-              }
-              if (liq.short && liq.short > 0) {
-                levels.push({ price, volume: liq.short, side: "short" });
-              }
+        if (prices && binanceData) {
+          // Parse Binance data (most liquid exchange)
+          for (let i = 0; i < prices.length && i * 5 < binanceData.length; i++) {
+            const price = prices[i];
+            const dataIndex = i * 5;
+            const longVol = binanceData[dataIndex] || 0;
+            const shortVol = binanceData[dataIndex + 1] || 0;
+
+            if (longVol > 0) {
+              levels.push({ price, volume: longVol, side: "long" });
             }
-          });
+            if (shortVol > 0) {
+              levels.push({ price, volume: shortVol, side: "short" });
+            }
+          }
         }
 
         setData({
           symbol: result.symbol || baseCoin,
           interval: result.interval || selectedInterval,
           levels,
-          currentPrice: rawData.currentPrice || 0,
+          currentPrice: rawData.lastPrice || 0,
           timestamp: result.timestamp || new Date().toISOString(),
         });
         setRelayStatus("connected");
@@ -103,6 +108,13 @@ export function LiquidationPanel() {
   useEffect(() => {
     checkRelayStatus();
   }, [checkRelayStatus]);
+
+  // Auto-load data when relay is connected or params change
+  useEffect(() => {
+    if (baseCoin) {
+      fetchData();
+    }
+  }, [baseCoin, selectedInterval, fetchData]);
 
   // Format volume for display
   const formatVolume = (vol: number): string => {
