@@ -131,30 +131,34 @@ export function OpenOrderList() {
         </Button>
       </div>
 
-      {orderGroups.map((group, groupIndex) => (
-        <div
-          key={groupIndex}
-          className="border border-[var(--border)] rounded-lg overflow-hidden"
-        >
-          {/* 组头：显示交易对、方向、数量 */}
-          <div className="px-3 py-1.5 bg-[var(--bg-secondary)] flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2">
-              <span className="font-medium">{group[0]?.symbol}</span>
-              <span className={`px-1.5 py-0.5 rounded ${
-                group[0]?.positionSide === 'LONG'
-                  ? 'bg-blue-100 text-blue-600'
-                  : 'bg-purple-100 text-purple-600'
-              }`}>
-                {group[0]?.positionSide === 'LONG' ? '做多' : '做空'}
-              </span>
+      {orderGroups.map((group, groupIndex) => {
+        const firstOrder = group[0];
+        if (!firstOrder) return null;
+
+        return (
+          <div
+            key={groupIndex}
+            className="border border-[var(--border)] rounded-lg overflow-hidden"
+          >
+            {/* 组头：显示交易对、方向、数量 */}
+            <div className="px-3 py-1.5 bg-[var(--bg-secondary)] flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <span className="font-medium">{firstOrder.symbol}</span>
+                <span className={`px-1.5 py-0.5 rounded ${
+                  firstOrder.positionSide === 'LONG'
+                    ? 'bg-blue-100 text-blue-600'
+                    : 'bg-purple-100 text-purple-600'
+                }`}>
+                  {firstOrder.positionSide === 'LONG' ? '做多' : '做空'}
+                </span>
+                <span className="text-[var(--text-secondary)]">
+                  数量: {firstOrder.quantity}
+                </span>
+              </div>
               <span className="text-[var(--text-secondary)]">
-                数量: {group[0]?.quantity}
+                {new Date(firstOrder.time).toLocaleTimeString()}
               </span>
             </div>
-            <span className="text-[var(--text-secondary)]">
-              {new Date(group[0]?.time).toLocaleTimeString()}
-            </span>
-          </div>
 
           {/* 组内订单 */}
           <div className="divide-y divide-[var(--border)]">
@@ -190,7 +194,8 @@ export function OpenOrderList() {
             ))}
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
