@@ -60,6 +60,7 @@ export function OpenOrderList() {
   const { symbol } = useChartStore();
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [isCancellingAll, setIsCancellingAll] = useState(false);
+  const [cancellingGroup, setCancellingGroup] = useState<number | null>(null);
 
   // 分组订单 - 必须在所有条件返回之前
   const orderGroups = useMemo(() => groupOrders(realOrders), [realOrders]);
@@ -79,6 +80,16 @@ export function OpenOrderList() {
       fetchOpenOrders(symbol);
     }
     setCancellingId(null);
+  };
+
+  // 取消整组订单
+  const handleCancelGroup = async (group: RealOrder[], groupIndex: number) => {
+    setCancellingGroup(groupIndex);
+    for (const order of group) {
+      await cancelOrder(order.id, order.symbol);
+    }
+    fetchOpenOrders(symbol);
+    setCancellingGroup(null);
   };
 
   const handleRefresh = () => {
@@ -152,12 +163,18 @@ export function OpenOrderList() {
                   {firstOrder.positionSide === 'LONG' ? '做多' : '做空'}
                 </span>
                 <span className="text-[var(--text-secondary)]">
-                  数量: {firstOrder.quantity}
+                  {firstOrder.quantity} | {new Date(firstOrder.time).toLocaleTimeString()}
                 </span>
               </div>
-              <span className="text-[var(--text-secondary)]">
-                {new Date(firstOrder.time).toLocaleTimeString()}
-              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-5 text-xs text-red-500 hover:text-red-600 hover:bg-red-50 px-2"
+                disabled={cancellingGroup === groupIndex}
+                onClick={() => handleCancelGroup(group, groupIndex)}
+              >
+                {cancellingGroup === groupIndex ? '取消中...' : '取消组'}
+              </Button>
             </div>
 
           {/* 组内订单 */}
