@@ -62,8 +62,23 @@ if command -v node &> /dev/null; then
     NODE_VERSION=$(node -v)
     print_warning "Node.js 已安装: $NODE_VERSION"
 else
-    curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
-    yum install -y nodejs
+    # 尝试使用 dnf module (适用于 OpenCloudOS/CentOS 9)
+    if dnf module list nodejs 2>/dev/null | grep -q "18"; then
+        dnf module reset nodejs -y 2>/dev/null || true
+        dnf module enable nodejs:18 -y
+        dnf install nodejs -y
+    else
+        # 使用二进制包安装
+        print_warning "使用二进制包安装 Node.js..."
+        NODE_VERSION="v18.19.0"
+        NODE_DISTRO="linux-x64"
+        cd /tmp
+        curl -fsSL "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-${NODE_DISTRO}.tar.xz" -o node.tar.xz
+        tar -xJf node.tar.xz
+        cp -r node-${NODE_VERSION}-${NODE_DISTRO}/{bin,lib,share} /usr/local/
+        rm -rf node.tar.xz node-${NODE_VERSION}-${NODE_DISTRO}
+        cd -
+    fi
     print_status "Node.js 安装完成: $(node -v)"
 fi
 
