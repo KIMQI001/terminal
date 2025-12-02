@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useOrderStore } from "@/stores/orderStore";
 
@@ -13,6 +14,13 @@ const orderTypeLabels: Record<string, string> = {
 export function OpenOrderList() {
   const { getOpenOrders, cancelOrder } = useOrderStore();
   const openOrders = getOpenOrders();
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+
+  const handleCancel = async (orderId: string, symbol: string) => {
+    setCancellingId(orderId);
+    await cancelOrder(orderId, symbol);
+    setCancellingId(null);
+  };
 
   if (openOrders.length === 0) {
     return (
@@ -49,9 +57,10 @@ export function OpenOrderList() {
               variant="outline"
               size="sm"
               className="h-6 text-xs"
-              onClick={() => cancelOrder(order.id)}
+              disabled={cancellingId === order.id}
+              onClick={() => handleCancel(order.id, order.symbol)}
             >
-              取消
+              {cancellingId === order.id ? '取消中...' : '取消'}
             </Button>
           </div>
 

@@ -35,7 +35,7 @@ interface OrderState {
   addOrder: (data: OrderFormData, symbol: string) => Order;
   placeOrder: (data: OrderFormData, symbol: string) => Promise<{ success: boolean; error?: string }>;
   updateOrderStatus: (id: string, status: OrderStatus, filledQuantity?: number) => void;
-  cancelOrder: (id: string) => void;
+  cancelOrder: (id: string, symbol: string) => Promise<boolean>;
   getOpenOrders: () => Order[];
   getOrderHistory: () => Order[];
 }
@@ -98,6 +98,8 @@ export const useOrderStore = create<OrderState>((set, get) => ({
           type: data.type === 'market' ? 'MARKET' : 'LIMIT',
           quantity: data.quantity,
           price: data.price,
+          stopLoss: data.stopPrice,  // 止损价
+          takeProfit: data.takeProfit,  // 止盈价
         }),
       });
 
@@ -151,14 +153,40 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     }));
   },
 
-  cancelOrder: (id) => {
-    set((state) => ({
-      orders: state.orders.map((order) =>
-        order.id === id
-          ? { ...order, status: "cancelled" as OrderStatus, updatedAt: Date.now() }
-          : order
-      ),
-    }));
+  cancelOrder: async (id, symbol) => {
+    const token = useUserStore.getState().token;
+    if (!token) {
+      console.error('未登录，无法取消订单');
+      return false;
+    }
+
+    try {
+      const response = await fetch(`/api/user/order?symbol=${symbol}&orderId=${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        set((state) => ({
+          orders: state.orders.map((order) =>
+            order.id === id
+              ? { ...order, status: "cancelled" as OrderStatus, updatedAt: Date.now() }
+              : order
+          ),
+        }));
+        return true;
+      } else {
+        console.error('取消订单失败:', result.error);
+        return false;
+      }
+    } catch (error) {
+      console.error('取消订单失败:', error);
+      return false;
+    }
   },
 
   getOpenOrders: () => {

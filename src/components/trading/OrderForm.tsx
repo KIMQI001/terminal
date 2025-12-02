@@ -104,6 +104,7 @@ export function OrderForm() {
       side,
       price: orderType !== "market" ? parseFloat(price) : undefined,
       stopPrice: stopLoss ? parseFloat(stopLoss) : undefined,
+      takeProfit: takeProfit ? parseFloat(takeProfit) : undefined,
       quantity: coinQuantity, // 使用计算出的币数量
     };
 

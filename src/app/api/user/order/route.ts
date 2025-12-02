@@ -57,6 +57,63 @@ function formatPrice(price: number, precision: number): string {
   return price.toFixed(precision);
 }
 
+// 下止盈止损单
+async function placeStopOrder(
+  apiKey: string,
+  apiSecret: string,
+  isTestnet: boolean,
+  params: {
+    symbol: string;
+    side: 'BUY' | 'SELL';
+    positionSide: 'LONG' | 'SHORT';
+    type: 'STOP_MARKET' | 'TAKE_PROFIT_MARKET';
+    quantity: number;
+    stopPrice: number;
+  }
+) {
+  const baseUrl = isTestnet
+    ? 'https://testnet.binancefuture.com'
+    : 'https://fapi.binance.com';
+
+  const timestamp = Date.now();
+  const precision = getPrecision(params.symbol);
+
+  const queryParams: Record<string, string | number> = {
+    symbol: params.symbol,
+    side: params.side,
+    positionSide: params.positionSide,
+    type: params.type,
+    quantity: formatQuantity(params.quantity, precision.quantity),
+    stopPrice: formatPrice(params.stopPrice, precision.price),
+    timestamp,
+  };
+
+  const queryString = Object.entries(queryParams)
+    .map(([key, value]) => `${key}=${value}`)
+    .join('&');
+
+  const signature = generateBinanceSignature(queryString, apiSecret);
+
+  const url = `${baseUrl}/fapi/v1/order`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'X-MBX-APIKEY': apiKey,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: `${queryString}&signature=${signature}`,
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.msg || '止盈止损单失败');
+  }
+
+  return data;
+}
+
 // 下单到 Binance
 async function placeBinanceOrder(
   apiKey: string,
@@ -68,6 +125,8 @@ async function placeBinanceOrder(
     type: 'LIMIT' | 'MARKET';
     quantity: number;
     price?: number;
+    stopLoss?: number;
+    takeProfit?: number;
   }
 ) {
   const baseUrl = isTestnet
@@ -120,7 +179,7 @@ async function placeBinanceOrder(
     throw new Error(data.msg || '下单失败');
   }
 
-  return {
+  const result = {
     success: true,
     order: {
       orderId: data.orderId,
@@ -132,7 +191,48 @@ async function placeBinanceOrder(
       status: data.status,
       time: data.updateTime,
     },
+    stopOrders: [] as { type: string; orderId: number }[],
   };
+
+  // 下止损单
+  if (params.stopLoss && params.stopLoss > 0) {
+    try {
+      // 止损单：多单用 SELL 平仓，空单用 BUY 平仓
+      const slSide = params.side === 'BUY' ? 'SELL' : 'BUY';
+      const slData = await placeStopOrder(apiKey, apiSecret, isTestnet, {
+        symbol: params.symbol,
+        side: slSide,
+        positionSide,
+        type: 'STOP_MARKET',
+        quantity: params.quantity,
+        stopPrice: params.stopLoss,
+      });
+      result.stopOrders.push({ type: 'stopLoss', orderId: slData.orderId });
+    } catch (e) {
+      console.error('Stop loss order failed:', e);
+    }
+  }
+
+  // 下止盈单
+  if (params.takeProfit && params.takeProfit > 0) {
+    try {
+      // 止盈单：多单用 SELL 平仓，空单用 BUY 平仓
+      const tpSide = params.side === 'BUY' ? 'SELL' : 'BUY';
+      const tpData = await placeStopOrder(apiKey, apiSecret, isTestnet, {
+        symbol: params.symbol,
+        side: tpSide,
+        positionSide,
+        type: 'TAKE_PROFIT_MARKET',
+        quantity: params.quantity,
+        stopPrice: params.takeProfit,
+      });
+      result.stopOrders.push({ type: 'takeProfit', orderId: tpData.orderId });
+    } catch (e) {
+      console.error('Take profit order failed:', e);
+    }
+  }
+
+  return result;
 }
 
 // 取消订单
@@ -181,7 +281,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { symbol, side, type, quantity, price } = await request.json();
+    const { symbol, side, type, quantity, price, stopLoss, takeProfit } = await request.json();
 
     // 参数验证
     if (!symbol) {
@@ -212,6 +312,8 @@ export async function POST(request: NextRequest) {
       type,
       quantity,
       price,
+      stopLoss,
+      takeProfit,
     });
 
     return NextResponse.json(result);
