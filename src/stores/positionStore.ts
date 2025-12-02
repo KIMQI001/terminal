@@ -4,6 +4,7 @@ import { Position, Balance } from "@/types/order";
 interface PositionState {
   positions: Position[];
   balances: Balance[];
+  isLoadingBalances: boolean;
 
   // Actions
   addPosition: (position: Omit<Position, "id" | "unrealizedPnl" | "unrealizedPnlPercent">) => void;
@@ -12,27 +13,13 @@ interface PositionState {
   updateCurrentPrice: (symbol: string, price: number) => void;
   setBalances: (balances: Balance[]) => void;
   getBalance: (asset: string) => Balance | undefined;
+  fetchBalances: () => Promise<void>;
 }
 
 export const usePositionStore = create<PositionState>((set, get) => ({
-  positions: [
-    // Demo data
-    {
-      id: "pos_1",
-      symbol: "BTCUSDC",
-      side: "long",
-      quantity: 0.1,
-      entryPrice: 95000,
-      currentPrice: 96500,
-      unrealizedPnl: 150,
-      unrealizedPnlPercent: 1.58,
-    },
-  ],
-  balances: [
-    { asset: "USDT", free: 10000, locked: 0 },
-    { asset: "BTC", free: 0.5, locked: 0 },
-    { asset: "ETH", free: 2.0, locked: 0 },
-  ],
+  positions: [],
+  balances: [],
+  isLoadingBalances: false,
 
   addPosition: (positionData) => {
     const pnl = (positionData.currentPrice - positionData.entryPrice) * positionData.quantity;
@@ -86,5 +73,41 @@ export const usePositionStore = create<PositionState>((set, get) => ({
 
   getBalance: (asset) => {
     return get().balances.find((b) => b.asset === asset);
+  },
+
+  fetchBalances: async () => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    if (!token) {
+      console.log('No token found, skipping balance fetch');
+      return;
+    }
+
+    set({ isLoadingBalances: true });
+
+    try {
+      const response = await fetch('/api/user/test-connection', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ exchange: 'binance' }),
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.balance) {
+        const balances: Balance[] = data.balance.map((b: { asset: string; free: string; locked: string }) => ({
+          asset: b.asset,
+          free: parseFloat(b.free),
+          locked: parseFloat(b.locked),
+        }));
+        set({ balances });
+      }
+    } catch (error) {
+      console.error('Failed to fetch balances:', error);
+    } finally {
+      set({ isLoadingBalances: false });
+    }
   },
 }));

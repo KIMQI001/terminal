@@ -1,10 +1,12 @@
 "use client";
 
+import { useEffect } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useOrderStore } from "@/stores/orderStore";
 import { useChartStore } from "@/stores/chartStore";
+import { usePositionStore } from "@/stores/positionStore";
 import { OrderForm } from "./OrderForm";
 import { PositionList } from "./PositionList";
 import { OpenOrderList } from "./OpenOrderList";
@@ -12,6 +14,14 @@ import { OpenOrderList } from "./OpenOrderList";
 export function TradePanel() {
   const { isModalOpen, closeModal } = useOrderStore();
   const { symbol } = useChartStore();
+  const { fetchBalances } = usePositionStore();
+
+  // 面板打开时获取真实余额
+  useEffect(() => {
+    if (isModalOpen) {
+      fetchBalances();
+    }
+  }, [isModalOpen, fetchBalances]);
 
   if (!isModalOpen) return null;
 
