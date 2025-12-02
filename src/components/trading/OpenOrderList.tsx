@@ -61,6 +61,9 @@ export function OpenOrderList() {
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [isCancellingAll, setIsCancellingAll] = useState(false);
 
+  // 分组订单 - 必须在所有条件返回之前
+  const orderGroups = useMemo(() => groupOrders(realOrders), [realOrders]);
+
   // 获取真实挂单
   useEffect(() => {
     if (symbol) {
@@ -110,9 +113,6 @@ export function OpenOrderList() {
       </div>
     );
   }
-
-  // 分组订单
-  const orderGroups = useMemo(() => groupOrders(realOrders), [realOrders]);
 
   return (
     <div className="space-y-3">
