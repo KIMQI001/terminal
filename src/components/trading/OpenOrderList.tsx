@@ -9,8 +9,11 @@ const orderTypeLabels: Record<string, string> = {
   limit: "限价",
   market: "市价",
   "stop-market": "止损",
+  "stop_market": "止损",
   "take-profit-market": "止盈",
+  "take-profit_market": "止盈",
   "stop-limit": "止损限价",
+  "stop_limit": "止损限价",
 };
 
 export function OpenOrderList() {
