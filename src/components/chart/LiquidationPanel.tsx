@@ -158,13 +158,20 @@ export function LiquidationPanel() {
     return vol.toFixed(0);
   };
 
-  // Get top liquidation levels
-  const topLevels = data?.levels
-    .sort((a, b) => b.volume - a.volume)
-    .slice(0, 10) || [];
+  // Get top liquidation levels - 分别从多空各取 top 5，按清算量排序
+  const allLongLevels = data?.levels.filter((l) => l.side === "long") || [];
+  const allShortLevels = data?.levels.filter((l) => l.side === "short") || [];
 
-  const longLevels = topLevels.filter((l) => l.side === "long");
-  const shortLevels = topLevels.filter((l) => l.side === "short");
+  // 各取清算量最大的 5 个，然后按价格排序显示
+  const longLevels = [...allLongLevels]
+    .sort((a, b) => b.volume - a.volume)
+    .slice(0, 5)
+    .sort((a, b) => b.price - a.price); // 按价格从高到低
+
+  const shortLevels = [...allShortLevels]
+    .sort((a, b) => b.volume - a.volume)
+    .slice(0, 5)
+    .sort((a, b) => b.price - a.price); // 按价格从高到低
 
   // Status indicator color
   const statusColor = {
@@ -244,7 +251,7 @@ export function LiquidationPanel() {
           )}
 
           {/* Data */}
-          {data && topLevels.length > 0 ? (
+          {data && (longLevels.length > 0 || shortLevels.length > 0) ? (
             <div className="flex gap-3">
               {/* Long liquidations - 多头清算区（价格下方） */}
               <div className="flex-1">
