@@ -221,15 +221,13 @@ export function LiquidationPanel() {
     unknown: "bg-gray-400",
   }[relayStatus];
 
-  // Risk level colors
-  const getRiskColor = (risk: "h1" | "h2" | "h3") => {
-    // h1=高风险, h2=中风险, h3=低风险
-    const riskColors = {
-      h1: { bg: "bg-red-100", text: "text-red-600", border: "border-red-300" },
-      h2: { bg: "bg-orange-100", text: "text-orange-600", border: "border-orange-300" },
-      h3: { bg: "bg-yellow-100", text: "text-yellow-600", border: "border-yellow-300" },
-    };
-    return riskColors[risk];
+  // Side colors - 多头蓝色，空头橙色（与图表柱子颜色一致）
+  const getSideColor = (side: "long" | "short") => {
+    if (side === "long") {
+      return { bg: "bg-blue-50", text: "text-blue-600", border: "border-blue-200" };
+    } else {
+      return { bg: "bg-orange-50", text: "text-orange-600", border: "border-orange-200" };
+    }
   };
 
   return (
@@ -301,7 +299,7 @@ export function LiquidationPanel() {
                 </div>
                 <div className="space-y-0.5">
                   {longLevels.map((level, i) => {
-                    const colors = getRiskColor(level.risk);
+                    const colors = getSideColor(level.side);
                     return (
                       <div
                         key={i}
@@ -327,7 +325,7 @@ export function LiquidationPanel() {
                 </div>
                 <div className="space-y-0.5">
                   {shortLevels.map((level, i) => {
-                    const colors = getRiskColor(level.risk);
+                    const colors = getSideColor(level.side);
                     return (
                       <div
                         key={i}
