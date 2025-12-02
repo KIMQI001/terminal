@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { Position, Balance } from "@/types/order";
+import { useUserStore } from "./userStore";
 
 interface PositionState {
   positions: Position[];
@@ -76,7 +77,7 @@ export const usePositionStore = create<PositionState>((set, get) => ({
   },
 
   fetchBalances: async () => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    const token = useUserStore.getState().token;
     if (!token) {
       console.log('No token found, skipping balance fetch');
       return;
