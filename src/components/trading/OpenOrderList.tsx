@@ -112,7 +112,7 @@ export function OpenOrderList() {
     setIsCancellingAll(false);
   };
 
-  if (isLoadingOrders) {
+  if (isLoadingOrders && realOrders.length === 0) {
     return (
       <div className="py-8 text-center text-sm text-[var(--text-secondary)]">
         加载中...

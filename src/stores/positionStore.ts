@@ -128,7 +128,11 @@ export const usePositionStore = create<PositionState>((set, get) => ({
       return;
     }
 
-    set({ isLoadingPositions: true });
+    const { positions } = get();
+    // 只在首次加载（数据为空）时显示 loading
+    if (positions.length === 0) {
+      set({ isLoadingPositions: true });
+    }
 
     try {
       const response = await fetch('/api/user/positions', {

@@ -246,7 +246,11 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       return;
     }
 
-    set({ isLoadingOrders: true });
+    const { realOrders } = get();
+    // 只在首次加载（数据为空）时显示 loading
+    if (realOrders.length === 0) {
+      set({ isLoadingOrders: true });
+    }
 
     try {
       const url = symbol
