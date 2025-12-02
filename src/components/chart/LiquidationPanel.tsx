@@ -158,20 +158,43 @@ export function LiquidationPanel() {
     return vol.toFixed(0);
   };
 
-  // Get top liquidation levels - 分别从多空各取 top 5，按清算量排序
+  // 找出局部峰值（山峰）- 比相邻价位清算量都大的点
+  const findPeaks = (levels: LiquidationLevel[], count: number): LiquidationLevel[] => {
+    if (levels.length === 0) return [];
+
+    // 按价格排序
+    const sorted = [...levels].sort((a, b) => a.price - b.price);
+
+    // 找出局部峰值
+    const peaks: LiquidationLevel[] = [];
+    for (let i = 0; i < sorted.length; i++) {
+      const prev = sorted[i - 1]?.volume || 0;
+      const curr = sorted[i].volume;
+      const next = sorted[i + 1]?.volume || 0;
+
+      // 当前值比前后都大，或者是边界且比相邻大
+      if (curr > prev && curr > next) {
+        peaks.push(sorted[i]);
+      } else if (i === 0 && curr > next) {
+        peaks.push(sorted[i]);
+      } else if (i === sorted.length - 1 && curr > prev) {
+        peaks.push(sorted[i]);
+      }
+    }
+
+    // 按清算量排序取前 N 个峰值
+    return peaks
+      .sort((a, b) => b.volume - a.volume)
+      .slice(0, count)
+      .sort((a, b) => b.price - a.price); // 最后按价格从高到低显示
+  };
+
   const allLongLevels = data?.levels.filter((l) => l.side === "long") || [];
   const allShortLevels = data?.levels.filter((l) => l.side === "short") || [];
 
-  // 各取清算量最大的 5 个，然后按价格排序显示
-  const longLevels = [...allLongLevels]
-    .sort((a, b) => b.volume - a.volume)
-    .slice(0, 5)
-    .sort((a, b) => b.price - a.price); // 按价格从高到低
-
-  const shortLevels = [...allShortLevels]
-    .sort((a, b) => b.volume - a.volume)
-    .slice(0, 5)
-    .sort((a, b) => b.price - a.price); // 按价格从高到低
+  // 找出清算量最大的几个山峰
+  const longLevels = findPeaks(allLongLevels, 5);
+  const shortLevels = findPeaks(allShortLevels, 5);
 
   // Status indicator color
   const statusColor = {
@@ -181,7 +204,7 @@ export function LiquidationPanel() {
   }[relayStatus];
 
   // Risk level colors
-  const getRiskColor = (risk: "h1" | "h2" | "h3", side: "long" | "short") => {
+  const getRiskColor = (risk: "h1" | "h2" | "h3") => {
     // h1=高风险, h2=中风险, h3=低风险
     const riskColors = {
       h1: { bg: "bg-red-100", text: "text-red-600", border: "border-red-300" },
@@ -260,7 +283,7 @@ export function LiquidationPanel() {
                 </div>
                 <div className="space-y-0.5">
                   {longLevels.map((level, i) => {
-                    const colors = getRiskColor(level.risk, level.side);
+                    const colors = getRiskColor(level.risk);
                     return (
                       <div
                         key={i}
@@ -286,7 +309,7 @@ export function LiquidationPanel() {
                 </div>
                 <div className="space-y-0.5">
                   {shortLevels.map((level, i) => {
-                    const colors = getRiskColor(level.risk, level.side);
+                    const colors = getRiskColor(level.risk);
                     return (
                       <div
                         key={i}
