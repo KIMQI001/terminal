@@ -13,7 +13,7 @@ const orderTypes: { value: OrderType; label: string }[] = [
   { value: "market", label: "市价" },
 ];
 
-const leverageOptions = [1, 5, 10, 20, 50, 75, 100, 125];
+const leverageOptions = [5, 20, 50, 100];
 
 export function OrderForm() {
   const { symbol, candles } = useChartStore();
