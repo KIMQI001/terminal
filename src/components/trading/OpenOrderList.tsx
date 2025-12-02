@@ -97,9 +97,9 @@ export function OpenOrderList() {
             <div className="flex items-center gap-2">
               <span className="font-medium text-sm">{order.symbol}</span>
               <span className={`text-xs px-1.5 py-0.5 rounded ${
-                order.type === 'stop-market'
+                order.type.includes('stop')
                   ? 'bg-red-100 text-red-600'
-                  : order.type === 'take-profit-market'
+                  : order.type.includes('take-profit') || order.type.includes('profit')
                   ? 'bg-green-100 text-green-600'
                   : 'bg-gray-100 text-gray-600'
               }`}>
