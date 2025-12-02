@@ -77,10 +77,15 @@ async function placeBinanceOrder(
   const timestamp = Date.now();
   const precision = getPrecision(params.symbol);
 
+  // 根据交易方向确定持仓方向（双向持仓模式）
+  // BUY 开多 -> LONG, SELL 开空 -> SHORT
+  const positionSide = params.side === 'BUY' ? 'LONG' : 'SHORT';
+
   // 构建查询参数（使用格式化后的数量）
   const queryParams: Record<string, string | number> = {
     symbol: params.symbol,
     side: params.side,
+    positionSide,
     type: params.type,
     quantity: formatQuantity(params.quantity, precision.quantity),
     timestamp,
