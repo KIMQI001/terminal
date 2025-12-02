@@ -94,7 +94,7 @@ class FVGPaneRenderer implements ISeriesPrimitivePaneRenderer {
         // If partially filled, show the filled portion with darker color
         if (fvg.fillPercentage > 0 && fvg.fillPercentage < 100) {
           const filledHeight = height * (fvg.fillPercentage / 100);
-          const filledY = isBullish ? y + height - filledHeight : y;
+          const filledY = isBullish ? y : y + height - filledHeight;
 
           const filledColor = isBullish
             ? 'rgba(34, 197, 94, 0.25)'

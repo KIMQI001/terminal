@@ -15,6 +15,26 @@ interface MultiTimeframeOTE {
   '1w': OTEZone | null;
 }
 
+// 多周期 FVG 类型
+interface MultiTimeframeFVG {
+  '5m': FVG | null;
+  '15m': FVG | null;
+  '1h': FVG | null;
+  '4h': FVG | null;
+  '1d': FVG | null;
+  '1w': FVG | null;
+}
+
+// 多周期 OB 类型
+interface MultiTimeframeOB {
+  '5m': OrderBlock | null;
+  '15m': OrderBlock | null;
+  '1h': OrderBlock | null;
+  '4h': OrderBlock | null;
+  '1d': OrderBlock | null;
+  '1w': OrderBlock | null;
+}
+
 interface IndicatorStoreState {
   enabled: IndicatorState;
   swingPoints: SwingPoint[];
@@ -27,6 +47,8 @@ interface IndicatorStoreState {
   breakerBlocks: BreakerBlock[];
   inducements: Inducement[];
   multiTimeframeOTE: MultiTimeframeOTE;
+  multiTimeframeFVG: MultiTimeframeFVG;
+  multiTimeframeOB: MultiTimeframeOB;
 
   toggleIndicator: (key: keyof IndicatorState) => void;
   setSwingPoints: (points: SwingPoint[]) => void;
@@ -39,6 +61,8 @@ interface IndicatorStoreState {
   setBreakerBlocks: (blocks: BreakerBlock[]) => void;
   setInducements: (inducements: Inducement[]) => void;
   setMultiTimeframeOTE: (timeframe: Timeframe, ote: OTEZone | null) => void;
+  setMultiTimeframeFVG: (timeframe: Timeframe, fvg: FVG | null) => void;
+  setMultiTimeframeOB: (timeframe: Timeframe, ob: OrderBlock | null) => void;
   clearAll: () => void;
 }
 
@@ -72,6 +96,22 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
     '1d': null,
     '1w': null,
   },
+  multiTimeframeFVG: {
+    '5m': null,
+    '15m': null,
+    '1h': null,
+    '4h': null,
+    '1d': null,
+    '1w': null,
+  },
+  multiTimeframeOB: {
+    '5m': null,
+    '15m': null,
+    '1h': null,
+    '4h': null,
+    '1d': null,
+    '1w': null,
+  },
 
   toggleIndicator: (key) =>
     set((state) => ({
@@ -95,6 +135,20 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
       multiTimeframeOTE: {
         ...state.multiTimeframeOTE,
         [timeframe]: ote,
+      },
+    })),
+  setMultiTimeframeFVG: (timeframe, fvg) =>
+    set((state) => ({
+      multiTimeframeFVG: {
+        ...state.multiTimeframeFVG,
+        [timeframe]: fvg,
+      },
+    })),
+  setMultiTimeframeOB: (timeframe, ob) =>
+    set((state) => ({
+      multiTimeframeOB: {
+        ...state.multiTimeframeOB,
+        [timeframe]: ob,
       },
     })),
   clearAll: () =>

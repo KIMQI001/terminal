@@ -17,6 +17,8 @@ import { useOrderStore } from "@/stores/orderStore";
 import { MeasurementTool } from "./MeasurementTool";
 import { ICTOverlay } from "./ICTOverlay";
 import { OTEPanel } from "./OTEPanel";
+import { FVGPanel } from "./FVGPanel";
+import { OBPanel } from "./OBPanel";
 import { fetchKlines } from "@/lib/binance/api";
 import { BinanceWebSocket } from "@/lib/binance/websocket";
 import { detectSwingPoints } from "@/lib/chart/indicators/swingPoints";
@@ -85,6 +87,8 @@ export function TradingChart() {
     setBreakerBlocks,
     setInducements,
     setMultiTimeframeOTE,
+    setMultiTimeframeFVG,
+    setMultiTimeframeOB,
   } = useIndicatorStore();
 
   const {
@@ -126,14 +130,23 @@ export function TradingChart() {
       const detectedSwingPoints = detectSwingPoints(candleData);
       setSwingPoints(detectedSwingPoints);
 
-      if (enabled.orderBlocks) {
-        const obs = detectOrderBlocks(candleData);
-        setOrderBlocks(obs);
+      // OB 始终计算（面板需要数据）
+      const obs = detectOrderBlocks(candleData);
+      setOrderBlocks(obs);
+      // 保存到多周期 OB 存储（按时间排序取最新的一个）
+      const targetTimeframes = ['5m', '15m', '1h', '4h', '1d', '1w'] as const;
+      if (targetTimeframes.includes(timeframe as typeof targetTimeframes[number])) {
+        const sortedObs = [...obs].sort((a, b) => b.startTime - a.startTime);
+        setMultiTimeframeOB(timeframe, sortedObs[0] || null);
       }
 
-      if (enabled.fvg) {
-        const fvgs = detectFVGs(candleData);
-        setFVGs(fvgs);
+      // FVG 始终计算（面板需要数据）
+      const fvgs = detectFVGs(candleData);
+      setFVGs(fvgs);
+      // 保存到多周期 FVG 存储（只保存最新的一个）
+      const targetTimeframes2 = ['5m', '15m', '1h', '4h', '1d', '1w'] as const;
+      if (targetTimeframes2.includes(timeframe as typeof targetTimeframes2[number])) {
+        setMultiTimeframeFVG(timeframe, fvgs[fvgs.length - 1] || null);
       }
 
       if (enabled.bos || enabled.choch) {
@@ -148,16 +161,14 @@ export function TradingChart() {
         setLiquidityZones(zones);
       }
 
-      // OTE zones
-      if (enabled.ote) {
-        const lastPrice = candleData[candleData.length - 1].close;
-        const otes = detectOTEZones(detectedSwingPoints, lastPrice, candleData);
-        setOTEZones(otes);
-        // 保存到多周期 OTE 存储（只保存最新的一个）
-        const targetTimeframes = ['5m', '15m', '1h', '4h', '1d', '1w'] as const;
-        if (targetTimeframes.includes(timeframe as typeof targetTimeframes[number])) {
-          setMultiTimeframeOTE(timeframe, otes[0] || null);
-        }
+      // OTE zones 始终计算（面板需要数据）
+      const lastPrice = candleData[candleData.length - 1].close;
+      const otes = detectOTEZones(detectedSwingPoints, lastPrice, candleData);
+      setOTEZones(otes);
+      // 保存到多周期 OTE 存储（只保存最新的一个）
+      const targetTimeframes3 = ['5m', '15m', '1h', '4h', '1d', '1w'] as const;
+      if (targetTimeframes3.includes(timeframe as typeof targetTimeframes3[number])) {
+        setMultiTimeframeOTE(timeframe, otes[0] || null);
       }
 
       // Breaker blocks (need order blocks first)
@@ -173,7 +184,7 @@ export function TradingChart() {
         setInducements(inducements);
       }
     },
-    [enabled, timeframe, setSwingPoints, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setMultiTimeframeOTE]
+    [enabled, timeframe, setSwingPoints, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB]
   );
 
   // Initialize chart
@@ -215,6 +226,20 @@ export function TradingChart() {
         borderColor: "#e0e0e0",
         timeVisible: true,
         secondsVisible: false,
+        tickMarkFormatter: (timestamp: number) => {
+          // 转换为上海时间 (UTC+8)
+          const date = new Date(timestamp * 1000);
+          const shanghaiOffset = 8 * 60;
+          const localOffset = date.getTimezoneOffset();
+          const shanghaiTime = new Date(date.getTime() + (shanghaiOffset + localOffset) * 60 * 1000);
+
+          const month = String(shanghaiTime.getMonth() + 1).padStart(2, '0');
+          const day = String(shanghaiTime.getDate()).padStart(2, '0');
+          const hours = String(shanghaiTime.getHours()).padStart(2, '0');
+          const minutes = String(shanghaiTime.getMinutes()).padStart(2, '0');
+
+          return `${month}-${day} ${hours}:${minutes}`;
+        },
       },
       localization: {
         timeFormatter: (timestamp: number) => {
@@ -391,11 +416,68 @@ export function TradingChart() {
       }
     };
 
-    // 只在 OTE 指标启用时加载
-    if (enabled.ote) {
-      loadAllTimeframesOTE();
-    }
-  }, [symbol, enabled.ote, timeframe, setMultiTimeframeOTE]);
+    // OTE 面板始终需要数据
+    loadAllTimeframesOTE();
+  }, [symbol, timeframe, setMultiTimeframeOTE]);
+
+  // 初始化所有周期的 FVG 数据
+  useEffect(() => {
+    const allTimeframes = ['5m', '15m', '1h', '4h', '1d', '1w'] as const;
+
+    const loadAllTimeframesFVG = async () => {
+      for (const tf of allTimeframes) {
+        // 跳过当前周期（已经由主数据加载处理）
+        if (tf === timeframe) continue;
+
+        try {
+          const limit = (symbol === "BTCUSDC" || symbol === "ETHUSDC") ? 5000 : 1000;
+          const data = await fetchKlines(symbol, tf, limit);
+
+          if (data.length > 0) {
+            // 检测 FVG
+            const fvgs = detectFVGs(data);
+            // 保存到 store（只保存最新的一个）
+            setMultiTimeframeFVG(tf, fvgs[fvgs.length - 1] || null);
+          }
+        } catch (error) {
+          console.error(`Failed to load FVG for ${tf}:`, error);
+        }
+      }
+    };
+
+    // FVG 面板始终需要数据
+    loadAllTimeframesFVG();
+  }, [symbol, timeframe, setMultiTimeframeFVG]);
+
+  // 初始化所有周期的 OB 数据
+  useEffect(() => {
+    const allTimeframes = ['5m', '15m', '1h', '4h', '1d', '1w'] as const;
+
+    const loadAllTimeframesOB = async () => {
+      for (const tf of allTimeframes) {
+        // 跳过当前周期（已经由主数据加载处理）
+        if (tf === timeframe) continue;
+
+        try {
+          const limit = (symbol === "BTCUSDC" || symbol === "ETHUSDC") ? 5000 : 1000;
+          const data = await fetchKlines(symbol, tf, limit);
+
+          if (data.length > 0) {
+            // 检测 Order Blocks
+            const obs = detectOrderBlocks(data);
+            // 保存到 store（按时间排序取最新的一个）
+            const sortedObs = [...obs].sort((a, b) => b.startTime - a.startTime);
+            setMultiTimeframeOB(tf, sortedObs[0] || null);
+          }
+        } catch (error) {
+          console.error(`Failed to load OB for ${tf}:`, error);
+        }
+      }
+    };
+
+    // OB 面板始终需要数据
+    loadAllTimeframesOB();
+  }, [symbol, timeframe, setMultiTimeframeOB]);
 
   // Update ICT Primitives with data
   useEffect(() => {
@@ -645,7 +727,11 @@ export function TradingChart() {
         seriesRef={candleSeriesRef}
         containerRef={chartContainerRef}
       />
-      <OTEPanel />
+      <div className="absolute top-2 right-2 z-10 flex flex-col gap-2">
+        <OTEPanel />
+        <FVGPanel />
+        <OBPanel />
+      </div>
       <MeasurementTool />
     </div>
   );

@@ -8,6 +8,7 @@ export interface OrderBlock {
   endTime?: number;
   mitigated: boolean;
   strength: number;
+  breakTime?: number;  // 被突破变成 breaker 的时间
 }
 
 export interface FVG {
@@ -17,6 +18,7 @@ export interface FVG {
   time: number;
   filled: boolean;
   fillPercentage: number;
+  fib22: number;  // 0.22入场点
 }
 
 export interface BOS {

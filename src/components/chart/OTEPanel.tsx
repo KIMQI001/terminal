@@ -10,7 +10,7 @@ const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d', '1w'] as const;
 
 export function OTEPanel() {
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const { oteZones, multiTimeframeOTE, enabled } = useIndicatorStore();
+  const { oteZones, multiTimeframeOTE } = useIndicatorStore();
   const { candles } = useChartStore();
   const { setPrefillData, setTradingLines, openModal } = useOrderStore();
 
@@ -69,10 +69,8 @@ export function OTEPanel() {
     openModal();
   };
 
-  if (!enabled.ote) return null;
-
   return (
-    <div className="absolute top-2 right-2 z-10 bg-white/95 border border-gray-200 rounded-lg shadow-lg">
+    <div className="bg-white/95 border border-gray-200 rounded-lg shadow-lg">
       {/* 标题栏 - 折叠按钮 */}
       <div
         className="flex items-center justify-between px-3 py-1.5 cursor-pointer hover:bg-gray-50 rounded-t-lg border-b border-gray-100"
@@ -86,7 +84,7 @@ export function OTEPanel() {
       {!isCollapsed && (
         <div className="flex">
           {/* 左侧: Multi-TF */}
-          <div className="px-2 py-2 min-w-[180px]">
+          <div className="px-2 py-2 w-[200px]">
             <div className="text-[10px] font-semibold text-gray-500 mb-1">Multi-TF (点击开单)</div>
             <div className="space-y-0.5">
               <div className="grid grid-cols-4 gap-1 text-[9px] text-gray-400 font-medium pb-0.5 border-b">

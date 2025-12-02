@@ -33,20 +33,28 @@ export function detectFVGs(
             fillPercentage = 100;
             break;
           }
-          // Partial fill
-          if (candles[j].low < candle3.low) {
+          // Partial fill - 追踪最大填充深度（影线触及也算）
+          if (candles[j].low <= candle3.low) {
             const filledAmount = candle3.low - candles[j].low;
-            fillPercentage = Math.min(100, (filledAmount / gapSize) * 100);
+            const currentFill = Math.min(100, (filledAmount / gapSize) * 100);
+            fillPercentage = Math.max(fillPercentage, currentFill);
           }
         }
 
+        const fvgHigh = candle3.low;
+        const fvgLow = candle1.high;
+        const fvgSize = fvgHigh - fvgLow;
+        // 看涨FVG：入场点在高位 - 22%（价格回调到FVG上部买入）
+        const fib22 = fvgHigh - fvgSize * 0.22;
+
         fvgs.push({
           type: "bullish",
-          high: candle3.low,
-          low: candle1.high,
+          high: fvgHigh,
+          low: fvgLow,
           time: candle2.time,
           filled,
           fillPercentage,
+          fib22,
         });
       }
     }
@@ -67,25 +75,33 @@ export function detectFVGs(
             fillPercentage = 100;
             break;
           }
-          // Partial fill
-          if (candles[j].high > candle3.high) {
+          // Partial fill - 追踪最大填充深度（影线触及也算）
+          if (candles[j].high >= candle3.high) {
             const filledAmount = candles[j].high - candle3.high;
-            fillPercentage = Math.min(100, (filledAmount / gapSize) * 100);
+            const currentFill = Math.min(100, (filledAmount / gapSize) * 100);
+            fillPercentage = Math.max(fillPercentage, currentFill);
           }
         }
 
+        const fvgHigh = candle1.low;
+        const fvgLow = candle3.high;
+        const fvgSize = fvgHigh - fvgLow;
+        // 看跌FVG：入场点在低位 + 22%（价格回调到FVG下部卖出）
+        const fib22 = fvgLow + fvgSize * 0.22;
+
         fvgs.push({
           type: "bearish",
-          high: candle1.low,
-          low: candle3.high,
+          high: fvgHigh,
+          low: fvgLow,
           time: candle2.time,
           filled,
           fillPercentage,
+          fib22,
         });
       }
     }
   }
 
-  // Return only recent, unfilled FVGs
-  return fvgs.filter((fvg) => !fvg.filled).slice(-15);
+  // Return only recent FVGs with fill < 80%
+  return fvgs.filter((fvg) => fvg.fillPercentage < 80).slice(-15);
 }
