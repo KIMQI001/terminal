@@ -158,15 +158,15 @@ export function LiquidationPanel() {
     return vol.toFixed(0);
   };
 
-  // 找出局部峰值（山峰）- 比相邻价位清算量都大的点
+  // 找出局部峰值（山峰）- 比相邻价位清算量都大的点，且相邻峰值间距至少 0.2%
   const findPeaks = (levels: LiquidationLevel[], count: number): LiquidationLevel[] => {
     if (levels.length === 0) return [];
 
     // 按价格排序
     const sorted = [...levels].sort((a, b) => a.price - b.price);
 
-    // 找出局部峰值
-    const peaks: LiquidationLevel[] = [];
+    // 找出所有局部峰值
+    const allPeaks: LiquidationLevel[] = [];
     for (let i = 0; i < sorted.length; i++) {
       const prev = sorted[i - 1]?.volume || 0;
       const curr = sorted[i].volume;
@@ -174,19 +174,37 @@ export function LiquidationPanel() {
 
       // 当前值比前后都大，或者是边界且比相邻大
       if (curr > prev && curr > next) {
-        peaks.push(sorted[i]);
+        allPeaks.push(sorted[i]);
       } else if (i === 0 && curr > next) {
-        peaks.push(sorted[i]);
+        allPeaks.push(sorted[i]);
       } else if (i === sorted.length - 1 && curr > prev) {
-        peaks.push(sorted[i]);
+        allPeaks.push(sorted[i]);
       }
     }
 
-    // 按清算量排序取前 N 个峰值
-    return peaks
-      .sort((a, b) => b.volume - a.volume)
-      .slice(0, count)
-      .sort((a, b) => b.price - a.price); // 最后按价格从高到低显示
+    // 按清算量从大到小排序
+    allPeaks.sort((a, b) => b.volume - a.volume);
+
+    // 过滤掉距离太近的峰值（保留较大的）
+    // 最小距离 = 价格的 0.2%（约 200 点对于 BTC）
+    const MIN_DISTANCE_RATIO = 0.002;
+    const filteredPeaks: LiquidationLevel[] = [];
+
+    for (const peak of allPeaks) {
+      const minDistance = peak.price * MIN_DISTANCE_RATIO;
+      const isTooClose = filteredPeaks.some(
+        (p) => Math.abs(p.price - peak.price) < minDistance
+      );
+
+      if (!isTooClose) {
+        filteredPeaks.push(peak);
+      }
+
+      if (filteredPeaks.length >= count) break;
+    }
+
+    // 按价格从高到低显示
+    return filteredPeaks.sort((a, b) => b.price - a.price);
   };
 
   const allLongLevels = data?.levels.filter((l) => l.side === "long") || [];
