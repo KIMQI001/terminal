@@ -146,13 +146,13 @@ export function OrderForm() {
             {isLoadingLeverage ? '...' : `${currentLeverage}x`}
           </span>
         </div>
-        <div className="flex gap-1 flex-wrap">
+        <div className="grid grid-cols-4 gap-2">
           {leverageOptions.map((lev) => (
             <button
               key={lev}
               onClick={() => handleSetLeverage(lev)}
               disabled={isSettingLeverage || isLoadingLeverage}
-              className={`px-2 py-1 text-xs rounded transition-colors ${
+              className={`py-1.5 text-xs font-medium rounded transition-colors ${
                 currentLeverage === lev
                   ? "bg-blue-500 text-white"
                   : "bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--border)]"
