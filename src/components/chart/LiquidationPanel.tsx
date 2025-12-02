@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useChartStore } from "@/stores/chartStore";
+import { useOrderStore, TradingLine } from "@/stores/orderStore";
 import type { LiquidationBar } from "@/lib/chart/primitives";
 
 interface LiquidationLevel {
@@ -30,6 +31,28 @@ export function LiquidationPanel() {
   const [relayStatus, setRelayStatus] = useState<"connected" | "disconnected" | "unknown">("unknown");
 
   const { symbol, setLiquidationData } = useChartStore();
+  const { setPrefillData, setTradingLines, openModal } = useOrderStore();
+
+  // 点击清算价格开单
+  const handleLiqClick = (level: LiquidationLevel) => {
+    const entry = level.price;
+    const side = level.side === "short" ? "sell" : "buy";
+
+    // 空头清算 → 开空单（止损在上，止盈在下）
+    // 多头清算 → 开多单（止损在下，止盈在上）
+    const stopLoss = level.side === "short" ? entry + 1000 : entry - 1000;
+    const takeProfit = level.side === "short" ? entry - 3000 : entry + 3000;
+
+    const lines: TradingLine[] = [
+      { price: entry, type: "entry", side },
+      { price: stopLoss, type: "stopLoss", side },
+      { price: takeProfit, type: "takeProfit", side },
+    ];
+
+    setTradingLines(lines);
+    setPrefillData({ side, entry, stopLoss, takeProfit });
+    openModal();
+  };
 
   // Extract base coin from symbol (e.g., "BTCUSDC" -> "BTC")
   const baseCoin = symbol.replace(/USDC?|USDT?|BUSD?/i, "");
@@ -303,7 +326,8 @@ export function LiquidationPanel() {
                     return (
                       <div
                         key={i}
-                        className={`flex justify-between text-[9px] ${colors.bg} px-1.5 py-0.5 rounded border ${colors.border}`}
+                        onClick={() => handleLiqClick(level)}
+                        className={`flex justify-between text-[9px] ${colors.bg} px-1.5 py-0.5 rounded border ${colors.border} cursor-pointer hover:opacity-80 transition-opacity`}
                       >
                         <span className="font-mono">${level.price.toFixed(0)}</span>
                         <span className={`${colors.text} font-semibold`}>
@@ -329,7 +353,8 @@ export function LiquidationPanel() {
                     return (
                       <div
                         key={i}
-                        className={`flex justify-between text-[9px] ${colors.bg} px-1.5 py-0.5 rounded border ${colors.border}`}
+                        onClick={() => handleLiqClick(level)}
+                        className={`flex justify-between text-[9px] ${colors.bg} px-1.5 py-0.5 rounded border ${colors.border} cursor-pointer hover:opacity-80 transition-opacity`}
                       >
                         <span className="font-mono">${level.price.toFixed(0)}</span>
                         <span className={`${colors.text} font-semibold`}>
