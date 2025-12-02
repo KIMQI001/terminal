@@ -14,6 +14,8 @@ const orderTypes: { value: OrderType; label: string }[] = [
 ];
 
 const leverageOptions = [5, 20, 50, 100];
+const DEFAULT_AMOUNT_PRESETS = [20, 50, 100, 200];
+const STORAGE_KEY = 'order-amount-presets';
 
 export function OrderForm() {
   const { symbol, candles } = useChartStore();
@@ -28,6 +30,25 @@ export function OrderForm() {
   const [takeProfit, setTakeProfit] = useState<string>("");
 
   const [isSettingLeverage, setIsSettingLeverage] = useState(false);
+  const [amountPresets, setAmountPresets] = useState<number[]>(DEFAULT_AMOUNT_PRESETS);
+  const [isEditingPresets, setIsEditingPresets] = useState(false);
+  const [editingPresets, setEditingPresets] = useState<string[]>(['20', '50', '100', '200']);
+
+  // 从 localStorage 加载预设值
+  useEffect(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length === 4) {
+          setAmountPresets(parsed);
+          setEditingPresets(parsed.map(String));
+        }
+      } catch {
+        // 忽略解析错误
+      }
+    }
+  }, []);
 
   const lastPrice = candles[candles.length - 1]?.close || 0;
   const baseAsset = symbol.replace("USDT", "").replace("USDC", "");
@@ -92,10 +113,25 @@ export function OrderForm() {
     return (usd * currentLeverage) / p;
   }, [orderType, price, amountUSD, lastPrice, currentLeverage]);
 
-  const handlePercentage = (percent: number) => {
-    if (!quoteBalance) return;
-    const maxUSD = (quoteBalance.free * percent) / 100;
-    setAmountUSD(maxUSD.toFixed(2));
+  // 点击预设金额
+  const handlePresetAmount = (amount: number) => {
+    setAmountUSD(amount.toString());
+  };
+
+  // 保存预设值
+  const handleSavePresets = () => {
+    const newPresets = editingPresets.map(v => parseInt(v) || 0).filter(v => v > 0);
+    if (newPresets.length === 4) {
+      setAmountPresets(newPresets);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(newPresets));
+      setIsEditingPresets(false);
+    }
+  };
+
+  // 取消编辑
+  const handleCancelEdit = () => {
+    setEditingPresets(amountPresets.map(String));
+    setIsEditingPresets(false);
   };
 
   const handleSubmit = async (side: OrderSide) => {
@@ -216,12 +252,70 @@ export function OrderForm() {
 
       {/* 金额输入 */}
       <div className="space-y-1.5">
-        <div className="flex justify-between">
-          <label className="text-xs text-[var(--text-secondary)]">金额</label>
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-[var(--text-secondary)]">金额</label>
+            {!isEditingPresets && (
+              <button
+                onClick={() => setIsEditingPresets(true)}
+                className="text-xs text-blue-500 hover:text-blue-600"
+              >
+                编辑
+              </button>
+            )}
+          </div>
           <span className="text-xs text-[var(--text-secondary)]">
             可用: {quoteBalance?.free.toLocaleString() || 0} {quoteAsset}
           </span>
         </div>
+
+        {/* 金额预设按钮 */}
+        {isEditingPresets ? (
+          <div className="space-y-2">
+            <div className="grid grid-cols-4 gap-1">
+              {editingPresets.map((value, index) => (
+                <input
+                  key={index}
+                  type="number"
+                  value={value}
+                  onChange={(e) => {
+                    const newPresets = [...editingPresets];
+                    newPresets[index] = e.target.value;
+                    setEditingPresets(newPresets);
+                  }}
+                  className="w-full py-1 px-2 text-xs text-center bg-[var(--bg-tertiary)] border border-[var(--border)] rounded focus:outline-none focus:border-blue-500"
+                />
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleSavePresets}
+                className="flex-1 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+              >
+                保存
+              </button>
+              <button
+                onClick={handleCancelEdit}
+                className="flex-1 py-1 text-xs bg-[var(--bg-tertiary)] rounded hover:bg-[var(--border)] transition-colors"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-4 gap-1">
+            {amountPresets.map((amount) => (
+              <button
+                key={amount}
+                onClick={() => handlePresetAmount(amount)}
+                className="py-1.5 text-xs bg-[var(--bg-tertiary)] rounded hover:bg-[var(--border)] transition-colors"
+              >
+                {amount}
+              </button>
+            ))}
+          </div>
+        )}
+
         <Input
           type="number"
           placeholder="金额"
@@ -231,17 +325,6 @@ export function OrderForm() {
         />
         <div className="text-xs text-[var(--text-secondary)]">
           ≈ {coinQuantity.toLocaleString(undefined, { maximumFractionDigits: 6 })} {baseAsset}
-        </div>
-        <div className="flex gap-1">
-          {[25, 50, 75, 100].map((percent) => (
-            <button
-              key={percent}
-              onClick={() => handlePercentage(percent)}
-              className="flex-1 py-1 text-xs bg-[var(--bg-tertiary)] rounded hover:bg-[var(--border)] transition-colors"
-            >
-              {percent}%
-            </button>
-          ))}
         </div>
       </div>
 
