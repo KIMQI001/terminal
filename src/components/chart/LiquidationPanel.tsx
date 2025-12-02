@@ -99,10 +99,10 @@ export function LiquidationPanel() {
               // 价格 > 当前价（索引 > lastIndex）：空头清算区
               const side: "long" | "short" = middleIndex < lastIndex ? "long" : "short";
 
-              // 风险等级
+              // 风险等级（根据实际数据范围调整）
               const risk: "h1" | "h2" | "h3" =
-                totalAmount > 100e6 ? "h1" :
-                totalAmount > 50e6 ? "h2" : "h3";
+                totalAmount > 800e6 ? "h1" :
+                totalAmount > 500e6 ? "h2" : "h3";
 
               levels.push({ price, volume: totalAmount, side, risk });
             }
