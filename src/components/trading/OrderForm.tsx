@@ -13,10 +13,12 @@ const orderTypes: { value: OrderType; label: string }[] = [
   { value: "market", label: "市价" },
 ];
 
+const leverageOptions = [1, 5, 10, 20, 50, 75, 100, 125];
+
 export function OrderForm() {
   const { symbol, candles } = useChartStore();
   const { addOrder, closeModal, prefillData, setPrefillData, setTradingLines } = useOrderStore();
-  const { getBalance } = usePositionStore();
+  const { getBalance, currentLeverage, isLoadingLeverage, fetchLeverage, setLeverage } = usePositionStore();
 
   const [orderType, setOrderType] = useState<OrderType>("limit");
   const [selectedSide, setSelectedSide] = useState<OrderSide | null>(null);
@@ -25,8 +27,24 @@ export function OrderForm() {
   const [stopLoss, setStopLoss] = useState<string>("");
   const [takeProfit, setTakeProfit] = useState<string>("");
 
+  const [isSettingLeverage, setIsSettingLeverage] = useState(false);
+
   const lastPrice = candles[candles.length - 1]?.close || 0;
   const baseAsset = symbol.replace("USDT", "").replace("USDC", "");
+
+  // 获取当前杠杆
+  useEffect(() => {
+    if (symbol) {
+      fetchLeverage(symbol);
+    }
+  }, [symbol, fetchLeverage]);
+
+  // 设置杠杆
+  const handleSetLeverage = async (leverage: number) => {
+    setIsSettingLeverage(true);
+    await setLeverage(symbol, leverage);
+    setIsSettingLeverage(false);
+  };
 
   // 根据交易对判断使用 USDC 还是 USDT
   const quoteAsset = symbol.endsWith("USDC") ? "USDC" : "USDT";
@@ -115,6 +133,32 @@ export function OrderForm() {
             {type.label}
           </button>
         ))}
+      </div>
+
+      {/* 杠杆设置 */}
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label className="text-xs text-[var(--text-secondary)]">杠杆</label>
+          <span className="text-xs font-semibold text-[var(--text-primary)]">
+            {isLoadingLeverage ? '...' : `${currentLeverage}x`}
+          </span>
+        </div>
+        <div className="flex gap-1 flex-wrap">
+          {leverageOptions.map((lev) => (
+            <button
+              key={lev}
+              onClick={() => handleSetLeverage(lev)}
+              disabled={isSettingLeverage || isLoadingLeverage}
+              className={`px-2 py-1 text-xs rounded transition-colors ${
+                currentLeverage === lev
+                  ? "bg-blue-500 text-white"
+                  : "bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--border)]"
+              } ${(isSettingLeverage || isLoadingLeverage) ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              {lev}x
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* 方向指示 (来自OTE) */}

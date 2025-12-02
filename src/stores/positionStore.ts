@@ -6,6 +6,8 @@ interface PositionState {
   positions: Position[];
   balances: Balance[];
   isLoadingBalances: boolean;
+  currentLeverage: number;
+  isLoadingLeverage: boolean;
 
   // Actions
   addPosition: (position: Omit<Position, "id" | "unrealizedPnl" | "unrealizedPnlPercent">) => void;
@@ -15,12 +17,16 @@ interface PositionState {
   setBalances: (balances: Balance[]) => void;
   getBalance: (asset: string) => Balance | undefined;
   fetchBalances: () => Promise<void>;
+  fetchLeverage: (symbol: string) => Promise<void>;
+  setLeverage: (symbol: string, leverage: number) => Promise<boolean>;
 }
 
 export const usePositionStore = create<PositionState>((set, get) => ({
   positions: [],
   balances: [],
   isLoadingBalances: false,
+  currentLeverage: 20,
+  isLoadingLeverage: false,
 
   addPosition: (positionData) => {
     const pnl = (positionData.currentPrice - positionData.entryPrice) * positionData.quantity;
@@ -109,6 +115,70 @@ export const usePositionStore = create<PositionState>((set, get) => ({
       console.error('Failed to fetch balances:', error);
     } finally {
       set({ isLoadingBalances: false });
+    }
+  },
+
+  fetchLeverage: async (symbol: string) => {
+    const token = useUserStore.getState().token;
+    if (!token) {
+      console.log('No token found, skipping leverage fetch');
+      return;
+    }
+
+    set({ isLoadingLeverage: true });
+
+    try {
+      const response = await fetch(`/api/user/leverage?symbol=${symbol}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        set({ currentLeverage: data.leverage });
+      }
+    } catch (error) {
+      console.error('Failed to fetch leverage:', error);
+    } finally {
+      set({ isLoadingLeverage: false });
+    }
+  },
+
+  setLeverage: async (symbol: string, leverage: number) => {
+    const token = useUserStore.getState().token;
+    if (!token) {
+      console.log('No token found, cannot set leverage');
+      return false;
+    }
+
+    set({ isLoadingLeverage: true });
+
+    try {
+      const response = await fetch('/api/user/leverage', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ symbol, leverage }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        set({ currentLeverage: data.leverage });
+        return true;
+      } else {
+        console.error('Failed to set leverage:', data.error);
+        return false;
+      }
+    } catch (error) {
+      console.error('Failed to set leverage:', error);
+      return false;
+    } finally {
+      set({ isLoadingLeverage: false });
     }
   },
 }));

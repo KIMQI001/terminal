@@ -9,7 +9,8 @@ const KEY_LENGTH = 32;
 
 // 从环境变量获取加密主密钥
 function getMasterKey(): string {
-  const envKey = process.env.API_ENCRYPTION_KEY;
+  // 优先使用 API_ENCRYPTION_KEY，向后兼容 ENCRYPTION_KEY
+  const envKey = process.env.API_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY;
   if (envKey) {
     return envKey;
   }
