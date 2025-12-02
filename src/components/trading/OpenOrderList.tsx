@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { useOrderStore, RealOrder } from "@/stores/orderStore";
 import { useChartStore } from "@/stores/chartStore";
@@ -14,6 +14,45 @@ const orderTypeLabels: Record<string, string> = {
   "take-profit_market": "止盈",
   "stop-limit": "止损限价",
   "stop_limit": "止损限价",
+};
+
+// 获取订单类型优先级（限价 < 止盈 < 止损）
+const getTypeOrder = (type: string): number => {
+  if (type.includes('limit') && !type.includes('stop')) return 0;
+  if (type.includes('profit')) return 1;
+  if (type.includes('stop')) return 2;
+  return 3;
+};
+
+// 按数量和时间分组订单
+const groupOrders = (orders: RealOrder[]): RealOrder[][] => {
+  if (orders.length === 0) return [];
+
+  const groups: RealOrder[][] = [];
+  const used = new Set<string>();
+
+  // 按时间排序
+  const sorted = [...orders].sort((a, b) => b.time - a.time);
+
+  for (const order of sorted) {
+    if (used.has(order.id)) continue;
+
+    // 找同数量且同时间（1秒内）的订单
+    const group = sorted.filter(o =>
+      !used.has(o.id) &&
+      o.quantity === order.quantity &&
+      Math.abs(o.time - order.time) < 2000 // 2秒内
+    );
+
+    group.forEach(o => used.add(o.id));
+
+    // 组内按类型排序：限价 → 止盈 → 止损
+    group.sort((a, b) => getTypeOrder(a.type) - getTypeOrder(b.type));
+
+    groups.push(group);
+  }
+
+  return groups;
 };
 
 export function OpenOrderList() {
@@ -72,8 +111,11 @@ export function OpenOrderList() {
     );
   }
 
+  // 分组订单
+  const orderGroups = useMemo(() => groupOrders(realOrders), [realOrders]);
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <div className="flex justify-end gap-2 mb-2">
         <Button
           variant="outline"
@@ -88,62 +130,64 @@ export function OpenOrderList() {
           刷新
         </Button>
       </div>
-      {realOrders.map((order: RealOrder) => (
+
+      {orderGroups.map((group, groupIndex) => (
         <div
-          key={order.id}
-          className="p-3 bg-[var(--bg-tertiary)] rounded-lg space-y-2"
+          key={groupIndex}
+          className="border border-[var(--border)] rounded-lg overflow-hidden"
         >
-          <div className="flex items-center justify-between">
+          {/* 组头：显示交易对、方向、数量 */}
+          <div className="px-3 py-1.5 bg-[var(--bg-secondary)] flex items-center justify-between text-xs">
             <div className="flex items-center gap-2">
-              <span className="font-medium text-sm">{order.symbol}</span>
-              <span className={`text-xs px-1.5 py-0.5 rounded ${
-                order.type.includes('stop')
-                  ? 'bg-red-100 text-red-600'
-                  : order.type.includes('take-profit') || order.type.includes('profit')
-                  ? 'bg-green-100 text-green-600'
-                  : 'bg-gray-100 text-gray-600'
+              <span className="font-medium">{group[0]?.symbol}</span>
+              <span className={`px-1.5 py-0.5 rounded ${
+                group[0]?.positionSide === 'LONG'
+                  ? 'bg-blue-100 text-blue-600'
+                  : 'bg-purple-100 text-purple-600'
               }`}>
-                {orderTypeLabels[order.type] || order.type}
+                {group[0]?.positionSide === 'LONG' ? '做多' : '做空'}
               </span>
-              <span
-                className={`text-xs px-1.5 py-0.5 rounded ${
-                  order.side === "buy"
-                    ? "bg-[var(--positive)]/10 text-[var(--positive)]"
-                    : "bg-[var(--negative)]/10 text-[var(--negative)]"
-                }`}
-              >
-                {order.side === "buy" ? "买" : "卖"}
-              </span>
-              <span className="text-xs text-gray-400">
-                {order.positionSide === 'LONG' ? '多' : '空'}
+              <span className="text-[var(--text-secondary)]">
+                数量: {group[0]?.quantity}
               </span>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-6 text-xs"
-              disabled={cancellingId === order.id}
-              onClick={() => handleCancel(order.id, order.symbol)}
-            >
-              {cancellingId === order.id ? '取消中...' : '取消'}
-            </Button>
+            <span className="text-[var(--text-secondary)]">
+              {new Date(group[0]?.time).toLocaleTimeString()}
+            </span>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 text-xs">
-            <div>
-              <div className="text-[var(--text-secondary)]">
-                {order.stopPrice ? '触发价' : '价格'}
+          {/* 组内订单 */}
+          <div className="divide-y divide-[var(--border)]">
+            {group.map((order) => (
+              <div
+                key={order.id}
+                className="px-3 py-2 flex items-center justify-between bg-[var(--bg-tertiary)]"
+              >
+                <div className="flex items-center gap-3">
+                  <span className={`text-xs px-1.5 py-0.5 rounded min-w-[40px] text-center ${
+                    order.type.includes('stop')
+                      ? 'bg-red-100 text-red-600'
+                      : order.type.includes('profit')
+                      ? 'bg-green-100 text-green-600'
+                      : 'bg-gray-100 text-gray-600'
+                  }`}>
+                    {orderTypeLabels[order.type] || order.type}
+                  </span>
+                  <span className="text-sm font-mono">
+                    {(order.stopPrice || order.price)?.toLocaleString() || "-"}
+                  </span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-xs text-gray-500 hover:text-red-500"
+                  disabled={cancellingId === order.id}
+                  onClick={() => handleCancel(order.id, order.symbol)}
+                >
+                  {cancellingId === order.id ? '...' : '×'}
+                </Button>
               </div>
-              <div>{(order.stopPrice || order.price)?.toLocaleString() || "-"}</div>
-            </div>
-            <div>
-              <div className="text-[var(--text-secondary)]">数量</div>
-              <div>{order.quantity}</div>
-            </div>
-            <div>
-              <div className="text-[var(--text-secondary)]">时间</div>
-              <div>{new Date(order.time).toLocaleTimeString()}</div>
-            </div>
+            ))}
           </div>
         </div>
       ))}
