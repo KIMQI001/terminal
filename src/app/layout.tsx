@@ -5,6 +5,9 @@ import { Providers } from "./providers";
 export const metadata: Metadata = {
   title: "Trading Terminal",
   description: "Professional trading terminal with ICT indicators",
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
