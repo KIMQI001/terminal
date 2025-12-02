@@ -7,6 +7,7 @@ interface LiquidationLevel {
   price: number;
   volume: number;
   side: "long" | "short";
+  risk: "h1" | "h2" | "h3";  // h1=高风险红色, h2=中风险橙色, h3=低风险黄色
 }
 
 interface LiquidationData {
@@ -61,25 +62,48 @@ export function LiquidationPanel() {
         const rawData = result.data;
         const levels: LiquidationLevel[] = [];
 
-        // CoinAnk API returns: { prices: [...], Binance: [...], Bybit: [...], lastPrice, lastIndex }
-        // Each exchange array has format: [long1, short1, 0, 0, 0, long2, short2, 0, 0, 0, ...]
-        // Every 5 elements represent one price level: [long, short, 0, 0, 0]
+        // CoinAnk API returns: { prices: [...], Binance: [...], lastPrice, lastIndex }
+        // lastIndex: 当前价格在 prices 数组中的索引，用于区分多空
+        // - 索引 < lastIndex: 多头清算区（价格下方，做多被清算）
+        // - 索引 > lastIndex: 空头清算区（价格上方，做空被清算）
         const prices = rawData.prices as number[] | undefined;
         const binanceData = rawData.Binance as number[] | undefined;
+        const lastIndex = rawData.lastIndex as number | undefined;
 
-        if (prices && binanceData) {
-          // Parse Binance data (most liquid exchange)
-          for (let i = 0; i < prices.length && i * 5 < binanceData.length; i++) {
-            const price = prices[i];
-            const dataIndex = i * 5;
-            const longVol = binanceData[dataIndex] || 0;
-            const shortVol = binanceData[dataIndex + 1] || 0;
+        if (prices && binanceData && lastIndex !== undefined) {
+          // 推断索引乘数（每5个元素为一组）
+          const indexMultiplier = binanceData.length === prices.length ? 1 : 5;
+          const GROUP_SIZE = 10; // 每10个价格点聚合为一组
 
-            if (longVol > 0) {
-              levels.push({ price, volume: longVol, side: "long" });
+          // 按价格区间聚合
+          for (let groupStart = 0; groupStart < prices.length; groupStart += GROUP_SIZE) {
+            const groupEnd = Math.min(groupStart + GROUP_SIZE, prices.length);
+            let totalAmount = 0;
+
+            // 聚合该区间内的清算量
+            for (let i = groupStart; i < groupEnd; i++) {
+              const dataIndex = i * indexMultiplier;
+              if (dataIndex < binanceData.length) {
+                totalAmount += binanceData[dataIndex] || 0;
+              }
             }
-            if (shortVol > 0) {
-              levels.push({ price, volume: shortVol, side: "short" });
+
+            if (totalAmount > 0) {
+              // 取区间中点的价格
+              const middleIndex = Math.floor((groupStart + groupEnd) / 2);
+              const price = prices[middleIndex] || prices[groupStart];
+
+              // 根据 lastIndex 判断多空
+              // 价格 < 当前价（索引 < lastIndex）：多头清算区
+              // 价格 > 当前价（索引 > lastIndex）：空头清算区
+              const side: "long" | "short" = middleIndex < lastIndex ? "long" : "short";
+
+              // 风险等级
+              const risk: "h1" | "h2" | "h3" =
+                totalAmount > 100e6 ? "h1" :
+                totalAmount > 50e6 ? "h2" : "h3";
+
+              levels.push({ price, volume: totalAmount, side, risk });
             }
           }
         }
@@ -138,6 +162,17 @@ export function LiquidationPanel() {
     disconnected: "bg-red-500",
     unknown: "bg-gray-400",
   }[relayStatus];
+
+  // Risk level colors
+  const getRiskColor = (risk: "h1" | "h2" | "h3", side: "long" | "short") => {
+    // h1=高风险, h2=中风险, h3=低风险
+    const riskColors = {
+      h1: { bg: "bg-red-100", text: "text-red-600", border: "border-red-300" },
+      h2: { bg: "bg-orange-100", text: "text-orange-600", border: "border-orange-300" },
+      h3: { bg: "bg-yellow-100", text: "text-yellow-600", border: "border-yellow-300" },
+    };
+    return riskColors[risk];
+  };
 
   return (
     <div className="bg-white/95 border border-gray-200 rounded-lg shadow-lg">
@@ -201,46 +236,52 @@ export function LiquidationPanel() {
           {/* Data */}
           {data && topLevels.length > 0 ? (
             <div className="flex gap-3">
-              {/* Long liquidations */}
+              {/* Long liquidations - 多头清算区（价格下方） */}
               <div className="flex-1">
-                <div className="text-[10px] font-semibold text-green-600 mb-1">
+                <div className="text-[10px] font-semibold text-blue-600 mb-1">
                   Long Liq ({longLevels.length})
                 </div>
                 <div className="space-y-0.5">
-                  {longLevels.map((level, i) => (
-                    <div
-                      key={i}
-                      className="flex justify-between text-[9px] bg-green-50 px-1.5 py-0.5 rounded"
-                    >
-                      <span className="font-mono">${level.price.toFixed(0)}</span>
-                      <span className="text-green-600 font-semibold">
-                        {formatVolume(level.volume)}
-                      </span>
-                    </div>
-                  ))}
+                  {longLevels.map((level, i) => {
+                    const colors = getRiskColor(level.risk, level.side);
+                    return (
+                      <div
+                        key={i}
+                        className={`flex justify-between text-[9px] ${colors.bg} px-1.5 py-0.5 rounded border ${colors.border}`}
+                      >
+                        <span className="font-mono">${level.price.toFixed(0)}</span>
+                        <span className={`${colors.text} font-semibold`}>
+                          {formatVolume(level.volume)}
+                        </span>
+                      </div>
+                    );
+                  })}
                   {longLevels.length === 0 && (
                     <div className="text-[9px] text-gray-400">No data</div>
                   )}
                 </div>
               </div>
 
-              {/* Short liquidations */}
+              {/* Short liquidations - 空头清算区（价格上方） */}
               <div className="flex-1">
-                <div className="text-[10px] font-semibold text-red-600 mb-1">
+                <div className="text-[10px] font-semibold text-orange-600 mb-1">
                   Short Liq ({shortLevels.length})
                 </div>
                 <div className="space-y-0.5">
-                  {shortLevels.map((level, i) => (
-                    <div
-                      key={i}
-                      className="flex justify-between text-[9px] bg-red-50 px-1.5 py-0.5 rounded"
-                    >
-                      <span className="font-mono">${level.price.toFixed(0)}</span>
-                      <span className="text-red-600 font-semibold">
-                        {formatVolume(level.volume)}
-                      </span>
-                    </div>
-                  ))}
+                  {shortLevels.map((level, i) => {
+                    const colors = getRiskColor(level.risk, level.side);
+                    return (
+                      <div
+                        key={i}
+                        className={`flex justify-between text-[9px] ${colors.bg} px-1.5 py-0.5 rounded border ${colors.border}`}
+                      >
+                        <span className="font-mono">${level.price.toFixed(0)}</span>
+                        <span className={`${colors.text} font-semibold`}>
+                          {formatVolume(level.volume)}
+                        </span>
+                      </div>
+                    );
+                  })}
                   {shortLevels.length === 0 && (
                     <div className="text-[9px] text-gray-400">No data</div>
                   )}
