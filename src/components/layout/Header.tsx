@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User } from "lucide-react";
+import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -16,7 +16,7 @@ import { useMeasurementStore } from "@/stores/measurementStore";
 import { useUserStore } from "@/stores/userStore";
 import { Timeframe } from "@/types/chart";
 import { IndicatorState } from "@/types/indicator";
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 const timeframes: { value: Timeframe; label: string }[] = [
   { value: "5m", label: "5m" },
@@ -48,6 +48,25 @@ export function Header() {
   const { isAuthenticated, user, openSettings } = useUserStore();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // 监听全屏状态变化
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  // 切换全屏
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen();
+    } else {
+      document.exitFullscreen();
+    }
+  }, []);
 
   const handleSymbolChange = (newSymbol: string) => {
     setSymbol(newSymbol.toUpperCase());
@@ -185,6 +204,20 @@ export function Header() {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* 全屏按钮 */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={toggleFullscreen}
+          title={isFullscreen ? "退出全屏" : "全屏显示"}
+        >
+          {isFullscreen ? (
+            <Minimize2 className="w-3 h-3" />
+          ) : (
+            <Maximize2 className="w-3 h-3" />
+          )}
+        </Button>
 
         {/* 用户/设置按钮 */}
         <Button

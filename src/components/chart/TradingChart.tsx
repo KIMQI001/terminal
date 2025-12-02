@@ -14,6 +14,7 @@ import { useChartStore } from "@/stores/chartStore";
 import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useMeasurementStore } from "@/stores/measurementStore";
 import { useOrderStore } from "@/stores/orderStore";
+import { usePositionStore } from "@/stores/positionStore";
 import { MeasurementTool } from "./MeasurementTool";
 import { ICTOverlay } from "./ICTOverlay";
 import { OTEPanel } from "./OTEPanel";
@@ -103,7 +104,8 @@ export function TradingChart() {
     clearMeasurement,
   } = useMeasurementStore();
 
-  const { tradingLines } = useOrderStore();
+  const { tradingLines, realOrders } = useOrderStore();
+  const { positions } = usePositionStore();
 
   // 监听 Shift 键
   useEffect(() => {
@@ -569,7 +571,7 @@ export function TradingChart() {
     }
   }, [swingPoints, enabled.swingPoints]);
 
-  // Update Trading Lines (Entry, Stop Loss, Take Profit)
+  // Update Trading Lines (Entry, Stop Loss, Take Profit, Orders, Positions)
   useEffect(() => {
     if (!candleSeriesRef.current) return;
 
@@ -579,22 +581,87 @@ export function TradingChart() {
     });
     priceLinesRef.current = [];
 
-    // 绘制新的价格线
+    const currentSymbol = symbol.replace('/', '');
+
+    // 1. 显示持仓入场价格（实线）
+    const currentPositions = positions.filter(p => p.symbol === currentSymbol);
+    currentPositions.forEach((pos) => {
+      if (!candleSeriesRef.current) return;
+      const priceLine = candleSeriesRef.current.createPriceLine({
+        price: pos.entryPrice,
+        color: pos.side === 'long' ? '#3b82f6' : '#a855f7',
+        lineWidth: 2,
+        lineStyle: 0, // 实线
+        axisLabelVisible: true,
+        title: `持仓 ${pos.quantity}`,
+      });
+      priceLinesRef.current.push(priceLine);
+    });
+
+    // 2. 显示限价挂单（虚线）
+    realOrders
+      .filter(o => o.symbol === currentSymbol && o.type.toLowerCase() === 'limit')
+      .forEach((order) => {
+        if (!candleSeriesRef.current || !order.price) return;
+        const priceLine = candleSeriesRef.current.createPriceLine({
+          price: order.price,
+          color: order.positionSide === 'LONG' ? '#3b82f6' : '#a855f7',
+          lineWidth: 1,
+          lineStyle: 2, // 虚线
+          axisLabelVisible: true,
+          title: `限价 ${order.quantity}`,
+        });
+        priceLinesRef.current.push(priceLine);
+      });
+
+    // 3. 显示止盈止损挂单（仅当有持仓时）
+    if (currentPositions.length > 0) {
+      realOrders
+        .filter(o => o.symbol === currentSymbol)
+        .forEach((order) => {
+          if (!candleSeriesRef.current) return;
+          const price = order.stopPrice || order.price;
+          if (!price) return;
+
+          if (order.type.toLowerCase().includes('profit')) {
+            const priceLine = candleSeriesRef.current.createPriceLine({
+              price,
+              color: '#22c55e', // 绿色
+              lineWidth: 1,
+              lineStyle: 2,
+              axisLabelVisible: true,
+              title: 'TP',
+            });
+            priceLinesRef.current.push(priceLine);
+          } else if (order.type.toLowerCase().includes('stop') && !order.type.toLowerCase().includes('profit')) {
+            const priceLine = candleSeriesRef.current.createPriceLine({
+              price,
+              color: '#ef4444', // 红色
+              lineWidth: 1,
+              lineStyle: 2,
+              axisLabelVisible: true,
+              title: 'SL',
+            });
+            priceLinesRef.current.push(priceLine);
+          }
+        });
+    }
+
+    // 4. 显示手动输入的交易线（原有逻辑）
     if (tradingLines.length > 0) {
       tradingLines.forEach((line) => {
         if (!candleSeriesRef.current) return;
 
-        // 根据类型设置颜色和标签
         let color: string;
         let title: string;
         if (line.type === "entry") {
-          color = line.side === "buy" ? "#3b82f6" : "#a855f7"; // 蓝色/紫色
+          color = line.side === "buy" ? "#3b82f6" : "#a855f7";
           title = "Entry";
         } else if (line.type === "stopLoss") {
-          color = "#ef4444"; // 红色
+          color = "#ef4444";
           title = "SL";
         } else {
-          color = "#22c55e"; // 绿色
+          color = "#22c55e";
           title = "TP";
         }
 
@@ -602,7 +669,7 @@ export function TradingChart() {
           price: line.price,
           color,
           lineWidth: 1,
-          lineStyle: 2, // 虚线
+          lineStyle: 2,
           axisLabelVisible: true,
           title,
         });
@@ -610,7 +677,7 @@ export function TradingChart() {
         priceLinesRef.current.push(priceLine);
       });
     }
-  }, [tradingLines]);
+  }, [tradingLines, realOrders, positions, symbol]);
 
   // 测量模式或 Shift 按下时禁用图表拖动
   const shouldDisableChartInteraction = phase === "drawing" || (canStartMeasure && phase === "idle");
