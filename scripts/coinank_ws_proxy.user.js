@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CoinAnk WebSocket 代理 (推荐)
 // @namespace    http://tampermonkey.net/
-// @version      3.1.0
+// @version      3.2.0
 // @description  通过 WebSocket 连接后端，作为 CoinAnk API 代理
 // @author       ICT Trading System
 // @match        https://coinank.com/*
@@ -103,6 +103,13 @@
     const MAX_RECONNECT_ATTEMPTS = 5;
     const RECONNECT_DELAY = 3000; // 3秒
 
+    // 心跳配置
+    const HEARTBEAT_INTERVAL = 30000; // 30秒发送一次心跳
+    const HEARTBEAT_TIMEOUT = 10000;  // 10秒内没有收到 pong 则认为连接断开
+    let heartbeatTimer = null;
+    let heartbeatTimeoutTimer = null;
+    let lastPongTime = null;
+
     // ============================================
     // 工具函数
     // ============================================
@@ -185,6 +192,53 @@
     }
 
     // ============================================
+    // 心跳管理
+    // ============================================
+
+    function startHeartbeat() {
+        stopHeartbeat(); // 先清理旧的定时器
+        lastPongTime = Date.now();
+
+        heartbeatTimer = setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                log('💓 发送心跳 ping...');
+                ws.send(JSON.stringify({ action: 'ping' }));
+
+                // 设置心跳超时检测
+                heartbeatTimeoutTimer = setTimeout(() => {
+                    const timeSinceLastPong = Date.now() - lastPongTime;
+                    if (timeSinceLastPong > HEARTBEAT_TIMEOUT) {
+                        error(`💔 心跳超时 (${Math.round(timeSinceLastPong / 1000)}秒未收到 pong)，主动断开重连...`);
+                        ws.close();
+                    }
+                }, HEARTBEAT_TIMEOUT);
+            }
+        }, HEARTBEAT_INTERVAL);
+
+        log('💓 心跳检测已启动 (间隔: ' + HEARTBEAT_INTERVAL / 1000 + '秒, 超时: ' + HEARTBEAT_TIMEOUT / 1000 + '秒)');
+    }
+
+    function stopHeartbeat() {
+        if (heartbeatTimer) {
+            clearInterval(heartbeatTimer);
+            heartbeatTimer = null;
+        }
+        if (heartbeatTimeoutTimer) {
+            clearTimeout(heartbeatTimeoutTimer);
+            heartbeatTimeoutTimer = null;
+        }
+    }
+
+    function handlePong() {
+        lastPongTime = Date.now();
+        if (heartbeatTimeoutTimer) {
+            clearTimeout(heartbeatTimeoutTimer);
+            heartbeatTimeoutTimer = null;
+        }
+        log('💓 收到心跳 pong');
+    }
+
+    // ============================================
     // WebSocket 连接管理
     // ============================================
 
@@ -200,12 +254,8 @@
             log('═══════════════════════════════════════');
             reconnectAttempts = 0;
 
-            // 发送心跳
-            setInterval(() => {
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ action: 'ping' }));
-                }
-            }, 30000);
+            // 启动心跳检测
+            startHeartbeat();
         };
 
         ws.onmessage = async function(event) {
@@ -213,12 +263,19 @@
                 const message = JSON.parse(event.data);
                 log('📥 收到服务器消息:', message.action);
 
+                // 处理心跳响应
+                if (message.action === 'pong') {
+                    handlePong();
+                    return;
+                }
+
                 if (message.action === 'fetch') {
                     // 后端请求数据
                     const symbol = message.symbol || 'BTC';
                     const interval = message.interval || '1d';
                     const requestId = message.request_id;
 
+                    log(`🆔 Request ID: ${requestId}`);
                     log(`🎯 执行数据请求: ${symbol} @ ${interval}`);
 
                     try {
@@ -247,11 +304,11 @@
                         log(`📦 响应预览:`, JSON.stringify(response).substring(0, 300) + '...');
 
                         ws.send(JSON.stringify(response));
-                        log(`✅ 数据已发送到后端: ${symbol}`);
+                        log(`✅ 数据已发送到后端: ${symbol} (Request ID: ${requestId})`);
 
                     } catch (err) {
                         // 发送错误给后端
-                        error(`❌ 请求失败: ${err.message}`);
+                        error(`❌ 请求失败: ${err.message} (Request ID: ${requestId})`);
 
                         const response = {
                             action: 'error',
@@ -277,6 +334,9 @@
 
         ws.onclose = function() {
             log('🔌 WebSocket 已断开');
+
+            // 停止心跳
+            stopHeartbeat();
 
             // 自动重连
             if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {

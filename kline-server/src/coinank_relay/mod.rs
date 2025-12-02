@@ -87,9 +87,10 @@ impl CoinankRelayState {
         symbol: &str,
         interval: &str,
         timeout_secs: u64,
+        request_id: &str,
     ) -> Result<RelayMessage, String> {
-        // 生成请求 ID
-        let request_id = uuid::Uuid::new_v4().to_string();
+        // 使用传入的请求 ID
+        let request_id = request_id.to_string();
 
         // 创建响应通道
         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -276,7 +277,7 @@ async fn handle_api_socket(socket: WebSocket, state: Arc<CoinankRelayState>) {
                             info!("[CoinAnk] Fetch request: {}@{} ({})", symbol, interval, request_id);
 
                             // 转发请求到油猴客户端
-                            let response = match state.send_request(&symbol, &interval, 30).await {
+                            let response = match state.send_request(&symbol, &interval, 30, &request_id).await {
                                 Ok(data) => data,
                                 Err(e) => RelayMessage::Error {
                                     request_id,
