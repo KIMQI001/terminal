@@ -25,6 +25,38 @@ function generateBinanceSignature(queryString: string, apiSecret: string): strin
   return crypto.createHmac('sha256', apiSecret).update(queryString).digest('hex');
 }
 
+// 交易对精度配置（常用交易对）
+const SYMBOL_PRECISION: Record<string, { quantity: number; price: number }> = {
+  'BTCUSDT': { quantity: 3, price: 1 },
+  'ETHUSDT': { quantity: 3, price: 2 },
+  'BNBUSDT': { quantity: 2, price: 2 },
+  'SOLUSDT': { quantity: 0, price: 2 },
+  'XRPUSDT': { quantity: 1, price: 4 },
+  'DOGEUSDT': { quantity: 0, price: 5 },
+  'ADAUSDT': { quantity: 0, price: 4 },
+  'AVAXUSDT': { quantity: 1, price: 2 },
+  'DOTUSDT': { quantity: 1, price: 3 },
+  'LINKUSDT': { quantity: 1, price: 3 },
+  'MATICUSDT': { quantity: 0, price: 4 },
+  'LTCUSDT': { quantity: 2, price: 2 },
+  'BTCUSDC': { quantity: 3, price: 1 },
+  'ETHUSDC': { quantity: 3, price: 2 },
+};
+
+// 获取精度，默认使用安全值
+function getPrecision(symbol: string) {
+  return SYMBOL_PRECISION[symbol] || { quantity: 3, price: 2 };
+}
+
+// 格式化数量和价格
+function formatQuantity(quantity: number, precision: number): string {
+  return quantity.toFixed(precision);
+}
+
+function formatPrice(price: number, precision: number): string {
+  return price.toFixed(precision);
+}
+
 // 下单到 Binance
 async function placeBinanceOrder(
   apiKey: string,
@@ -43,19 +75,20 @@ async function placeBinanceOrder(
     : 'https://fapi.binance.com';
 
   const timestamp = Date.now();
+  const precision = getPrecision(params.symbol);
 
-  // 构建查询参数
+  // 构建查询参数（使用格式化后的数量）
   const queryParams: Record<string, string | number> = {
     symbol: params.symbol,
     side: params.side,
     type: params.type,
-    quantity: params.quantity,
+    quantity: formatQuantity(params.quantity, precision.quantity),
     timestamp,
   };
 
   // 限价单需要价格和 timeInForce
   if (params.type === 'LIMIT' && params.price) {
-    queryParams.price = params.price;
+    queryParams.price = formatPrice(params.price, precision.price);
     queryParams.timeInForce = 'GTC';
   }
 

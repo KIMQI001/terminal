@@ -83,13 +83,14 @@ export function OrderForm() {
     setTradingLines(lines);
   }, [price, stopLoss, takeProfit, selectedSide, setTradingLines]);
 
-  // 计算币数量
+  // 计算币数量（保证金 * 杠杆 / 价格）
   const coinQuantity = useMemo(() => {
     const p = orderType === "market" ? lastPrice : parseFloat(price) || 0;
     const usd = parseFloat(amountUSD) || 0;
     if (p <= 0) return 0;
-    return usd / p;
-  }, [orderType, price, amountUSD, lastPrice]);
+    // 输入金额是保证金，乘以杠杆得到实际开仓价值
+    return (usd * currentLeverage) / p;
+  }, [orderType, price, amountUSD, lastPrice, currentLeverage]);
 
   const handlePercentage = (percent: number) => {
     if (!quoteBalance) return;
