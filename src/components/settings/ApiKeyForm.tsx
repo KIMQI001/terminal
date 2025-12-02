@@ -86,10 +86,11 @@ export function ApiKeyForm() {
             {apiConfigs.map((config) => (
               <span
                 key={config.exchange}
-                className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 text-xs rounded"
+                className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 text-xs rounded font-mono"
               >
                 {EXCHANGES.find((e) => e.value === config.exchange)?.label}
                 {config.isTestnet && " (测试网)"}
+                {config.apiKey && ` - ${config.apiKey}`}
               </span>
             ))}
           </div>
