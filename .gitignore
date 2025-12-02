@@ -43,5 +43,8 @@ kline-server/target/
 kline-server/*.db
 kline-server/*.db-journal
 
+# SQLite database
+data/
+
 # Misc
 *.log

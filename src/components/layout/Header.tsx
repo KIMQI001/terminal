@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler } from "lucide-react";
+import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useOrderStore } from "@/stores/orderStore";
 import { useMeasurementStore } from "@/stores/measurementStore";
+import { useUserStore } from "@/stores/userStore";
 import { Timeframe } from "@/types/chart";
 import { IndicatorState } from "@/types/indicator";
 import { useState } from "react";
@@ -44,6 +45,7 @@ export function Header() {
   const { enabled, toggleIndicator } = useIndicatorStore();
   const { isModalOpen, togglePanel } = useOrderStore();
   const { isToolActive, toggleToolActive } = useMeasurementStore();
+  const { isAuthenticated, user, openSettings } = useUserStore();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -183,6 +185,26 @@ export function Header() {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* 用户/设置按钮 */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={openSettings}
+          className={isAuthenticated ? "text-green-600" : ""}
+        >
+          {isAuthenticated ? (
+            <>
+              <User className="w-3 h-3 mr-1.5" />
+              <span className="max-w-16 truncate">{user?.username}</span>
+            </>
+          ) : (
+            <>
+              <Settings className="w-3 h-3 mr-1.5" />
+              设置
+            </>
+          )}
+        </Button>
       </div>
     </header>
   );
