@@ -7,15 +7,14 @@ const AUTH_TAG_LENGTH = 16;
 const SALT_LENGTH = 32;
 const KEY_LENGTH = 32;
 
-// 从环境变量获取加密主密钥，如果没有则生成一个随机密钥
-// 生产环境应该设置 ENCRYPTION_KEY 环境变量
+// 从环境变量获取加密主密钥
 function getMasterKey(): string {
-  const envKey = process.env.ENCRYPTION_KEY;
+  const envKey = process.env.API_ENCRYPTION_KEY;
   if (envKey) {
     return envKey;
   }
   // 开发环境使用固定密钥（警告：生产环境必须设置环境变量）
-  console.warn('ENCRYPTION_KEY not set, using default key. Set ENCRYPTION_KEY in production!');
+  console.warn('API_ENCRYPTION_KEY not set, using default key. Set API_ENCRYPTION_KEY in production!');
   return 'default-dev-key-change-in-production-12345';
 }
 
