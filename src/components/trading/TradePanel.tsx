@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -11,16 +11,33 @@ import { OrderForm } from "./OrderForm";
 import { PositionList } from "./PositionList";
 import { OpenOrderList } from "./OpenOrderList";
 
+const BALANCE_POLL_INTERVAL = 3000; // 3秒轮询
+
 export function TradePanel() {
   const { isModalOpen, closeModal } = useOrderStore();
   const { symbol } = useChartStore();
   const { fetchBalances } = usePositionStore();
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 面板打开时获取真实余额
+  // 面板打开时获取真实余额，并启动定时轮询
   useEffect(() => {
     if (isModalOpen) {
+      // 立即获取一次
       fetchBalances();
+
+      // 启动定时轮询
+      pollIntervalRef.current = setInterval(() => {
+        fetchBalances();
+      }, BALANCE_POLL_INTERVAL);
     }
+
+    // 清理定时器
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
   }, [isModalOpen, fetchBalances]);
 
   if (!isModalOpen) return null;

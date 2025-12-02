@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { Order, OrderFormData, OrderStatus, OrderSide } from "@/types/order";
+import { useUserStore } from "./userStore";
 
 // OTE预填充数据
 export interface OTEPrefillData {
@@ -21,6 +22,8 @@ interface OrderState {
   isModalOpen: boolean;
   prefillData: OTEPrefillData | null;
   tradingLines: TradingLine[];
+  isPlacingOrder: boolean;
+  orderError: string | null;
 
   // Actions
   openModal: () => void;
@@ -30,6 +33,7 @@ interface OrderState {
   setTradingLines: (lines: TradingLine[]) => void;
   clearTradingLines: () => void;
   addOrder: (data: OrderFormData, symbol: string) => Order;
+  placeOrder: (data: OrderFormData, symbol: string) => Promise<{ success: boolean; error?: string }>;
   updateOrderStatus: (id: string, status: OrderStatus, filledQuantity?: number) => void;
   cancelOrder: (id: string) => void;
   getOpenOrders: () => Order[];
@@ -41,6 +45,8 @@ export const useOrderStore = create<OrderState>((set, get) => ({
   isModalOpen: false,
   prefillData: null,
   tradingLines: [],
+  isPlacingOrder: false,
+  orderError: null,
 
   openModal: () => set({ isModalOpen: true }),
   closeModal: () => set({ isModalOpen: false, prefillData: null, tradingLines: [] }),
@@ -69,6 +75,65 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     }));
 
     return newOrder;
+  },
+
+  placeOrder: async (data, symbol) => {
+    const token = useUserStore.getState().token;
+    if (!token) {
+      return { success: false, error: '未登录' };
+    }
+
+    set({ isPlacingOrder: true, orderError: null });
+
+    try {
+      const response = await fetch('/api/user/order', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          symbol,
+          side: data.side === 'buy' ? 'BUY' : 'SELL',
+          type: data.type === 'market' ? 'MARKET' : 'LIMIT',
+          quantity: data.quantity,
+          price: data.price,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // 添加到本地订单列表
+        const newOrder: Order = {
+          id: result.order.orderId.toString(),
+          symbol: result.order.symbol,
+          type: data.type,
+          side: data.side,
+          price: parseFloat(result.order.price) || data.price,
+          stopPrice: data.stopPrice,
+          quantity: parseFloat(result.order.quantity),
+          filledQuantity: 0,
+          status: result.order.status === 'FILLED' ? 'filled' : 'pending',
+          createdAt: result.order.time || Date.now(),
+          updatedAt: Date.now(),
+        };
+
+        set((state) => ({
+          orders: [newOrder, ...state.orders],
+          isPlacingOrder: false,
+        }));
+
+        return { success: true };
+      } else {
+        set({ isPlacingOrder: false, orderError: result.error });
+        return { success: false, error: result.error };
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : '下单失败';
+      set({ isPlacingOrder: false, orderError: errorMsg });
+      return { success: false, error: errorMsg };
+    }
   },
 
   updateOrderStatus: (id, status, filledQuantity) => {
