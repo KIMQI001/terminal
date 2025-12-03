@@ -53,11 +53,22 @@ export function TowerList({ currentPrice, blocks }: TowerListProps) {
         block.stopLoss = boundary;
       }
 
-      // Take profit = first opposite block, min 1000 points
-      const oppositeBlocks = block.type === "bearish" ? bullish : bearish;
-      const target = oppositeBlocks.find((b) =>
-        block.type === "bearish" ? b.entry < block.entry : b.entry > block.entry
-      );
+      // Take profit = nearest opposite block, min 1000 points
+      // For bullish: find the lowest bearish block above it (nearest resistance)
+      // For bearish: find the highest bullish block below it (nearest support)
+      let target: TowerBlock | undefined;
+
+      if (block.type === "bearish") {
+        // 做空止盈 = 下方最近的多块（entry 最大的那个 < block.entry）
+        const candidates = bullish.filter((b) => b.entry < block.entry);
+        // bullish 已经从高到低排序，第一个就是最近的
+        target = candidates[0];
+      } else {
+        // 做多止盈 = 上方最近的空块（entry 最小的那个 > block.entry）
+        const candidates = bearish.filter((b) => b.entry > block.entry);
+        // bearish 从高到低排序，最后一个是 entry 最小的（最近的）
+        target = candidates[candidates.length - 1];
+      }
 
       if (target) {
         const tpDistance = Math.abs(target.entry - block.entry);
