@@ -23,9 +23,19 @@ const WebSocket = require('ws');
 // 配置
 // ============================================
 
+// 启动模式: local (本地) 或 remote (远程)
+// 本地模式: 连接 ws://127.0.0.1:3001 (服务器上运行时使用)
+// 远程模式: 连接 wss://guncangdashi.sbs (开发测试时使用)
+const MODE = process.env.MODE || 'local';
+
+const WS_URLS = {
+  local: 'ws://127.0.0.1:3001/ws/coinank/tampermonkey',
+  remote: 'wss://guncangdashi.sbs/ws/coinank/tampermonkey',
+};
+
 const CONFIG = {
   // 后端 WebSocket 地址
-  BACKEND_WS_URL: process.env.BACKEND_WS_URL || 'wss://guncangdashi.sbs/ws/coinank/tampermonkey',
+  BACKEND_WS_URL: process.env.BACKEND_WS_URL || WS_URLS[MODE] || WS_URLS.local,
 
   // CoinAnk API
   COINANK_API_BASE: 'https://api.coinank.com',
@@ -81,6 +91,8 @@ class CoinAnkProxy {
   async start() {
     log('═══════════════════════════════════════');
     log('🚀 CoinAnk Puppeteer 代理启动中...');
+    log(`📡 模式: ${MODE.toUpperCase()}`);
+    log(`🔌 WebSocket: ${CONFIG.BACKEND_WS_URL}`);
     log('═══════════════════════════════════════');
 
     try {
