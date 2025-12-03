@@ -10,7 +10,7 @@
 
 // 加载环境变量 (必须在最前面)
 import * as dotenv from 'dotenv';
-dotenv.config({ path: '../.env' });
+dotenv.config({ path: '../.env.local' });
 
 import { config, validateConfig } from './config';
 import { startScheduler } from './scheduler';
