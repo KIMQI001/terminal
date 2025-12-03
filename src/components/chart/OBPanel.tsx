@@ -117,7 +117,7 @@ export function OBPanel() {
               <div className="grid grid-cols-4 gap-1 text-[9px] text-gray-400 font-medium pb-0.5 border-b">
                 <span>TF</span>
                 <span>Type</span>
-                <span className="text-right">Mid</span>
+                <span className="text-right">.22</span>
                 <span className="text-right">Size</span>
               </div>
 
@@ -153,6 +153,9 @@ export function OBPanel() {
                 const borderColor = isNearest ? (isBullish ? 'border-green-500' : 'border-red-500') : 'border-transparent';
                 const fillColor = isBullish ? 'bg-green-200' : 'bg-red-200';
 
+                // 优先使用数据中的 fillPercentage
+                const displayFillPercent = ob.fillPercentage ?? fillPercent;
+
                 return (
                   <div
                     key={tf}
@@ -160,10 +163,10 @@ export function OBPanel() {
                     className={`relative grid grid-cols-4 gap-1 text-[9px] py-0.5 items-center rounded border border-dashed ${borderColor} overflow-hidden cursor-pointer hover:bg-gray-100 transition-colors`}
                   >
                     {/* 填充背景 - 从左到右填充 */}
-                    {isNearest && fillPercent > 0 && (
+                    {isNearest && displayFillPercent > 0 && (
                       <div
                         className={`absolute inset-y-0 left-0 ${fillColor} opacity-50`}
-                        style={{ width: `${Math.min(100, Math.max(0, fillPercent))}%` }}
+                        style={{ width: `${Math.min(100, Math.max(0, displayFillPercent))}%` }}
                       />
                     )}
                     {/* 内容 */}
@@ -212,21 +215,21 @@ export function OBPanel() {
                     >
                       {/* 底色 */}
                       <div className={`absolute inset-0 ${bgColor}`} />
-                      {/* 填充进度背景 */}
-                      {fillPercent > 0 && (
+                      {/* 填充进度背景 - 优先使用 ob.fillPercentage */}
+                      {(ob.fillPercentage ?? fillPercent) > 0 && (
                         <div
                           className={`absolute inset-y-0 left-0 ${fillColor} opacity-60`}
-                          style={{ width: `${Math.min(100, fillPercent)}%` }}
+                          style={{ width: `${Math.min(100, ob.fillPercentage ?? fillPercent)}%` }}
                         />
                       )}
                       {/* 内容 */}
                       <div className="relative flex items-center justify-between">
                         <span className={`font-bold ${color}`}>{label}</span>
-                        <span className="text-gray-500">M:{midPrice.toFixed(1)}</span>
+                        <span className="text-gray-500">.22:{midPrice.toFixed(1)}</span>
                       </div>
                       <div className="relative flex items-center justify-between mt-0.5">
                         <span className="text-gray-500">S:{sizePercent}%</span>
-                        <span className="text-gray-500">F:{fillPercent.toFixed(0)}%</span>
+                        <span className="text-gray-500">F:{ob.fillPercentage?.toFixed(0) ?? fillPercent.toFixed(0)}%</span>
                       </div>
                     </div>
                   );

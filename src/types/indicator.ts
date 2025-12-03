@@ -9,6 +9,8 @@ export interface OrderBlock {
   mitigated: boolean;
   strength: number;
   breakTime?: number;  // 被突破变成 breaker 的时间
+  fillPercentage: number;  // 最大填充深度 (0-100)
+  fib22: number;           // 0.22 入场点
 }
 
 export interface FVG {

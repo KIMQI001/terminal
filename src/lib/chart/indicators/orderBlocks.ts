@@ -189,12 +189,50 @@ export function detectOrderBlocks(
     }
   }
 
+  // Helper function to calculate fill percentage using extremes
+  const calculateFillPercentage = (
+    obTop: number,
+    obBtm: number,
+    locIndex: number,
+    type: "bullish" | "bearish"
+  ): number => {
+    let fillPercentage = 0;
+    const obSize = obTop - obBtm;
+    if (obSize <= 0) return 0;
+
+    for (let j = locIndex + 1; j < candles.length; j++) {
+      if (type === "bullish") {
+        // 看涨 OB：价格从上方进入，用 low 极值
+        if (candles[j].low <= obBtm) {
+          return 100;
+        }
+        if (candles[j].low <= obTop) {
+          const filled = ((obTop - candles[j].low) / obSize) * 100;
+          fillPercentage = Math.max(fillPercentage, Math.min(100, filled));
+        }
+      } else {
+        // 看跌 OB：价格从下方进入，用 high 极值
+        if (candles[j].high >= obTop) {
+          return 100;
+        }
+        if (candles[j].high >= obBtm) {
+          const filled = ((candles[j].high - obBtm) / obSize) * 100;
+          fillPercentage = Math.max(fillPercentage, Math.min(100, filled));
+        }
+      }
+    }
+    return fillPercentage;
+  };
+
   // Convert to OrderBlock format
   const result: OrderBlock[] = [];
 
   // Add bullish OBs (non-breakers only, limited count)
   const activeBullish = bullishOBs.filter(ob => !ob.breaker).slice(0, showBull);
   for (const ob of activeBullish) {
+    const obSize = ob.top - ob.btm;
+    const fillPercentage = calculateFillPercentage(ob.top, ob.btm, ob.locIndex, "bullish");
+    const fib22 = ob.top - obSize * 0.22;  // 看涨：顶部往下 22%
     result.push({
       type: "bullish",
       high: ob.top,
@@ -202,12 +240,17 @@ export function detectOrderBlocks(
       startTime: ob.loc,
       mitigated: false,
       strength: 0,
+      fillPercentage,
+      fib22,
     });
   }
 
   // Add bearish OBs (non-breakers only, limited count)
   const activeBearish = bearishOBs.filter(ob => !ob.breaker).slice(0, showBear);
   for (const ob of activeBearish) {
+    const obSize = ob.top - ob.btm;
+    const fillPercentage = calculateFillPercentage(ob.top, ob.btm, ob.locIndex, "bearish");
+    const fib22 = ob.btm + obSize * 0.22;  // 看跌：底部往上 22%
     result.push({
       type: "bearish",
       high: ob.top,
@@ -215,6 +258,8 @@ export function detectOrderBlocks(
       startTime: ob.loc,
       mitigated: false,
       strength: 0,
+      fillPercentage,
+      fib22,
     });
   }
 
