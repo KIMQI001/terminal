@@ -270,15 +270,26 @@ ${ict.swingPoints
   .map(s => `- ${s.type.toUpperCase()}: $${s.price.toFixed(2)}`)
   .join('\n')}
 
-### Fair Value Gaps (未填充)
+### Fair Value Gaps (未填充，最近15个)
 ${
   ict.fvgs
     .filter(f => !f.filled)
-    .slice(0, 3)
-    .map(f => `- ${f.type.toUpperCase()} FVG: 区间 $${f.low.toFixed(2)}-$${f.high.toFixed(2)}
-    入场: $${f.entry.toFixed(2)} (0.22位置)
-    止损: $${f.stopLoss.toFixed(2)} (边界)`)
+    .slice(-15)
+    .map(f => `- ${f.type.toUpperCase()} FVG: $${f.low.toFixed(2)}-$${f.high.toFixed(2)}, 入场: $${f.entry.toFixed(2)}, 止损: $${f.stopLoss.toFixed(2)}`)
     .join('\n') || '无活跃 FVG'
+}
+
+### Order Blocks (最近10个)
+${
+  ict.orderBlocks
+    .slice(-10)
+    .map(ob => {
+      const size = ob.high - ob.low;
+      const entry = ob.type === 'bullish' ? ob.high - size * 0.22 : ob.low + size * 0.22;
+      const stopLoss = ob.type === 'bullish' ? ob.low : ob.high;
+      return `- ${ob.type.toUpperCase()} OB: $${ob.low.toFixed(2)}-$${ob.high.toFixed(2)}, 入场: $${entry.toFixed(2)}, 止损: $${stopLoss.toFixed(2)}`;
+    })
+    .join('\n') || '无活跃 OB'
 }
 
 ### OTE 区域

@@ -305,6 +305,169 @@ export function detectFVGs(candles: Candle[], minGapPercent: number = 0.1): FVG[
 }
 
 // ============================================
+// Order Block 检测 (基于 LuxAlgo 方法)
+// ============================================
+
+export function detectOrderBlocks(
+  candles: Candle[],
+  length: number = 10,
+  showBull: number = 10,
+  showBear: number = 10
+): OrderBlock[] {
+  if (candles.length < length + 10) return [];
+
+  const getMax = (c: Candle) => c.high;
+  const getMin = (c: Candle) => c.low;
+
+  interface Swing {
+    price: number;
+    index: number;
+    time: number;
+    crossed: boolean;
+  }
+
+  interface OBTrack {
+    top: number;
+    btm: number;
+    loc: number;
+    breaker: boolean;
+  }
+
+  const bullishOBs: OBTrack[] = [];
+  const bearishOBs: OBTrack[] = [];
+
+  let os = 0;
+  let topSwing: Swing | null = null;
+  let btmSwing: Swing | null = null;
+
+  for (let i = length; i < candles.length; i++) {
+    const candle = candles[i];
+    const candleAtLen = candles[i - length];
+
+    let upper = -Infinity;
+    let lower = Infinity;
+    for (let j = i - length + 1; j < i; j++) {
+      upper = Math.max(upper, candles[j].high);
+      lower = Math.min(lower, candles[j].low);
+    }
+
+    const prevOs = os;
+    if (candleAtLen.high > upper) {
+      os = 0;
+    } else if (candleAtLen.low < lower) {
+      os = 1;
+    }
+
+    if (os === 0 && prevOs !== 0) {
+      topSwing = {
+        price: candleAtLen.high,
+        index: i - length,
+        time: candleAtLen.time,
+        crossed: false,
+      };
+    }
+
+    if (os === 1 && prevOs !== 1) {
+      btmSwing = {
+        price: candleAtLen.low,
+        index: i - length,
+        time: candleAtLen.time,
+        crossed: false,
+      };
+    }
+
+    // Bullish OB: price breaks above swing high
+    if (topSwing && !topSwing.crossed && candle.close > topSwing.price) {
+      topSwing.crossed = true;
+      let minima = getMax(candles[i - 1]);
+      let maxima = getMin(candles[i - 1]);
+      let loc = candles[i - 1].time;
+
+      for (let j = 1; j < i - topSwing.index; j++) {
+        const idx = i - j;
+        if (idx <= topSwing.index) break;
+        const min = getMin(candles[idx]);
+        if (min < minima) {
+          minima = min;
+          maxima = getMax(candles[idx]);
+          loc = candles[idx].time;
+        }
+      }
+
+      bullishOBs.unshift({ top: maxima, btm: minima, loc, breaker: false });
+    }
+
+    // Bearish OB: price breaks below swing low
+    if (btmSwing && !btmSwing.crossed && candle.close < btmSwing.price) {
+      btmSwing.crossed = true;
+      let maxima = getMin(candles[i - 1]);
+      let minima = getMax(candles[i - 1]);
+      let loc = candles[i - 1].time;
+
+      for (let j = 1; j < i - btmSwing.index; j++) {
+        const idx = i - j;
+        if (idx <= btmSwing.index) break;
+        const max = getMax(candles[idx]);
+        if (max > maxima) {
+          maxima = max;
+          minima = getMin(candles[idx]);
+          loc = candles[idx].time;
+        }
+      }
+
+      bearishOBs.unshift({ top: maxima, btm: minima, loc, breaker: false });
+    }
+
+    // Check for mitigation
+    for (let j = bullishOBs.length - 1; j >= 0; j--) {
+      const ob = bullishOBs[j];
+      if (!ob.breaker && Math.min(candle.close, candle.open) < ob.btm) {
+        ob.breaker = true;
+      } else if (ob.breaker && candle.close > ob.top) {
+        bullishOBs.splice(j, 1);
+      }
+    }
+
+    for (let j = bearishOBs.length - 1; j >= 0; j--) {
+      const ob = bearishOBs[j];
+      if (!ob.breaker && Math.max(candle.close, candle.open) > ob.top) {
+        ob.breaker = true;
+      } else if (ob.breaker && candle.close < ob.btm) {
+        bearishOBs.splice(j, 1);
+      }
+    }
+  }
+
+  const result: OrderBlock[] = [];
+
+  const activeBullish = bullishOBs.filter(ob => !ob.breaker).slice(0, showBull);
+  for (const ob of activeBullish) {
+    result.push({
+      type: 'bullish',
+      high: ob.top,
+      low: ob.btm,
+      startTime: ob.loc,
+      mitigated: false,
+      strength: 0,
+    });
+  }
+
+  const activeBearish = bearishOBs.filter(ob => !ob.breaker).slice(0, showBear);
+  for (const ob of activeBearish) {
+    result.push({
+      type: 'bearish',
+      high: ob.top,
+      low: ob.btm,
+      startTime: ob.loc,
+      mitigated: false,
+      strength: 0,
+    });
+  }
+
+  return result;
+}
+
+// ============================================
 // OTE 区域检测
 // ============================================
 
@@ -449,6 +612,7 @@ export function analyzeICT(
   // 计算所有 ICT 指标
   const swingPoints = detectSwingPoints(candles);
   const fvgs = detectFVGs(candles);
+  const orderBlocks = detectOrderBlocks(candles);
   const oteZones = detectOTEZones(swingPoints, currentPrice);
   const { bos, choch } = detectStructure(swingPoints, currentPrice);
 
@@ -479,7 +643,7 @@ export function analyzeICT(
     timestamp: Date.now(),
     currentPrice,
     swingPoints,
-    orderBlocks: [], // 简化版本暂不实现 Order Blocks
+    orderBlocks,
     fvgs,
     oteZones,
     bos,
