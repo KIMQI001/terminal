@@ -166,11 +166,17 @@ export function LiquidationPanel() {
     checkRelayStatus();
   }, [checkRelayStatus]);
 
-  // Auto-load data when relay is connected or params change
+  // Auto-load data and refresh every 2 minutes
   useEffect(() => {
-    if (baseCoin) {
+    if (!baseCoin) return;
+
+    fetchData();
+
+    const interval = setInterval(() => {
       fetchData();
-    }
+    }, 2 * 60 * 1000); // 2分钟
+
+    return () => clearInterval(interval);
   }, [baseCoin, selectedInterval, fetchData]);
 
   // Format volume for display
