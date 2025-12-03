@@ -54,57 +54,73 @@ export async function fetchLiquidation(
   interval: string = '1d'
 ): Promise<LiquidationData | null> {
   const url = `${config.klineServer.restUrl}/api/coinank/fetch?symbol=${baseCoin}&interval=${interval}`;
+  const maxRetries = 2;
 
-  try {
-    const response = await fetch(url, {
-      headers: {
-        Accept: 'application/json',
-      },
-    });
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          Accept: 'application/json',
+        },
+      });
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
 
-    const result = await response.json() as RelayResponse;
+      const result = await response.json() as RelayResponse;
 
-    if (!result.success || !result.data) {
-      console.warn(`[LiquidationClient] 获取 ${baseCoin} 清算数据失败:`, result.error);
+      if (!result.success || !result.data) {
+        // 如果是 tampermonkey 未连接，尝试重试
+        if (result.error?.includes('No tampermonkey') && attempt < maxRetries) {
+          console.log(`[LiquidationClient] tampermonkey 未连接，第 ${attempt + 1} 次重试...`);
+          await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+          continue;
+        }
+        console.warn(`[LiquidationClient] 获取 ${baseCoin} 清算数据失败:`, result.error);
+        return null;
+      }
+
+      const rawData = result.data;
+      const { prices, Binance, lastPrice, lastIndex } = rawData;
+
+      if (!prices || !Binance || lastPrice === undefined || lastIndex === undefined) {
+        console.warn(`[LiquidationClient] 数据格式不完整`);
+        return null;
+      }
+
+      // 解析并聚合清算数据
+      const levels = parseLiquidationLevels(prices, Binance, lastIndex);
+
+      // 分离多空并找峰值
+      const longLevels = levels.filter(l => l.side === 'long');
+      const shortLevels = levels.filter(l => l.side === 'short');
+
+      const longPeaks = findPeaks(longLevels, 5);
+      const shortPeaks = findPeaks(shortLevels, 5);
+
+      console.log(`[LiquidationClient] ${baseCoin}@${interval} - 当前价: $${lastPrice}, 多头峰值: ${longPeaks.length}, 空头峰值: ${shortPeaks.length}`);
+
+      return {
+        symbol: result.symbol,
+        interval: result.interval,
+        currentPrice: lastPrice,
+        longPeaks,
+        shortPeaks,
+        timestamp: result.timestamp,
+      };
+    } catch (error) {
+      if (attempt < maxRetries) {
+        console.log(`[LiquidationClient] 请求失败，第 ${attempt + 1} 次重试...`);
+        await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+        continue;
+      }
+      console.error(`[LiquidationClient] 获取 ${baseCoin} 清算数据失败:`, error);
       return null;
     }
-
-    const rawData = result.data;
-    const { prices, Binance, lastPrice, lastIndex } = rawData;
-
-    if (!prices || !Binance || lastPrice === undefined || lastIndex === undefined) {
-      console.warn(`[LiquidationClient] 数据格式不完整`);
-      return null;
-    }
-
-    // 解析并聚合清算数据
-    const levels = parseLiquidationLevels(prices, Binance, lastIndex);
-
-    // 分离多空并找峰值
-    const longLevels = levels.filter(l => l.side === 'long');
-    const shortLevels = levels.filter(l => l.side === 'short');
-
-    const longPeaks = findPeaks(longLevels, 5);
-    const shortPeaks = findPeaks(shortLevels, 5);
-
-    console.log(`[LiquidationClient] ${baseCoin}@${interval} - 当前价: $${lastPrice}, 多头峰值: ${longPeaks.length}, 空头峰值: ${shortPeaks.length}`);
-
-    return {
-      symbol: result.symbol,
-      interval: result.interval,
-      currentPrice: lastPrice,
-      longPeaks,
-      shortPeaks,
-      timestamp: result.timestamp,
-    };
-  } catch (error) {
-    console.error(`[LiquidationClient] 获取 ${baseCoin} 清算数据失败:`, error);
-    return null;
   }
+
+  return null;
 }
 
 // ============================================
