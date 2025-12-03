@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { AuthGuard } from "@/components/auth/AuthGuard";
@@ -39,6 +39,29 @@ export default function TowerPage() {
   const handleCloseModal = useCallback(() => {
     setSelectedBlock(null);
   }, []);
+
+  // 统计塔块数量和多空比例
+  const stats = useMemo(() => {
+    if (!data?.blocks) return { total: 0, bullish: 0, bearish: 0, ratio: "0:0" };
+
+    const bullish = data.blocks.filter((b) => b.type === "bullish").length;
+    const bearish = data.blocks.filter((b) => b.type === "bearish").length;
+    const total = data.blocks.length;
+
+    // 计算多空比例（简化为最简分数形式）
+    const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+    const divisor = bullish > 0 && bearish > 0 ? gcd(bullish, bearish) : 1;
+    const ratio =
+      bullish === 0 && bearish === 0
+        ? "0:0"
+        : bullish === 0
+        ? `0:${bearish}`
+        : bearish === 0
+        ? `${bullish}:0`
+        : `${bullish / divisor}:${bearish / divisor}`;
+
+    return { total, bullish, bearish, ratio };
+  }, [data?.blocks]);
 
   return (
     <AuthGuard>
@@ -97,30 +120,105 @@ export default function TowerPage() {
 
         {/* Main Content */}
         <main className="p-4 max-w-2xl mx-auto">
+          {/* Stats Bar */}
+          {data && data.blocks.length > 0 && (
+            <div className="mb-4 p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="text-center">
+                    <div className="text-lg font-bold text-[var(--text-primary)]">
+                      {stats.total}
+                    </div>
+                    <div className="text-xs text-[var(--text-tertiary)]">塔块总数</div>
+                  </div>
+                  <div className="h-8 w-px bg-[var(--border)]" />
+                  <div className="text-center">
+                    <div className="text-lg font-bold text-green-400">
+                      {stats.bullish}
+                    </div>
+                    <div className="text-xs text-[var(--text-tertiary)]">多塔块</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-lg font-bold text-red-400">
+                      {stats.bearish}
+                    </div>
+                    <div className="text-xs text-[var(--text-tertiary)]">空塔块</div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm font-medium text-[var(--text-primary)]">
+                    多空比 <span className="text-green-400">{stats.bullish}</span>
+                    <span className="text-[var(--text-tertiary)]">:</span>
+                    <span className="text-red-400">{stats.bearish}</span>
+                  </div>
+                  <div className="text-xs text-[var(--text-tertiary)]">
+                    {stats.bullish > stats.bearish
+                      ? "偏多"
+                      : stats.bearish > stats.bullish
+                      ? "偏空"
+                      : "均衡"}
+                  </div>
+                </div>
+              </div>
+              {/* Progress Bar */}
+              <div className="mt-2 h-1.5 bg-[var(--bg-tertiary)] rounded-full overflow-hidden flex">
+                {stats.total > 0 && (
+                  <>
+                    <div
+                      className="h-full bg-green-500"
+                      style={{ width: `${(stats.bullish / stats.total) * 100}%` }}
+                    />
+                    <div
+                      className="h-full bg-red-500"
+                      style={{ width: `${(stats.bearish / stats.total) * 100}%` }}
+                    />
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Rules Summary */}
-          <div className="mb-4 p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
-            <h3 className="text-sm font-medium text-[var(--text-primary)] mb-2">
-              塔块规则
-            </h3>
-            <ul className="text-xs text-[var(--text-tertiary)] space-y-1">
-              <li>
-                <span className="text-[var(--text-secondary)]">筛选:</span>{" "}
-                FVG/OTE 填充度 &lt;22%，OB 不限
-              </li>
-              <li>
-                <span className="text-[var(--text-secondary)]">入场:</span>{" "}
-                FVG/OB 用 0.22 位，OTE 用 0.675 位
-              </li>
-              <li>
-                <span className="text-[var(--text-secondary)]">止损:</span>{" "}
-                塔块边界，最大 200 点
-              </li>
-              <li>
-                <span className="text-[var(--text-secondary)]">止盈:</span>{" "}
-                对立塔块，最小 1000 点
-              </li>
-            </ul>
-          </div>
+          <details className="mb-4 group">
+            <summary className="p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)] cursor-pointer list-none flex items-center justify-between hover:bg-[var(--bg-tertiary)] transition-colors">
+              <span className="text-sm font-medium text-[var(--text-primary)]">
+                塔块规则
+              </span>
+              <svg
+                className="w-4 h-4 text-[var(--text-tertiary)] transition-transform group-open:rotate-180"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
+            </summary>
+            <div className="mt-2 p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
+              <ul className="text-xs text-[var(--text-tertiary)] space-y-1">
+                <li>
+                  <span className="text-[var(--text-secondary)]">筛选:</span>{" "}
+                  FVG/OTE 填充度 &lt;22%，OB 不限
+                </li>
+                <li>
+                  <span className="text-[var(--text-secondary)]">入场:</span>{" "}
+                  FVG/OB 用 0.22 位，OTE 用 0.675 位
+                </li>
+                <li>
+                  <span className="text-[var(--text-secondary)]">止损:</span>{" "}
+                  塔块边界，最大 200 点
+                </li>
+                <li>
+                  <span className="text-[var(--text-secondary)]">止盈:</span>{" "}
+                  对立塔块，最小 1000 点
+                </li>
+              </ul>
+            </div>
+          </details>
 
           {/* Error State */}
           {error && (
