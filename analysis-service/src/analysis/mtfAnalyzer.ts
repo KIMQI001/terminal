@@ -90,6 +90,14 @@ export interface MTFAnalysis {
   alignment: number;  // 0-100 对齐度
   tradeable: boolean;
   summary: string;
+
+  // 反转信号相关
+  reversal: {
+    detected: boolean;        // 是否检测到反转机会
+    ltfBias: Bias;            // LTF 方向 (5m/15m/1h)
+    ltfAlignment: number;     // LTF 对齐度 (0-100)
+    entry: EntrySetup | null; // 反转入场点
+  };
 }
 
 // ============================================
@@ -384,7 +392,33 @@ export async function analyzeMultiTimeframe(symbol: string): Promise<MTFAnalysis
     }
   }
 
-  // 7. 构建结果
+  // 7. 反转检测：HTF 有明确方向，但 LTF (5m/15m/1h) 反向
+  const ltfTimeframes = ['5m', '15m', '1h'] as const;
+  let ltfBullish = 0, ltfBearish = 0;
+  for (const tf of ltfTimeframes) {
+    if (trends[tf] === 'bullish') ltfBullish++;
+    if (trends[tf] === 'bearish') ltfBearish++;
+  }
+
+  const ltfBias: Bias = ltfBullish > ltfBearish ? 'bullish' :
+                        ltfBearish > ltfBullish ? 'bearish' : 'neutral';
+  const ltfAlignment = Math.round((Math.max(ltfBullish, ltfBearish) / 3) * 100);
+
+  // 反转条件：HTF 有方向，LTF 反向，且 LTF 至少 2/3 一致
+  const reversalDetected = htfResult.bias !== 'neutral' &&
+                           ltfBias !== 'neutral' &&
+                           htfResult.bias !== ltfBias &&
+                           ltfAlignment >= 67;  // 2/3 = 66.7%
+
+  let reversalEntry: EntrySetup | null = null;
+  if (reversalDetected) {
+    reversalEntry = findLTFEntry(m15ICT, m5ICT, ltfBias, currentPrice);
+    if (reversalEntry) {
+      console.log(`[MTF] 反转机会: HTF=${htfResult.bias}, LTF=${ltfBias}, 入场=${reversalEntry.suggestedEntry.toFixed(2)}`);
+    }
+  }
+
+  // 8. 构建结果
   // 可交易条件：有明确方向且对齐度 >= 60%（至少 3/5 一致）
   const tradeable = overallBias !== 'neutral' && alignment >= 60;
 
@@ -418,10 +452,16 @@ export async function analyzeMultiTimeframe(symbol: string): Promise<MTFAnalysis
     alignment,
     tradeable,
     summary: '',
+    reversal: {
+      detected: reversalDetected,
+      ltfBias,
+      ltfAlignment,
+      entry: reversalEntry,
+    },
   };
 
   analysis.summary = generateSummary(analysis);
-  console.log(`[MTF] 分析完成: 可交易=${analysis.tradeable}, 对齐度=${alignment}%`);
+  console.log(`[MTF] 分析完成: 可交易=${analysis.tradeable}, 对齐度=${alignment}%, 反转=${reversalDetected}`);
 
   return analysis;
 }

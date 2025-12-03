@@ -610,6 +610,172 @@ export async function generateMTFSignal(
 }
 
 // ============================================
+// 反转交易信号
+// ============================================
+
+/**
+ * 构建反转信号 Prompt
+ */
+function buildReversalPrompt(mtf: MTFAnalysis, liq: LiquidationData | null): string {
+  let liquidationInfo = '';
+  if (liq) {
+    const keyLevels = extractKeyLiquidationLevels(liq, mtf.currentPrice, 3);
+    liquidationInfo = `
+## 清算数据
+### 多头清算密集区（价格下方）
+${keyLevels.longLiquidation.map(l => `- $${l.price.toFixed(2)}: ${(l.amount / 1e6).toFixed(2)}M USD`).join('\n') || '无显著水平'}
+
+### 空头清算密集区（价格上方）
+${keyLevels.shortLiquidation.map(l => `- $${l.price.toFixed(2)}: ${(l.amount / 1e6).toFixed(2)}M USD`).join('\n') || '无显著水平'}
+`;
+  }
+
+  // 格式化入场设置信息
+  let entryInfo = '无有效入场点';
+  if (mtf.reversal.entry) {
+    const e = mtf.reversal.entry;
+    entryInfo = `
+- 类型: ${e.type.toUpperCase()}
+- 方向: ${e.bias}
+- 入场区间: $${e.entryZone.low.toFixed(2)} - $${e.entryZone.high.toFixed(2)}
+- 建议入场: $${e.suggestedEntry.toFixed(2)}
+- 止损: $${e.stopLoss.toFixed(2)}
+- 止盈目标: ${e.takeProfits.map(tp => `$${tp.toFixed(2)}`).join(', ')}
+- 预期盈亏比: ${e.riskReward}`;
+  }
+
+  return `你是一位专业的 ICT (Inner Circle Trader) 交易分析师，现在分析一个**反转交易机会**。
+
+⚠️ **重要：这是反转交易，风险较高，需要更严格的入场条件**
+
+## 反转交易背景
+
+当前市场处于多空分歧状态：
+- **HTF (日线/4H) 方向**: ${mtf.htf.bias}
+- **LTF (5m/15m/1h) 方向**: ${mtf.reversal.ltfBias}
+- **LTF 对齐度**: ${mtf.reversal.ltfAlignment}%
+
+低级别时间框架正在逆转高级别趋势，这可能是：
+1. 短期回调/反弹（假反转）
+2. 趋势反转的早期信号（真反转）
+
+## 当前市场状态
+
+- 交易对: ${mtf.symbol}
+- 当前价格: $${mtf.currentPrice.toFixed(2)}
+
+### 各时间框架趋势
+- 日线: ${mtf.trends['1d']}
+- 4H: ${mtf.trends['4h']}
+- 1H: ${mtf.trends['1h']}
+- 15M: ${mtf.trends['15m']}
+- 5M: ${mtf.trends['5m']}
+
+### LTF 入场设置（基于 ${mtf.reversal.ltfBias} 方向）
+${entryInfo}
+
+${liquidationInfo}
+
+## K线数据（用于形态分析）
+
+${formatKlines(mtf.klines.h1, '1H')}
+
+${formatKlines(mtf.klines.m15, '15M')}
+
+${formatKlines(mtf.klines.m5, '5M')}
+
+**请结合 K 线形态（如吞没、Pin Bar、内包、Doji、锤子线等）判断反转有效性。**
+
+## 请提供反转交易建议
+
+基于以上分析，请以 JSON 格式返回交易建议：
+{
+  "direction": "long" | "short" | "neutral",
+  "confidence": "high" | "medium" | "low",
+  "entry": {
+    "price": 数字,
+    "zone": "入场区域说明"
+  },
+  "stopLoss": {
+    "price": 数字,
+    "reason": "止损原因"
+  },
+  "takeProfit": [
+    { "price": 数字, "reason": "止盈原因" }
+  ],
+  "riskReward": 风险回报比数字,
+  "reasoning": "详细分析理由（必须包含反转有效性判断）",
+  "warnings": ["风险提示1", "风险提示2"]
+}
+
+## 反转交易规则
+
+1. **方向**: 应该与 LTF 方向一致（${mtf.reversal.ltfBias === 'bullish' ? 'long' : 'short'}）
+2. **置信度上限**: 反转交易最高只能是 "medium"
+3. **必须有有效的入场点**: 需要 OTE 或 FVG 支撑
+4. **盈亏比要求**: 至少 1:2
+5. **必须添加以下风险警告**:
+   - "逆势交易，风险较高"
+   - "HTF 趋势仍为 ${mtf.htf.bias}"
+
+如果无法确认反转有效性，返回 direction: "neutral"。
+
+注意：优先使用上面预计算好的入场和止损价格。`;
+}
+
+/**
+ * 生成反转交易信号
+ */
+export async function generateReversalSignal(
+  mtfAnalysis: MTFAnalysis,
+  liquidationData: LiquidationData | null
+): Promise<TradeSignal | null> {
+  const check = canCallAI();
+  if (!check.allowed) {
+    console.log(`[AI] 跳过反转分析: ${check.reason}`);
+    return null;
+  }
+
+  // 必须有反转入场点
+  if (!mtfAnalysis.reversal.entry) {
+    console.log(`[AI] 无反转入场点，跳过`);
+    return null;
+  }
+
+  hourlyCallCount++;
+  dailyCallCount++;
+
+  try {
+    const client = getAIClient();
+    const prompt = buildReversalPrompt(mtfAnalysis, liquidationData);
+
+    console.log(`[AI] 使用 ${client.getName()} 分析反转机会 ${mtfAnalysis.symbol}...`);
+
+    const responseText = await client.generateContent(prompt);
+    const signal = parseAIResponse(responseText);
+
+    // 反转信号强制限制置信度
+    if (signal && signal.confidence === 'high') {
+      signal.confidence = 'medium';
+    }
+
+    // 确保有反转警告
+    if (signal && signal.direction !== 'neutral') {
+      const reversalWarnings = [
+        '逆势交易，风险较高',
+        `HTF 趋势仍为 ${mtfAnalysis.htf.bias}`,
+      ];
+      signal.warnings = [...reversalWarnings, ...signal.warnings];
+    }
+
+    return signal;
+  } catch (error) {
+    console.error('[AI] 反转分析调用失败:', error);
+    return null;
+  }
+}
+
+// ============================================
 // 工具函数
 // ============================================
 

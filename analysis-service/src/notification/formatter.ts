@@ -295,3 +295,129 @@ ${signal.warnings.map(w => `- ${w}`).join('\n')}`
 ---
 *${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}*`;
 }
+
+/**
+ * 格式化反转信号为钉钉 Markdown 消息
+ */
+export function formatReversalSignalMessage(
+  signal: TradeSignal,
+  mtf: MTFAnalysis
+): string {
+  // 方向
+  const directionEmoji =
+    signal.direction === 'long'
+      ? '🔄🐉 逆势龙升'
+      : signal.direction === 'short'
+        ? '🔄🐍 逆势蛇降'
+        : '🧘 静修';
+
+  // 置信度
+  const confidenceEmoji = {
+    high: '🔥 天命',
+    medium: '⚡ 良机',
+    low: '💨 虚无',
+  }[signal.confidence];
+
+  // 气运
+  const biasEmoji = (bias: string) =>
+    bias === 'bullish' ? '☯️ 阳' : bias === 'bearish' ? '☯️ 阴' : '☯️ 混沌';
+
+  // 如果是观望
+  if (signal.direction === 'neutral') {
+    return `## 🔄🧘 ${mtf.symbol} 逆天机卷
+
+**灵石现价**: $${mtf.currentPrice.toFixed(2)}
+**天界气运**: ${biasEmoji(mtf.htf.bias)} ${mtf.htf.bias}
+**地界反势**: ${biasEmoji(mtf.reversal.ltfBias)} ${mtf.reversal.ltfBias} (${mtf.reversal.ltfAlignment}%)
+**天意**: 逆天时机未到
+
+---
+### 天机
+${signal.reasoning}
+
+${
+  signal.warnings.length > 0
+    ? `### ⚠️ 劫难预警
+${signal.warnings.map(w => `- ${w}`).join('\n')}`
+    : ''
+}
+
+---
+*${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}*`;
+  }
+
+  // 计算止损百分比
+  const slPercent = (
+    ((signal.stopLoss.price - signal.entry.price) / signal.entry.price) *
+    100
+  ).toFixed(2);
+
+  // 构建止盈列表
+  const tpList = signal.takeProfit
+    .map((tp, i) => {
+      const tpPercent = (
+        ((tp.price - signal.entry.price) / signal.entry.price) *
+        100
+      ).toFixed(2);
+      return `- **${i + 1}重天**: $${tp.price.toFixed(2)} (${tpPercent > '0' ? '+' : ''}${tpPercent}%) - ${tp.reason}`;
+    })
+    .join('\n');
+
+  // 入场设置信息
+  let entrySetupInfo = '';
+  if (mtf.reversal.entry) {
+    entrySetupInfo = `
+**入道法门**: ${mtf.reversal.entry.type.toUpperCase()}
+**机缘区间**: $${mtf.reversal.entry.entryZone.low.toFixed(2)} - $${mtf.reversal.entry.entryZone.high.toFixed(2)}`;
+  }
+
+  return `## ${directionEmoji} ${mtf.symbol} 逆天机令
+
+⚠️ **警告: 此为逆势交易，风险较高**
+
+**道心**: ${confidenceEmoji}
+**灵石现价**: $${mtf.currentPrice.toFixed(2)}
+
+---
+### 天地之争
+| 时空 | 气运 |
+|------|------|
+| **天界** (日/4H) | ${biasEmoji(mtf.htf.bias)} ${mtf.htf.bias} |
+| **地界** (1H/15m/5m) | ${biasEmoji(mtf.reversal.ltfBias)} ${mtf.reversal.ltfBias} (${mtf.reversal.ltfAlignment}%) |
+
+当前处于**天地相悖**之态，低时间框架正在逆转高时间框架趋势。
+
+---
+### 三界气运明细
+| 境界 | 气运 | 结构 |
+|------|------|------|
+| 天界·日 | ${biasEmoji(mtf.htf.daily.trend)} ${mtf.htf.daily.trend} | ${mtf.htf.daily.structure} |
+| 天界·时 | ${biasEmoji(mtf.htf.h4.trend)} ${mtf.htf.h4.trend} | ${mtf.htf.h4.structure} |
+| 人界 | ${biasEmoji(mtf.mtf.h1.trend)} ${mtf.mtf.h1.trend} | ${mtf.mtf.h1.structure} |
+| 地界·刻 | ${biasEmoji(mtf.ltf.m15.trend)} ${mtf.ltf.m15.trend} | ${mtf.ltf.m15.structure} |
+| 地界·息 | ${biasEmoji(mtf.ltf.m5.trend)} ${mtf.ltf.m5.trend} | ${mtf.ltf.m5.structure} |
+
+---
+### 逆天心法
+${entrySetupInfo}
+**入道**: $${signal.entry.price.toFixed(2)}
+> ${signal.entry.zone}
+
+**渡劫线**: $${signal.stopLoss.price.toFixed(2)} (${slPercent}%)
+> ${signal.stopLoss.reason}
+
+**飞升境界**:
+${tpList || '- 随缘'}
+
+**因果比**: 1:${signal.riskReward.toFixed(1)}
+
+---
+### 天道感悟
+${signal.reasoning}
+
+### ⚠️ 逆天劫难
+${signal.warnings.map(w => `- ${w}`).join('\n')}
+
+---
+*${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}*`;
+}

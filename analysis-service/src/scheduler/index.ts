@@ -11,10 +11,10 @@ import { config } from '../config';
 import { fetchKlines, Timeframe } from '../data/klineClient';
 import { fetchLiquidation } from '../data/liquidationClient';
 import { analyzeICT } from '../analysis/ictAnalyzer';
-import { generateTradeSignal, generateMTFSignal, getCallStats } from '../analysis/aiAnalyzer';
+import { generateTradeSignal, generateMTFSignal, generateReversalSignal, getCallStats } from '../analysis/aiAnalyzer';
 import { analyzeMultiTimeframe } from '../analysis/mtfAnalyzer';
 import { sendDingtalkMarkdown } from '../notification/dingtalk';
-import { formatSignalMessage, formatMTFSignalMessage } from '../notification/formatter';
+import { formatSignalMessage, formatMTFSignalMessage, formatReversalSignalMessage } from '../notification/formatter';
 import { saveSignal, hasDuplicatePendingSignal } from '../signals/signalStore';
 
 // 上次推送的信号缓存（防止重复推送）
@@ -100,64 +100,92 @@ async function analyzeSymbolMTF(symbol: string): Promise<void> {
     console.log(`  HTF 偏向: ${mtfResult.htf.bias}, 对齐: ${mtfResult.htf.aligned}`);
     console.log(`  MTF 确认: ${mtfResult.mtf.confirmed}`);
     console.log(`  对齐度: ${mtfResult.alignment}%, 可交易: ${mtfResult.tradeable}`);
+    console.log(`  反转检测: ${mtfResult.reversal.detected}, LTF方向: ${mtfResult.reversal.ltfBias}`);
 
-    // 2. 如果不可交易，跳过
-    if (!mtfResult.tradeable) {
-      console.log(`[${key}] 时间框架未对齐或无入场机会，跳过 AI 分析`);
-      return;
-    }
-
-    // 3. 获取清算数据
+    // 2. 获取清算数据
     const baseCoin = symbol.replace('USDC', '').replace('USDT', '');
     const liquidation = await fetchLiquidation(baseCoin, '1d');
 
-    // 4. AI 生成综合信号
-    const signal = await generateMTFSignal(mtfResult, liquidation);
-    if (!signal) {
-      console.log(`[${key}] AI 分析跳过或失败`);
-      return;
+    // ========== 顺势信号处理 ==========
+    if (mtfResult.tradeable) {
+      // 3. AI 生成综合信号
+      const signal = await generateMTFSignal(mtfResult, liquidation);
+      if (signal) {
+        console.log(`[${key}] AI 分析完成 - 方向: ${signal.direction}, 置信度: ${signal.confidence}`);
+        console.log(`[${key}] AI reasoning: ${signal.reasoning}`);
+
+        // 4. 过滤并推送信号
+        if (signal.direction !== 'neutral' && signal.confidence !== 'low') {
+          const signalHash = `${signal.direction}-${signal.entry.price.toFixed(0)}-${signal.stopLoss.price.toFixed(0)}`;
+          if (lastSignals.get(key) !== signalHash &&
+              !hasDuplicatePendingSignal(symbol, 'mtf', signal.direction, signal.entry.price)) {
+            lastSignals.set(key, signalHash);
+
+            // 保存信号
+            try {
+              const signalId = saveSignal(signal, symbol, 'mtf');
+              console.log(`[${key}] 信号已保存: ${signalId}`);
+            } catch (dbError) {
+              console.error(`[${key}] 信号保存失败:`, dbError);
+            }
+
+            // 推送钉钉
+            const message = formatMTFSignalMessage(signal, mtfResult);
+            const sent = await sendDingtalkMarkdown(`${symbol} MTF 综合信号`, message);
+            console.log(`[${key}] 钉钉推送: ${sent ? '成功' : '失败'}`);
+          } else {
+            console.log(`[${key}] 重复信号，不推送`);
+          }
+        } else {
+          console.log(`[${key}] ${signal.direction === 'neutral' ? '建议观望' : '低置信度'}，不推送`);
+        }
+      } else {
+        console.log(`[${key}] AI 分析跳过或失败`);
+      }
+    } else {
+      console.log(`[${key}] 时间框架未对齐或无入场机会，跳过顺势分析`);
     }
 
-    console.log(`[${key}] AI 分析完成 - 方向: ${signal.direction}, 置信度: ${signal.confidence}`);
-    console.log(`[${key}] AI reasoning: ${signal.reasoning}`);
+    // ========== 反转信号处理 ==========
+    if (mtfResult.reversal.detected && mtfResult.reversal.entry) {
+      console.log(`[${key}] 检测到反转机会: HTF=${mtfResult.htf.bias}, LTF=${mtfResult.reversal.ltfBias}`);
 
-    // 5. 过滤信号
-    if (signal.direction === 'neutral') {
-      console.log(`[${key}] 建议观望，不推送`);
-      return;
+      // 调用 AI 分析反转机会
+      const reversalSignal = await generateReversalSignal(mtfResult, liquidation);
+      if (reversalSignal) {
+        console.log(`[${key}] 反转 AI 分析完成 - 方向: ${reversalSignal.direction}, 置信度: ${reversalSignal.confidence}`);
+        console.log(`[${key}] 反转 reasoning: ${reversalSignal.reasoning}`);
+
+        // 过滤并推送反转信号
+        if (reversalSignal.direction !== 'neutral' && reversalSignal.confidence !== 'low') {
+          const reversalKey = `${symbol}@REVERSAL`;
+          const reversalHash = `${reversalSignal.direction}-${reversalSignal.entry.price.toFixed(0)}-${reversalSignal.stopLoss.price.toFixed(0)}`;
+          if (lastSignals.get(reversalKey) !== reversalHash &&
+              !hasDuplicatePendingSignal(symbol, 'reversal', reversalSignal.direction, reversalSignal.entry.price)) {
+            lastSignals.set(reversalKey, reversalHash);
+
+            // 保存信号
+            try {
+              const signalId = saveSignal(reversalSignal, symbol, 'reversal');
+              console.log(`[${key}] 反转信号已保存: ${signalId}`);
+            } catch (dbError) {
+              console.error(`[${key}] 反转信号保存失败:`, dbError);
+            }
+
+            // 推送钉钉
+            const reversalMessage = formatReversalSignalMessage(reversalSignal, mtfResult);
+            const reversalSent = await sendDingtalkMarkdown(`${symbol} 反转信号`, reversalMessage);
+            console.log(`[${key}] 反转钉钉推送: ${reversalSent ? '成功' : '失败'}`);
+          } else {
+            console.log(`[${key}] 重复反转信号，不推送`);
+          }
+        } else {
+          console.log(`[${key}] 反转信号 ${reversalSignal.direction === 'neutral' ? '建议观望' : '低置信度'}，不推送`);
+        }
+      } else {
+        console.log(`[${key}] 反转 AI 分析跳过或失败`);
+      }
     }
-
-    if (signal.confidence === 'low') {
-      console.log(`[${key}] 低置信度信号，不推送`);
-      return;
-    }
-
-    // 6. 检查重复信号
-    const signalHash = `${signal.direction}-${signal.entry.price.toFixed(0)}-${signal.stopLoss.price.toFixed(0)}`;
-    if (lastSignals.get(key) === signalHash) {
-      console.log(`[${key}] 重复信号（缓存），不推送`);
-      return;
-    }
-
-    if (hasDuplicatePendingSignal(symbol, 'mtf', signal.direction, signal.entry.price)) {
-      console.log(`[${key}] 重复信号（数据库），不推送`);
-      return;
-    }
-
-    lastSignals.set(key, signalHash);
-
-    // 7. 保存信号到数据库
-    try {
-      const signalId = saveSignal(signal, symbol, 'mtf');
-      console.log(`[${key}] 信号已保存: ${signalId}`);
-    } catch (dbError) {
-      console.error(`[${key}] 信号保存失败:`, dbError);
-    }
-
-    // 8. 推送钉钉
-    const message = formatMTFSignalMessage(signal, mtfResult);
-    const sent = await sendDingtalkMarkdown(`${symbol} MTF 综合信号`, message);
-    console.log(`[${key}] 钉钉推送: ${sent ? '成功' : '失败'}`);
 
   } catch (error) {
     console.error(`[${key}] MTF 分析失败:`, error);
