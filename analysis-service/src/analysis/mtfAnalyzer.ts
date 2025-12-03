@@ -344,6 +344,7 @@ export async function analyzeMultiTimeframe(symbol: string): Promise<MTFAnalysis
   console.log(`[MTF] HTF 偏向: ${htfResult.bias}, 对齐: ${htfResult.aligned}`);
 
   // 4. MTF 分析
+  console.log(`[MTF] 1H trend: ${h1TF.trend}, structure: ${h1TF.structure}, structureType: ${h1TF.structureType}`);
   const mtfResult = analyzeMTF(h1TF, htfResult.bias);
   console.log(`[MTF] MTF 确认: ${mtfResult.confirmed}`);
 
