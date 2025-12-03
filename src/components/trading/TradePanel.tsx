@@ -71,10 +71,10 @@ export function TradePanel() {
               <TabsTrigger value="orders" className="text-xs">挂单</TabsTrigger>
             </TabsList>
             <div className="p-3">
-              <TabsContent value="positions" className="mt-0 max-h-64 overflow-y-auto">
+              <TabsContent value="positions" className="mt-0 max-h-96 overflow-y-auto">
                 <PositionList />
               </TabsContent>
-              <TabsContent value="orders" className="mt-0 max-h-64 overflow-y-auto">
+              <TabsContent value="orders" className="mt-0 max-h-96 overflow-y-auto">
                 <OpenOrderList />
               </TabsContent>
             </div>
