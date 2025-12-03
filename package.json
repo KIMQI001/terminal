@@ -27,6 +27,7 @@
     "lucide-react": "^0.454.0",
     "nanoid": "^5.1.6",
     "next": "14.2.18",
+    "puppeteer": "^24.31.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tailwind-merge": "^2.5.4",
