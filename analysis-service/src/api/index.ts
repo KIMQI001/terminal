@@ -48,9 +48,9 @@ export function startApiServer(port: number = 3002): void {
     });
   });
 
-  // 启动服务器
-  app.listen(port, '127.0.0.1', () => {
-    console.log(`[API] HTTP 服务器运行在 http://127.0.0.1:${port}`);
+  // 启动服务器 (绑定 0.0.0.0 以允许外部访问)
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`[API] HTTP 服务器运行在 http://0.0.0.0:${port}`);
     console.log('[API] 可用端点:');
     console.log('  - GET /api/health');
     console.log('  - GET /api/signals?status=all|pending|entered|completed&days=30');
