@@ -1,9 +1,11 @@
 /**
  * AI 分析模块
- * 使用 Claude API 分析 ICT 指标和清算数据，生成交易建议
+ * 支持多个 AI 提供商：Gemini, Claude, OpenAI, DeepSeek
  */
 
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { config } from '../config';
 import { ICTAnalysisResult } from './ictAnalyzer';
 import { LiquidationData, extractKeyLiquidationLevels } from '../data/liquidationClient';
@@ -32,34 +34,161 @@ export interface TradeSignal {
   warnings: string[];
 }
 
+// ============================================
+// AI 客户端接口
+// ============================================
+
+interface AIClient {
+  generateContent(prompt: string): Promise<string>;
+  getName(): string;
+}
+
+// ============================================
+// Gemini 客户端
+// ============================================
+
+class GeminiClient implements AIClient {
+  private client: GoogleGenerativeAI;
+  private model: string;
+
+  constructor() {
+    this.client = new GoogleGenerativeAI(config.ai.apiKey);
+    this.model = config.ai.model || config.ai.defaultModels.gemini;
+  }
+
+  async generateContent(prompt: string): Promise<string> {
+    const model = this.client.getGenerativeModel({ model: this.model });
+    const result = await model.generateContent(prompt);
+    return result.response.text();
+  }
+
+  getName(): string {
+    return `Gemini (${this.model})`;
+  }
+}
+
+// ============================================
+// Claude 客户端
+// ============================================
+
+class ClaudeClient implements AIClient {
+  private client: Anthropic;
+  private model: string;
+
+  constructor() {
+    this.client = new Anthropic({ apiKey: config.ai.apiKey });
+    this.model = config.ai.model || config.ai.defaultModels.claude;
+  }
+
+  async generateContent(prompt: string): Promise<string> {
+    const response = await this.client.messages.create({
+      model: this.model,
+      max_tokens: config.ai.maxTokens,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const content = response.content[0];
+    if (content.type !== 'text') {
+      throw new Error('Claude 响应格式错误');
+    }
+    return content.text;
+  }
+
+  getName(): string {
+    return `Claude (${this.model})`;
+  }
+}
+
+// ============================================
+// OpenAI 客户端 (也用于 DeepSeek)
+// ============================================
+
+class OpenAIClient implements AIClient {
+  private client: OpenAI;
+  private model: string;
+  private providerName: string;
+
+  constructor(provider: 'openai' | 'deepseek') {
+    const baseURL = provider === 'deepseek'
+      ? 'https://api.deepseek.com/v1'
+      : undefined;
+
+    this.client = new OpenAI({
+      apiKey: config.ai.apiKey,
+      baseURL,
+    });
+    this.model = config.ai.model || config.ai.defaultModels[provider];
+    this.providerName = provider === 'deepseek' ? 'DeepSeek' : 'OpenAI';
+  }
+
+  async generateContent(prompt: string): Promise<string> {
+    const response = await this.client.chat.completions.create({
+      model: this.model,
+      max_tokens: config.ai.maxTokens,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    return response.choices[0]?.message?.content || '';
+  }
+
+  getName(): string {
+    return `${this.providerName} (${this.model})`;
+  }
+}
+
+// ============================================
+// AI 客户端工厂
+// ============================================
+
+function createAIClient(): AIClient {
+  switch (config.ai.provider) {
+    case 'gemini':
+      return new GeminiClient();
+    case 'claude':
+      return new ClaudeClient();
+    case 'openai':
+      return new OpenAIClient('openai');
+    case 'deepseek':
+      return new OpenAIClient('deepseek');
+    default:
+      throw new Error(`不支持的 AI 提供商: ${config.ai.provider}`);
+  }
+}
+
+// 单例客户端
+let aiClient: AIClient | null = null;
+
+function getAIClient(): AIClient {
+  if (!aiClient) {
+    aiClient = createAIClient();
+    console.log(`[AI] 初始化 ${aiClient.getName()}`);
+  }
+  return aiClient;
+}
+
+// ============================================
 // 调用计数器
+// ============================================
+
 let hourlyCallCount = 0;
 let dailyCallCount = 0;
 let lastHourReset = Date.now();
 let lastDayReset = Date.now();
 
-/**
- * 重置计数器
- */
 function checkAndResetCounters(): void {
   const now = Date.now();
 
-  // 每小时重置
   if (now - lastHourReset > 60 * 60 * 1000) {
     hourlyCallCount = 0;
     lastHourReset = now;
   }
 
-  // 每天重置
   if (now - lastDayReset > 24 * 60 * 60 * 1000) {
     dailyCallCount = 0;
     lastDayReset = now;
   }
 }
 
-/**
- * 检查是否可以调用 AI
- */
 export function canCallAI(): { allowed: boolean; reason?: string } {
   checkAndResetCounters();
 
@@ -74,62 +203,42 @@ export function canCallAI(): { allowed: boolean; reason?: string } {
   return { allowed: true };
 }
 
-/**
- * 生成交易信号
- */
+// ============================================
+// 生成交易信号
+// ============================================
+
 export async function generateTradeSignal(
   ictResult: ICTAnalysisResult,
   liquidationData: LiquidationData | null
 ): Promise<TradeSignal | null> {
-  // 检查调用限制
   const check = canCallAI();
   if (!check.allowed) {
     console.log(`[AI] 跳过分析: ${check.reason}`);
     return null;
   }
 
-  // 增加计数
   hourlyCallCount++;
   dailyCallCount++;
 
   try {
-    const client = new Anthropic({
-      apiKey: config.ai.apiKey,
-    });
-
+    const client = getAIClient();
     const prompt = buildPrompt(ictResult, liquidationData);
 
-    console.log(`[AI] 调用 Claude 分析 ${ictResult.symbol}@${ictResult.timeframe}...`);
+    console.log(`[AI] 使用 ${client.getName()} 分析 ${ictResult.symbol}@${ictResult.timeframe}...`);
 
-    const response = await client.messages.create({
-      model: config.ai.model,
-      max_tokens: config.ai.maxTokens,
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-    });
-
-    const content = response.content[0];
-    if (content.type !== 'text') {
-      console.error('[AI] 响应格式错误');
-      return null;
-    }
-
-    return parseAIResponse(content.text);
+    const responseText = await client.generateContent(prompt);
+    return parseAIResponse(responseText);
   } catch (error) {
     console.error('[AI] 调用失败:', error);
     return null;
   }
 }
 
-/**
- * 构建 AI Prompt
- */
+// ============================================
+// 构建 AI Prompt
+// ============================================
+
 function buildPrompt(ict: ICTAnalysisResult, liq: LiquidationData | null): string {
-  // 提取清算关键水平
   let liquidationInfo = '';
   if (liq) {
     const keyLevels = extractKeyLiquidationLevels(liq, ict.currentPrice, 3);
@@ -213,12 +322,12 @@ ${liquidationInfo}
 4. 风险回报比至少 1:2 才考虑交易`;
 }
 
-/**
- * 解析 AI 响应
- */
+// ============================================
+// 解析 AI 响应
+// ============================================
+
 function parseAIResponse(text: string): TradeSignal | null {
   try {
-    // 提取 JSON 部分
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       console.error('[AI] 无法提取 JSON');
@@ -227,13 +336,11 @@ function parseAIResponse(text: string): TradeSignal | null {
 
     const parsed = JSON.parse(jsonMatch[0]);
 
-    // 验证必要字段
     if (!parsed.direction || !parsed.confidence) {
       console.error('[AI] 响应缺少必要字段');
       return null;
     }
 
-    // 如果是 neutral，返回简化结构
     if (parsed.direction === 'neutral') {
       return {
         direction: 'neutral',
@@ -263,10 +370,15 @@ function parseAIResponse(text: string): TradeSignal | null {
   }
 }
 
-/**
- * 获取当前调用统计
- */
+// ============================================
+// 工具函数
+// ============================================
+
 export function getCallStats(): { hourly: number; daily: number } {
   checkAndResetCounters();
   return { hourly: hourlyCallCount, daily: dailyCallCount };
+}
+
+export function getProviderInfo(): string {
+  return getAIClient().getName();
 }
