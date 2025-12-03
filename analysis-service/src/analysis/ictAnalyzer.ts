@@ -474,7 +474,7 @@ export function detectOrderBlocks(
 export function detectOTEZones(
   swingPoints: SwingPoint[],
   currentPrice: number,
-  maxZones: number = 3
+  maxZones: number = 5
 ): OTEZone[] {
   const zones: OTEZone[] = [];
 
@@ -490,20 +490,19 @@ export function detectOTEZones(
       const fib675 = curr.price - range * 0.675;
       const stopLossPrice = curr.price - range * 0.80;  // 略低于 78.6%
 
-      if (currentPrice > fib786 && currentPrice < curr.price) {
-        zones.push({
-          type: 'bullish',
-          startTime: prev.time,
-          swingHigh: curr.price,
-          swingLow: prev.price,
-          fib618,
-          fib786,
-          fib675,
-          active: currentPrice >= fib786 && currentPrice <= fib618,
-          entry: fib675,           // 67.5% 位置入场
-          stopLoss: stopLossPrice, // 止损略过 78.6%
-        });
-      }
+      // 移除价格位置限制，显示所有潜在 OTE
+      zones.push({
+        type: 'bullish',
+        startTime: prev.time,
+        swingHigh: curr.price,
+        swingLow: prev.price,
+        fib618,
+        fib786,
+        fib675,
+        active: currentPrice >= fib786 && currentPrice <= fib618,
+        entry: fib675,           // 67.5% 位置入场
+        stopLoss: stopLossPrice, // 止损略过 78.6%
+      });
     } else if (prev.type === 'high' && curr.type === 'low') {
       // Bearish OTE (价格反弹后做空)
       const range = prev.price - curr.price;
@@ -512,20 +511,19 @@ export function detectOTEZones(
       const fib675 = curr.price + range * 0.675;
       const stopLossPrice = curr.price + range * 0.80;  // 略高于 78.6%
 
-      if (currentPrice < fib786 && currentPrice > curr.price) {
-        zones.push({
-          type: 'bearish',
-          startTime: prev.time,
-          swingHigh: prev.price,
-          swingLow: curr.price,
-          fib618,
-          fib786,
-          fib675,
-          active: currentPrice <= fib786 && currentPrice >= fib618,
-          entry: fib675,           // 67.5% 位置入场
-          stopLoss: stopLossPrice, // 止损略过 78.6%
-        });
-      }
+      // 移除价格位置限制，显示所有潜在 OTE
+      zones.push({
+        type: 'bearish',
+        startTime: prev.time,
+        swingHigh: prev.price,
+        swingLow: curr.price,
+        fib618,
+        fib786,
+        fib675,
+        active: currentPrice <= fib786 && currentPrice >= fib618,
+        entry: fib675,           // 67.5% 位置入场
+        stopLoss: stopLossPrice, // 止损略过 78.6%
+      });
     }
   }
 
