@@ -169,22 +169,14 @@ function analyzeMTF(
     return { confirmed: false };
   }
 
-  // CHoCH 与 HTF 方向一致 → 强确认
-  if (h1.structure === 'choch' && h1.structureType === htfBias) {
-    return { confirmed: true };
+  // 放宽条件：只要 1H 不是反向就确认
+  const opposite = htfBias === 'bullish' ? 'bearish' : 'bullish';
+  if (h1.trend === opposite) {
+    return { confirmed: false };
   }
 
-  // BOS 与 HTF 方向一致 → 确认
-  if (h1.structure === 'bos' && h1.structureType === htfBias) {
-    return { confirmed: true };
-  }
-
-  // 趋势方向一致（无明确结构变化）
-  if (h1.trend === htfBias) {
-    return { confirmed: true };
-  }
-
-  return { confirmed: false };
+  // 同向或 neutral → 确认
+  return { confirmed: true };
 }
 
 /**
