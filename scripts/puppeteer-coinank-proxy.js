@@ -49,8 +49,8 @@ const CONFIG = {
   HEARTBEAT_INTERVAL: 30000,
   HEARTBEAT_TIMEOUT: 10000,
 
-  // 页面刷新间隔（用于更新 API Key）
-  PAGE_REFRESH_INTERVAL: 30 * 60 * 1000, // 30分钟
+  // 页面刷新间隔（用于更新 API Key 和保持数据新鲜）
+  PAGE_REFRESH_INTERVAL: 2 * 60 * 1000, // 2分钟
 
   // 调试模式
   DEBUG: process.env.DEBUG === 'true' || true,
