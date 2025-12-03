@@ -9,6 +9,7 @@ import OpenAI from 'openai';
 import { config } from '../config';
 import { ICTAnalysisResult } from './ictAnalyzer';
 import { LiquidationData, extractKeyLiquidationLevels } from '../data/liquidationClient';
+import { MTFAnalysis } from './mtfAnalyzer';
 
 // ============================================
 // 类型定义
@@ -366,6 +367,156 @@ function parseAIResponse(text: string): TradeSignal | null {
     };
   } catch (error) {
     console.error('[AI] 解析响应失败:', error);
+    return null;
+  }
+}
+
+// ============================================
+// MTF 多时间框架分析
+// ============================================
+
+/**
+ * 构建 MTF 分析 Prompt
+ */
+function buildMTFPrompt(mtf: MTFAnalysis, liq: LiquidationData | null): string {
+  let liquidationInfo = '';
+  if (liq) {
+    const keyLevels = extractKeyLiquidationLevels(liq, mtf.currentPrice, 3);
+    liquidationInfo = `
+## 清算数据
+### 多头清算密集区（价格下方）
+${keyLevels.longLiquidation.map(l => `- $${l.price.toFixed(2)}: ${(l.amount / 1e6).toFixed(2)}M USD`).join('\n') || '无显著水平'}
+
+### 空头清算密集区（价格上方）
+${keyLevels.shortLiquidation.map(l => `- $${l.price.toFixed(2)}: ${(l.amount / 1e6).toFixed(2)}M USD`).join('\n') || '无显著水平'}
+`;
+  }
+
+  // 格式化入场设置信息
+  let entryInfo = '无有效入场点';
+  if (mtf.ltf.entry) {
+    const e = mtf.ltf.entry;
+    entryInfo = `
+- 类型: ${e.type.toUpperCase()}
+- 方向: ${e.bias}
+- 入场区间: $${e.entryZone.low.toFixed(2)} - $${e.entryZone.high.toFixed(2)}
+- 建议入场: $${e.suggestedEntry.toFixed(2)}
+- 止损: $${e.stopLoss.toFixed(2)}
+- 止盈目标: ${e.takeProfits.map(tp => `$${tp.toFixed(2)}`).join(', ')}
+- 预期盈亏比: ${e.riskReward}`;
+  }
+
+  return `你是一位专业的 ICT (Inner Circle Trader) 交易分析师，使用自上而下的多时间框架分析方法。
+
+## 多时间框架分析结果
+
+### 当前市场状态
+- 交易对: ${mtf.symbol}
+- 当前价格: $${mtf.currentPrice.toFixed(2)}
+- 综合偏向: ${mtf.overallBias}
+- 时间框架对齐度: ${mtf.alignment}%
+- 可交易: ${mtf.tradeable ? '是' : '否'}
+
+### 高时间框架 (HTF: 1D + 4H) - 确定方向
+- 日线趋势: ${mtf.htf.daily.trend}
+- 日线结构: ${mtf.htf.daily.structure}${mtf.htf.daily.structureType ? ` (${mtf.htf.daily.structureType})` : ''}
+- 4H趋势: ${mtf.htf.h4.trend}
+- 4H结构: ${mtf.htf.h4.structure}${mtf.htf.h4.structureType ? ` (${mtf.htf.h4.structureType})` : ''}
+- HTF偏向: ${mtf.htf.bias}
+- 日线与4H对齐: ${mtf.htf.aligned ? '是' : '否'}
+
+### 中时间框架 (MTF: 1H) - 确认结构
+- 1H趋势: ${mtf.mtf.h1.trend}
+- 1H结构: ${mtf.mtf.h1.structure}${mtf.mtf.h1.structureType ? ` (${mtf.mtf.h1.structureType})` : ''}
+- 确认HTF方向: ${mtf.mtf.confirmed ? '是' : '否'}
+
+### 低时间框架 (LTF: 15M/5M) - 入场机会
+- 15M趋势: ${mtf.ltf.m15.trend}
+- 5M趋势: ${mtf.ltf.m5.trend}
+- 入场设置:
+${entryInfo}
+
+${liquidationInfo}
+
+## 请提供交易建议
+
+基于以上多时间框架分析，请以 JSON 格式返回交易建议：
+{
+  "direction": "long" | "short" | "neutral",
+  "confidence": "high" | "medium" | "low",
+  "entry": {
+    "price": 数字,
+    "zone": "入场区域说明"
+  },
+  "stopLoss": {
+    "price": 数字,
+    "reason": "止损原因"
+  },
+  "takeProfit": [
+    { "price": 数字, "reason": "止盈原因" }
+  ],
+  "riskReward": 风险回报比数字,
+  "reasoning": "详细分析理由（包含各时间框架的分析）",
+  "warnings": ["风险提示1", "风险提示2"]
+}
+
+## 重要规则
+
+仅当以下条件**全部满足**时才建议交易（direction 设为 long 或 short）：
+1. HTF 方向明确（非 neutral）
+2. MTF（1H）结构确认 HTF 方向
+3. LTF 出现有效入场机会（OTE 或 FVG）
+4. 对齐度 >= 50%
+
+如果以上条件**任一不满足**，必须返回 direction: "neutral"。
+
+置信度规则：
+- high: 对齐度 >= 80%，所有时间框架趋势一致
+- medium: 对齐度 50-79%，主要时间框架对齐
+- low: 对齐度 < 50%（此时应返回 neutral）`;
+}
+
+/**
+ * 生成 MTF 综合交易信号
+ */
+export async function generateMTFSignal(
+  mtfAnalysis: MTFAnalysis,
+  liquidationData: LiquidationData | null
+): Promise<TradeSignal | null> {
+  const check = canCallAI();
+  if (!check.allowed) {
+    console.log(`[AI] 跳过 MTF 分析: ${check.reason}`);
+    return null;
+  }
+
+  // 如果对齐度太低，直接返回 neutral
+  if (mtfAnalysis.alignment < 50) {
+    console.log(`[AI] MTF 对齐度过低 (${mtfAnalysis.alignment}%)，跳过 AI 调用`);
+    return {
+      direction: 'neutral',
+      confidence: 'low',
+      entry: { price: 0, zone: '观望' },
+      stopLoss: { price: 0, reason: '无' },
+      takeProfit: [],
+      riskReward: 0,
+      reasoning: `多时间框架对齐度不足 (${mtfAnalysis.alignment}%)，建议观望`,
+      warnings: ['时间框架未对齐', '等待更明确的信号'],
+    };
+  }
+
+  hourlyCallCount++;
+  dailyCallCount++;
+
+  try {
+    const client = getAIClient();
+    const prompt = buildMTFPrompt(mtfAnalysis, liquidationData);
+
+    console.log(`[AI] 使用 ${client.getName()} 执行 MTF 分析 ${mtfAnalysis.symbol}...`);
+
+    const responseText = await client.generateContent(prompt);
+    return parseAIResponse(responseText);
+  } catch (error) {
+    console.error('[AI] MTF 分析调用失败:', error);
     return null;
   }
 }

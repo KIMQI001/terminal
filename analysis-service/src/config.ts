@@ -7,10 +7,27 @@ export const config = {
     restUrl: process.env.KLINE_API_URL || 'http://127.0.0.1:3001',
   },
 
-  // 监控的交易对和周期
+  // 监控的交易对
   watchlist: [
-    { symbol: 'BTCUSDC', timeframes: ['5m', '15m', '1h', '4h', '1d', '1w'] as const },
+    { symbol: 'BTCUSDC' },
   ],
+
+  // 分析模式配置
+  analysis: {
+    // 'single' = 独立周期分析, 'mtf' = 多时间框架综合分析
+    mode: (process.env.ANALYSIS_MODE || 'mtf') as 'single' | 'mtf',
+
+    // MTF 模式配置
+    mtf: {
+      htf: ['1d', '4h'] as const,   // 高时间框架 - 确定方向
+      mtf: ['1h'] as const,          // 中时间框架 - 确认结构
+      ltf: ['15m', '5m'] as const,   // 低时间框架 - 寻找入场
+      minAlignment: 50,              // 最小对齐度要求 (0-100)
+    },
+
+    // 单周期模式的时间框架 (仅 mode='single' 时使用)
+    singleTimeframes: ['5m', '15m', '1h', '4h', '1d', '1w'] as const,
+  },
 
   // AI 配置
   ai: {
@@ -18,9 +35,9 @@ export const config = {
     apiKey: process.env.AI_API_KEY || '',
     model: process.env.AI_MODEL || '', // 留空则使用默认模型
     maxTokens: 1500,
-    // 成本控制 (6周期 × 4次/小时 = 24次/小时)
-    maxCallsPerHour: 30,
-    maxCallsPerDay: 500,
+    // 成本控制 (MTF 模式每次分析只调用 1 次 AI，成本大幅降低)
+    maxCallsPerHour: 10,
+    maxCallsPerDay: 200,
     // 各提供商默认模型
     defaultModels: {
       gemini: 'gemini-1.5-flash',
