@@ -9,10 +9,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use axum::{
-    extract::{WebSocketUpgrade, State, ws::{Message, WebSocket}},
+    extract::{WebSocketUpgrade, State, Query, ws::{Message, WebSocket}},
     response::IntoResponse,
-    routing::get,
-    Router,
+    routing::{get, post},
+    Json, Router,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -151,13 +151,87 @@ impl CoinankRelayState {
     }
 }
 
+/// HTTP API 请求参数
+#[derive(Debug, Deserialize)]
+pub struct FetchQuery {
+    symbol: String,
+    interval: String,
+}
+
+/// HTTP API 响应
+#[derive(Debug, Serialize)]
+pub struct FetchResponse {
+    success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    symbol: String,
+    interval: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    timestamp: Option<String>,
+}
+
 /// 创建 CoinAnk 中转路由
 pub fn create_coinank_router(state: Arc<CoinankRelayState>) -> Router {
     Router::new()
         .route("/ws/coinank/tampermonkey", get(tampermonkey_ws_handler))
         .route("/ws/coinank/api", get(api_ws_handler))
         .route("/ws/coinank/status", get(status_handler))
+        .route("/api/coinank/fetch", get(http_fetch_handler))
         .with_state(state)
+}
+
+/// HTTP API 获取数据（替代 WebSocket）
+async fn http_fetch_handler(
+    State(state): State<Arc<CoinankRelayState>>,
+    Query(params): Query<FetchQuery>,
+) -> Json<FetchResponse> {
+    let request_id = uuid::Uuid::new_v4().to_string();
+    info!("[CoinAnk HTTP] Fetch request: {}@{}", params.symbol, params.interval);
+
+    match state.send_request(&params.symbol, &params.interval, 30, &request_id).await {
+        Ok(RelayMessage::Data { data, timestamp, .. }) => {
+            Json(FetchResponse {
+                success: true,
+                data: Some(data),
+                error: None,
+                symbol: params.symbol,
+                interval: params.interval,
+                timestamp,
+            })
+        }
+        Ok(RelayMessage::Error { error, .. }) => {
+            Json(FetchResponse {
+                success: false,
+                data: None,
+                error: Some(error),
+                symbol: params.symbol,
+                interval: params.interval,
+                timestamp: None,
+            })
+        }
+        Ok(_) => {
+            Json(FetchResponse {
+                success: false,
+                data: None,
+                error: Some("Unexpected response type".to_string()),
+                symbol: params.symbol,
+                interval: params.interval,
+                timestamp: None,
+            })
+        }
+        Err(e) => {
+            Json(FetchResponse {
+                success: false,
+                data: None,
+                error: Some(e),
+                symbol: params.symbol,
+                interval: params.interval,
+                timestamp: None,
+            })
+        }
+    }
 }
 
 /// 状态检查

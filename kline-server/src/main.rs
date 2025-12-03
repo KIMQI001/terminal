@@ -137,7 +137,8 @@ async fn main() -> anyhow::Result<()> {
     info!("Supported exchanges: Binance (OKX and Bybit coming soon)");
     info!("CoinAnk relay endpoints:");
     info!("  - Tampermonkey: ws://{}/ws/coinank/tampermonkey", addr);
-    info!("  - API: ws://{}/ws/coinank/api", addr);
+    info!("  - API (WS): ws://{}/ws/coinank/api", addr);
+    info!("  - API (HTTP): http://{}/api/coinank/fetch?symbol=BTC&interval=1d", addr);
     info!("  - Status: http://{}/ws/coinank/status", addr);
 
     axum::serve(listener, app).await?;

@@ -1,20 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import WebSocket from 'ws';
 
-// Get relay WebSocket URL from environment
-const RELAY_WS_URL = process.env.COINANK_RELAY_WS || 'ws://localhost:3001/ws/coinank/api';
+// Get relay HTTP URL from environment
+// Use HTTP API instead of WebSocket to avoid ws library bundling issues in Next.js
+const RELAY_HTTP_URL = process.env.COINANK_RELAY_HTTP || 'http://localhost:3001/api/coinank/fetch';
 
 // Request timeout in milliseconds
 const REQUEST_TIMEOUT = 35000;
 
-interface RelayMessage {
-  action: string;
-  request_id?: string;
-  symbol?: string;
-  interval?: string;
+interface RelayResponse {
+  success: boolean;
   data?: unknown;
-  success?: boolean;
   error?: string;
+  symbol: string;
+  interval: string;
   timestamp?: string;
 }
 
@@ -52,105 +50,52 @@ async function fetchLiquidationData(
   symbol: string,
   interval: string
 ): Promise<LiquidationResponse> {
-  return new Promise((resolve, reject) => {
-    const requestId = crypto.randomUUID();
-    let ws: WebSocket | null = null;
-    let timeoutId: NodeJS.Timeout | null = null;
-    let resolved = false;
+  const url = `${RELAY_HTTP_URL}?symbol=${encodeURIComponent(symbol.toUpperCase())}&interval=${encodeURIComponent(interval)}`;
 
-    const cleanup = () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-      if (ws) {
-        try {
-          ws.close();
-        } catch {
-          // Ignore close errors
-        }
-        ws = null;
-      }
-    };
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
 
-    const resolveOnce = (result: LiquidationResponse) => {
-      if (!resolved) {
-        resolved = true;
-        cleanup();
-        resolve(result);
-      }
-    };
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
 
-    const rejectOnce = (error: Error) => {
-      if (!resolved) {
-        resolved = true;
-        cleanup();
-        reject(error);
-      }
-    };
+    clearTimeout(timeoutId);
 
-    // Set timeout
-    timeoutId = setTimeout(() => {
-      rejectOnce(new Error('Request timeout - no tampermonkey client connected?'));
-    }, REQUEST_TIMEOUT);
-
-    try {
-      ws = new WebSocket(RELAY_WS_URL);
-
-      ws.on('open', () => {
-        // Send fetch request
-        const request: RelayMessage = {
-          action: 'fetch',
-          symbol: symbol.toUpperCase(),
-          interval,
-          request_id: requestId,
-        };
-        ws?.send(JSON.stringify(request));
-      });
-
-      ws.on('message', (data: WebSocket.Data) => {
-        try {
-          const message: RelayMessage = JSON.parse(data.toString());
-
-          // Check if this is our response
-          if (message.request_id === requestId) {
-            if (message.action === 'data' && message.success) {
-              resolveOnce({
-                success: true,
-                data: message.data,
-                symbol: message.symbol,
-                interval: message.interval,
-                timestamp: message.timestamp,
-              });
-            } else if (message.action === 'error' || !message.success) {
-              resolveOnce({
-                success: false,
-                error: message.error || 'Request failed',
-                symbol: message.symbol,
-                interval: message.interval,
-              });
-            }
-          }
-        } catch (e) {
-          console.error('Failed to parse relay message:', e);
-        }
-      });
-
-      ws.on('error', (error: Error) => {
-        console.error('WebSocket error:', error);
-        rejectOnce(new Error(`WebSocket connection failed: ${error.message}`));
-      });
-
-      ws.on('close', () => {
-        // If we haven't received a response yet, treat close as error
-        if (!resolved) {
-          rejectOnce(new Error('WebSocket connection closed before receiving response'));
-        }
-      });
-    } catch (error) {
-      rejectOnce(error instanceof Error ? error : new Error('Unknown error'));
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
-  });
+
+    const result: RelayResponse = await response.json();
+
+    if (result.success) {
+      return {
+        success: true,
+        data: result.data,
+        symbol: result.symbol,
+        interval: result.interval,
+        timestamp: result.timestamp,
+      };
+    } else {
+      return {
+        success: false,
+        error: result.error || 'Request failed',
+        symbol: result.symbol,
+        interval: result.interval,
+      };
+    }
+  } catch (error) {
+    clearTimeout(timeoutId);
+
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Request timeout - no tampermonkey client connected?');
+    }
+
+    throw error;
+  }
 }
 
 // Status endpoint to check relay connection
@@ -169,14 +114,14 @@ export async function HEAD() {
 }
 
 async function checkRelayStatus(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const statusUrl = RELAY_WS_URL.replace('/ws/coinank/api', '/ws/coinank/status')
-      .replace('ws://', 'http://')
-      .replace('wss://', 'https://');
+  const statusUrl = RELAY_HTTP_URL
+    .replace('/api/coinank/fetch', '/ws/coinank/status');
 
-    fetch(statusUrl)
-      .then((res) => res.text())
-      .then((text) => resolve(text.includes('connected')))
-      .catch(() => resolve(false));
-  });
+  try {
+    const response = await fetch(statusUrl);
+    const text = await response.text();
+    return text.includes('connected');
+  } catch {
+    return false;
+  }
 }
