@@ -88,6 +88,26 @@ export function FVGPanel() {
     openModal();
   };
 
+  // 计算FVG被填充的百分比（用当前价格，作为 fallback）
+  const calculateFillPercent = (fvg: FVG): number => {
+    if (currentPrice === 0) return 0;
+    const isBullish = fvg.type === "bullish";
+    const size = fvg.high - fvg.low;
+    if (size === 0) return 0;
+
+    if (isBullish) {
+      // 看涨FVG: 价格从上方进入
+      if (currentPrice >= fvg.high) return 0;
+      if (currentPrice <= fvg.low) return 100;
+      return ((fvg.high - currentPrice) / size) * 100;
+    } else {
+      // 看跌FVG: 价格从下方进入
+      if (currentPrice <= fvg.low) return 0;
+      if (currentPrice >= fvg.high) return 100;
+      return ((currentPrice - fvg.low) / size) * 100;
+    }
+  };
+
   return (
     <div className="bg-white/95 border border-gray-200 rounded-lg shadow-lg">
       {/* 标题栏 - 折叠按钮 */}
@@ -135,12 +155,15 @@ export function FVGPanel() {
                 const midPrice = (fvg.high + fvg.low) / 2;
                 const sizePercent = ((gapHeight / midPrice) * 100).toFixed(2);
 
-                // 使用历史填充百分比
-                const fillPercent = fvg.fillPercentage;
+                // 计算填充百分比（用当前价格作为 fallback）
+                const fillPercent = calculateFillPercent(fvg);
 
                 // 虚线框颜色：看涨用绿色，看跌用红色
                 const borderColor = isNearest ? (isBullish ? 'border-green-500' : 'border-red-500') : 'border-transparent';
                 const fillColor = isBullish ? 'bg-green-200' : 'bg-red-200';
+
+                // 优先使用数据中的 fillPercentage（历史极值），如果是0或未定义则用当前价格计算
+                const displayFillPercent = (fvg.fillPercentage && fvg.fillPercentage > 0) ? fvg.fillPercentage : fillPercent;
 
                 return (
                   <div
@@ -149,10 +172,10 @@ export function FVGPanel() {
                     className={`relative grid grid-cols-4 gap-1 text-[9px] py-0.5 items-center rounded border border-dashed ${borderColor} overflow-hidden cursor-pointer hover:bg-gray-100 transition-colors`}
                   >
                     {/* 填充背景 - 从左到右填充 */}
-                    {isNearest && fillPercent > 0 && (
+                    {isNearest && displayFillPercent > 0 && (
                       <div
                         className={`absolute inset-y-0 left-0 ${fillColor} opacity-50`}
-                        style={{ width: `${Math.min(100, Math.max(0, fillPercent))}%` }}
+                        style={{ width: `${Math.min(100, Math.max(0, displayFillPercent))}%` }}
                       />
                     )}
                     {/* 内容 */}
