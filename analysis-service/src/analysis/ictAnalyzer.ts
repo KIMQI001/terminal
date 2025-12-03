@@ -33,6 +33,8 @@ export interface FVG {
   filled: boolean;
   fillPercentage: number;
   fib22: number;
+  entry: number;      // 入场点 = 0.22 位置
+  stopLoss: number;   // 止损 = 边界
 }
 
 export interface OTEZone {
@@ -44,6 +46,8 @@ export interface OTEZone {
   fib786: number;
   fib675: number;
   active: boolean;
+  entry: number;      // 入场点 = 0.675 位置
+  stopLoss: number;   // 止损 = 略过 0.786
 }
 
 export interface BOS {
@@ -237,6 +241,7 @@ export function detectFVGs(candles: Candle[], minGapPercent: number = 0.1): FVG[
         const fvgHigh = c3.low;
         const fvgLow = c1.high;
         const fvgSize = fvgHigh - fvgLow;
+        const entryPrice = fvgHigh - fvgSize * 0.22;  // 0.22 位置入场
         fvgs.push({
           type: 'bullish',
           high: fvgHigh,
@@ -244,7 +249,9 @@ export function detectFVGs(candles: Candle[], minGapPercent: number = 0.1): FVG[
           time: c2.time,
           filled: false,
           fillPercentage: 0,
-          fib22: fvgHigh - fvgSize * 0.22,
+          fib22: entryPrice,
+          entry: entryPrice,      // 入场点
+          stopLoss: fvgLow,       // 止损在底部边界
         });
       }
     }
@@ -257,6 +264,7 @@ export function detectFVGs(candles: Candle[], minGapPercent: number = 0.1): FVG[
         const fvgHigh = c1.low;
         const fvgLow = c3.high;
         const fvgSize = fvgHigh - fvgLow;
+        const entryPrice = fvgLow + fvgSize * 0.22;  // 0.22 位置入场
         fvgs.push({
           type: 'bearish',
           high: fvgHigh,
@@ -264,7 +272,9 @@ export function detectFVGs(candles: Candle[], minGapPercent: number = 0.1): FVG[
           time: c2.time,
           filled: false,
           fillPercentage: 0,
-          fib22: fvgLow + fvgSize * 0.22,
+          fib22: entryPrice,
+          entry: entryPrice,      // 入场点
+          stopLoss: fvgHigh,      // 止损在顶部边界
         });
       }
     }
@@ -310,11 +320,12 @@ export function detectOTEZones(
     const curr = swingPoints[i];
 
     if (prev.type === 'low' && curr.type === 'high') {
-      // Bullish OTE
+      // Bullish OTE (价格回撤后做多)
       const range = curr.price - prev.price;
       const fib618 = curr.price - range * 0.618;
       const fib786 = curr.price - range * 0.786;
       const fib675 = curr.price - range * 0.675;
+      const stopLossPrice = curr.price - range * 0.80;  // 略低于 78.6%
 
       if (currentPrice > fib786 && currentPrice < curr.price) {
         zones.push({
@@ -326,14 +337,17 @@ export function detectOTEZones(
           fib786,
           fib675,
           active: currentPrice >= fib786 && currentPrice <= fib618,
+          entry: fib675,           // 67.5% 位置入场
+          stopLoss: stopLossPrice, // 止损略过 78.6%
         });
       }
     } else if (prev.type === 'high' && curr.type === 'low') {
-      // Bearish OTE
+      // Bearish OTE (价格反弹后做空)
       const range = prev.price - curr.price;
       const fib618 = curr.price + range * 0.618;
       const fib786 = curr.price + range * 0.786;
       const fib675 = curr.price + range * 0.675;
+      const stopLossPrice = curr.price + range * 0.80;  // 略高于 78.6%
 
       if (currentPrice < fib786 && currentPrice > curr.price) {
         zones.push({
@@ -345,6 +359,8 @@ export function detectOTEZones(
           fib786,
           fib675,
           active: currentPrice <= fib786 && currentPrice >= fib618,
+          entry: fib675,           // 67.5% 位置入场
+          stopLoss: stopLossPrice, // 止损略过 78.6%
         });
       }
     }

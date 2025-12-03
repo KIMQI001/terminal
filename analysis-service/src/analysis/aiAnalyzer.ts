@@ -275,7 +275,9 @@ ${
   ict.fvgs
     .filter(f => !f.filled)
     .slice(0, 3)
-    .map(f => `- ${f.type.toUpperCase()} FVG: $${f.low.toFixed(2)} - $${f.high.toFixed(2)}, 入场点: $${f.fib22.toFixed(2)}`)
+    .map(f => `- ${f.type.toUpperCase()} FVG: 区间 $${f.low.toFixed(2)}-$${f.high.toFixed(2)}
+    入场: $${f.entry.toFixed(2)} (0.22位置)
+    止损: $${f.stopLoss.toFixed(2)} (边界)`)
     .join('\n') || '无活跃 FVG'
 }
 
@@ -284,7 +286,10 @@ ${
   ict.oteZones
     .map(
       z =>
-        `- ${z.type.toUpperCase()} OTE: 61.8%=$${z.fib618.toFixed(2)}, 67.5%=$${z.fib675.toFixed(2)}, 78.6%=$${z.fib786.toFixed(2)} ${z.active ? '[活跃]' : ''}`
+        `- ${z.type.toUpperCase()} OTE: ${z.active ? '[活跃]' : ''}
+    入场: $${z.entry.toFixed(2)} (67.5%)
+    止损: $${z.stopLoss.toFixed(2)} (>78.6%)
+    区间: 61.8%=$${z.fib618.toFixed(2)}, 78.6%=$${z.fib786.toFixed(2)}`
     )
     .join('\n') || '无活跃 OTE'
 }
@@ -317,11 +322,18 @@ ${liquidationInfo}
   "warnings": ["风险提示1", "风险提示2"]
 }
 
+## 交易偏好（请参考）
+
+- FVG 入场: 0.22 位置，止损放边界
+- OB 入场: 0.22 位置，止损放边界
+- OTE 入场: 0.675 位置，止损放 0.786 外侧
+
 注意事项：
 1. 如果没有明确的交易机会，direction 设为 "neutral"
 2. 止损应该放在关键结构位之外
 3. 考虑清算密集区作为潜在的流动性猎取目标
-4. 风险回报比至少 1:2 才考虑交易`;
+4. 风险回报比至少 1:2 才考虑交易
+5. 优先使用上面预计算好的入场和止损价格`;
 }
 
 // ============================================
@@ -504,6 +516,12 @@ ${formatKlines(mtf.klines.m5, '5M')}
   "warnings": ["风险提示1", "风险提示2"]
 }
 
+## 交易偏好（请参考）
+
+- FVG 入场: 0.22 位置，止损放边界
+- OB 入场: 0.22 位置，止损放边界
+- OTE 入场: 0.675 位置，止损放 0.786 外侧
+
 ## 重要规则
 
 仅当以下条件**全部满足**时才建议交易（direction 设为 long 或 short）：
@@ -517,7 +535,9 @@ ${formatKlines(mtf.klines.m5, '5M')}
 置信度规则：
 - high: 对齐度 >= 80%，所有时间框架趋势一致
 - medium: 对齐度 50-79%，主要时间框架对齐
-- low: 对齐度 < 50%（此时应返回 neutral）`;
+- low: 对齐度 < 50%（此时应返回 neutral）
+
+注意：优先使用上面预计算好的入场和止损价格。`;
 }
 
 /**
