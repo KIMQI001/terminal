@@ -127,6 +127,7 @@ export function formatStartupMessage(): string {
 - MTF: ${config.analysis.mtf.mtf.join(', ')} (确认结构)
 - LTF: ${config.analysis.mtf.ltf.join(', ')} (寻找入场)
 **执行间隔**: ${config.schedule.interval}
+
 **AI**: ${config.ai.provider}
 
 *${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}*`;
@@ -138,6 +139,7 @@ export function formatStartupMessage(): string {
 **分析模式**: 独立周期分析
 **时间周期**: ${config.analysis.singleTimeframes.join(', ')}
 **执行间隔**: ${config.schedule.interval}
+
 **AI**: ${config.ai.provider}
 
 *${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}*`;
