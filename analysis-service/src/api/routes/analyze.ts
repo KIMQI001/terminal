@@ -150,8 +150,12 @@ analyzeRoutes.get('/tower', async (req: Request, res: Response) => {
 
     console.log(`[API] 塔块数据请求: ${symbol}`);
 
+    // BTC/ETH 请求 5000 根，其他交易对请求 1000 根（与前端保持一致）
+    const baseCoin = symbol.replace('USDC', '').replace('USDT', '');
+    const limit = (baseCoin === 'BTC' || baseCoin === 'ETH') ? 5000 : 1000;
+
     // 并行获取所有周期的 K 线数据
-    const candlesPromises = timeframes.map(tf => fetchKlines(symbol, tf, 500));
+    const candlesPromises = timeframes.map(tf => fetchKlines(symbol, tf, limit));
     const allCandles = await Promise.all(candlesPromises);
 
     // 分析每个周期的 ICT 指标
@@ -210,37 +214,25 @@ analyzeRoutes.get('/tower', async (req: Request, res: Response) => {
         }
       }
 
-      // 收集 OTE（填充度 < 22%）
-      // 不再要求 active，因为守塔策略需要预埋单
+      // 收集 OTE（ictAnalyzer 已过滤历史填充和价格位置）
       for (const ote of ictResult.oteZones) {
-        // 计算 OTE 填充度
-        // bullish OTE: 价格从上往下填充，fib618 是顶部，fib786 是底部
-        // bearish OTE: 价格从下往上填充，fib786 是顶部，fib618 是底部
+        // 计算填充度
         const zoneHeight = Math.abs(ote.fib618 - ote.fib786);
         let fillPercent = 0;
 
         if (zoneHeight > 0) {
           if (ote.type === 'bullish') {
-            // Bullish OTE: 价格需要下跌到区域，从 fib618 向 fib786 填充
-            if (currentPrice >= ote.fib618) {
-              fillPercent = 0; // 价格在区域上方，未填充
-            } else if (currentPrice <= ote.fib786) {
-              fillPercent = 100; // 价格穿透区域，完全填充
-            } else {
-              fillPercent = ((ote.fib618 - currentPrice) / zoneHeight) * 100;
-            }
+            if (currentPrice >= ote.fib618) fillPercent = 0;
+            else if (currentPrice <= ote.fib786) fillPercent = 100;
+            else fillPercent = ((ote.fib618 - currentPrice) / zoneHeight) * 100;
           } else {
-            // Bearish OTE: 价格需要上涨到区域，从 fib618 向 fib786 填充
-            if (currentPrice <= ote.fib618) {
-              fillPercent = 0; // 价格在区域下方，未填充
-            } else if (currentPrice >= ote.fib786) {
-              fillPercent = 100; // 价格穿透区域，完全填充
-            } else {
-              fillPercent = ((currentPrice - ote.fib618) / zoneHeight) * 100;
-            }
+            if (currentPrice <= ote.fib618) fillPercent = 0;
+            else if (currentPrice >= ote.fib786) fillPercent = 100;
+            else fillPercent = ((currentPrice - ote.fib618) / zoneHeight) * 100;
           }
         }
 
+        // OTE 使用与 FVG 相同的 22% 过滤
         if (fillPercent < 22) {
           towerBlocks.push({
             id: `ote-${tf}-${ote.startTime}`,

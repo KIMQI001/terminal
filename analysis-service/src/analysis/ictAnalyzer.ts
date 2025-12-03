@@ -544,60 +544,128 @@ export function detectOrderBlocks(
 export function detectOTEZones(
   swingPoints: SwingPoint[],
   currentPrice: number,
-  maxZones: number = 5
+  candles: Candle[] = [],
+  maxZones: number = 10
 ): OTEZone[] {
   const zones: OTEZone[] = [];
 
-  for (let i = 1; i < swingPoints.length; i++) {
-    const prev = swingPoints[i - 1];
-    const curr = swingPoints[i];
+  if (swingPoints.length < 2) return zones;
 
-    if (prev.type === 'low' && curr.type === 'high') {
-      // Bullish OTE (价格回撤后做多)
-      const range = curr.price - prev.price;
-      const fib618 = curr.price - range * 0.618;
-      const fib786 = curr.price - range * 0.786;
-      const fib675 = curr.price - range * 0.675;
-      const stopLossPrice = curr.price - range * 0.80;  // 略低于 78.6%
+  // 按时间倒序排列（最新的在前）
+  const sorted = [...swingPoints].sort((a, b) => b.time - a.time);
 
-      // 移除价格位置限制，显示所有潜在 OTE
+  for (let i = 0; i < sorted.length - 1 && zones.length < maxZones; i++) {
+    const current = sorted[i];
+    const prev = sorted[i + 1];
+
+    // Bullish OTE: high 之后找 low（价格回撤后做多）
+    if (current.type === 'high' && prev.type === 'low') {
+      const swingHigh = current.price;
+      const swingLow = prev.price;
+      const range = swingHigh - swingLow;
+
+      if (range <= 0) continue;
+
+      const fib618 = swingHigh - range * 0.618;
+      const fib786 = swingHigh - range * 0.786;
+      const fib675 = swingHigh - range * 0.675;
+      const stopLossPrice = swingHigh - range * 0.80;
+
+      // 检查历史 K 线是否已经完全穿过区域
+      const startTime = current.time;
+      let historicallyFilled = false;
+      for (const candle of candles) {
+        if (candle.time > startTime && candle.low <= fib786) {
+          historicallyFilled = true;
+          break;
+        }
+      }
+      if (historicallyFilled) continue;
+
+      // 计算当前填充百分比
+      const zoneHeight = fib618 - fib786;
+      let fillPercent = 0;
+      if (currentPrice >= fib618) {
+        fillPercent = 0;
+      } else if (currentPrice <= fib786) {
+        fillPercent = 100;
+      } else {
+        fillPercent = ((fib618 - currentPrice) / zoneHeight) * 100;
+      }
+      if (fillPercent > 80) continue;
+
+      // 只有当区域在当前价格下方时才是做多机会
+      if (fib786 > currentPrice) continue;
+
       zones.push({
         type: 'bullish',
-        startTime: prev.time,
-        swingHigh: curr.price,
-        swingLow: prev.price,
+        startTime: current.time,
+        swingHigh,
+        swingLow,
         fib618,
         fib786,
         fib675,
         active: currentPrice >= fib786 && currentPrice <= fib618,
-        entry: fib675,           // 67.5% 位置入场
-        stopLoss: stopLossPrice, // 止损略过 78.6%
+        entry: fib675,
+        stopLoss: stopLossPrice,
       });
-    } else if (prev.type === 'high' && curr.type === 'low') {
-      // Bearish OTE (价格反弹后做空)
-      const range = prev.price - curr.price;
-      const fib618 = curr.price + range * 0.618;
-      const fib786 = curr.price + range * 0.786;
-      const fib675 = curr.price + range * 0.675;
-      const stopLossPrice = curr.price + range * 0.80;  // 略高于 78.6%
+    }
 
-      // 移除价格位置限制，显示所有潜在 OTE
+    // Bearish OTE: low 之后找 high（价格反弹后做空）
+    if (current.type === 'low' && prev.type === 'high') {
+      const swingHigh = prev.price;
+      const swingLow = current.price;
+      const range = swingHigh - swingLow;
+
+      if (range <= 0) continue;
+
+      const fib618 = swingLow + range * 0.618;
+      const fib786 = swingLow + range * 0.786;
+      const fib675 = swingLow + range * 0.675;
+      const stopLossPrice = swingLow + range * 0.80;
+
+      // 检查历史 K 线是否已经完全穿过区域
+      const startTime = current.time;
+      let historicallyFilled = false;
+      for (const candle of candles) {
+        if (candle.time > startTime && candle.high >= fib786) {
+          historicallyFilled = true;
+          break;
+        }
+      }
+      if (historicallyFilled) continue;
+
+      // 计算当前填充百分比
+      const zoneHeight = fib786 - fib618;
+      let fillPercent = 0;
+      if (currentPrice <= fib618) {
+        fillPercent = 0;
+      } else if (currentPrice >= fib786) {
+        fillPercent = 100;
+      } else {
+        fillPercent = ((currentPrice - fib618) / zoneHeight) * 100;
+      }
+      if (fillPercent > 80) continue;
+
+      // 只有当区域在当前价格上方时才是做空机会
+      if (fib618 < currentPrice) continue;
+
       zones.push({
         type: 'bearish',
-        startTime: prev.time,
-        swingHigh: prev.price,
-        swingLow: curr.price,
+        startTime: current.time,
+        swingHigh,
+        swingLow,
         fib618,
         fib786,
         fib675,
-        active: currentPrice <= fib786 && currentPrice >= fib618,
-        entry: fib675,           // 67.5% 位置入场
-        stopLoss: stopLossPrice, // 止损略过 78.6%
+        active: currentPrice >= fib618 && currentPrice <= fib786,
+        entry: fib675,
+        stopLoss: stopLossPrice,
       });
     }
   }
 
-  return zones.slice(-maxZones);
+  return zones;
 }
 
 // ============================================
@@ -681,7 +749,7 @@ export function analyzeICT(
   const swingPoints = detectSwingPoints(candles);
   const fvgs = detectFVGs(candles);
   const orderBlocks = detectOrderBlocks(candles);
-  const oteZones = detectOTEZones(swingPoints, currentPrice);
+  const oteZones = detectOTEZones(swingPoints, currentPrice, candles);
   const { bos, choch } = detectStructure(swingPoints, currentPrice);
 
   // 判断趋势
