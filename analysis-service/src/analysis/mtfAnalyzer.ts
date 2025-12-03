@@ -44,6 +44,15 @@ export interface EntrySetup {
   riskReward: number;
 }
 
+// 各周期趋势
+export interface TrendsByTimeframe {
+  '1d': Bias;
+  '4h': Bias;
+  '1h': Bias;
+  '15m': Bias;
+  '5m': Bias;
+}
+
 export interface MTFAnalysis {
   symbol: string;
   timestamp: number;
@@ -72,6 +81,9 @@ export interface MTFAnalysis {
     m15: Candle[];  // 最近 16 根
     m5: Candle[];   // 最近 12 根
   };
+
+  // 各周期趋势（用于多数投票）
+  trends: TrendsByTimeframe;
 
   // 综合结果
   overallBias: Bias;
@@ -273,34 +285,27 @@ function findLTFEntry(
 function generateSummary(analysis: MTFAnalysis): string {
   const lines: string[] = [];
 
-  // HTF 分析
-  lines.push(`【HTF 分析】`);
-  lines.push(`  日线: ${analysis.htf.daily.trend} (${analysis.htf.daily.structure})`);
-  lines.push(`  4H: ${analysis.htf.h4.trend} (${analysis.htf.h4.structure})`);
-  lines.push(`  偏向: ${analysis.htf.bias} | 对齐: ${analysis.htf.aligned ? '是' : '否'}`);
-
-  // MTF 分析
-  lines.push(`【MTF 分析】`);
-  lines.push(`  1H: ${analysis.mtf.h1.trend} (${analysis.mtf.h1.structure})`);
-  lines.push(`  确认HTF: ${analysis.mtf.confirmed ? '是' : '否'}`);
+  // 多周期趋势
+  lines.push(`【多周期趋势】`);
+  lines.push(`  1d: ${analysis.trends['1d']} | 4h: ${analysis.trends['4h']} | 1h: ${analysis.trends['1h']} | 15m: ${analysis.trends['15m']} | 5m: ${analysis.trends['5m']}`);
+  lines.push(`  多数投票: ${analysis.overallBias} (对齐度 ${analysis.alignment}%)`);
 
   // LTF 入场
   if (analysis.ltf.entry) {
     const e = analysis.ltf.entry;
-    lines.push(`【LTF 入场】`);
+    lines.push(`【入场信号】`);
     lines.push(`  类型: ${e.type.toUpperCase()}`);
     lines.push(`  入场区: ${e.entryZone.low.toFixed(0)} - ${e.entryZone.high.toFixed(0)}`);
     lines.push(`  建议入场: ${e.suggestedEntry.toFixed(2)}`);
     lines.push(`  止损: ${e.stopLoss.toFixed(2)}`);
     lines.push(`  盈亏比: ${e.riskReward}`);
   } else {
-    lines.push(`【LTF 入场】无有效入场点`);
+    lines.push(`【入场信号】无有效入场点`);
   }
 
   // 结论
   lines.push(`【结论】`);
   lines.push(`  可交易: ${analysis.tradeable ? '是' : '否'}`);
-  lines.push(`  对齐度: ${analysis.alignment}%`);
 
   return lines.join('\n');
 }
@@ -339,34 +344,50 @@ export async function analyzeMultiTimeframe(symbol: string): Promise<MTFAnalysis
   const m15TF = analyzeTimeframe(m15ICT);
   const m5TF = analyzeTimeframe(m5ICT);
 
-  // 3. HTF 分析
+  // 3. 收集所有周期趋势
+  const trends: TrendsByTimeframe = {
+    '1d': dailyTF.trend,
+    '4h': h4TF.trend,
+    '1h': h1TF.trend,
+    '15m': m15TF.trend,
+    '5m': m5TF.trend,
+  };
+
+  // 4. 多数投票计算 overallBias
+  let bullishCount = 0;
+  let bearishCount = 0;
+  for (const trend of Object.values(trends)) {
+    if (trend === 'bullish') bullishCount++;
+    if (trend === 'bearish') bearishCount++;
+  }
+
+  let overallBias: Bias = 'neutral';
+  if (bullishCount > bearishCount) overallBias = 'bullish';
+  else if (bearishCount > bullishCount) overallBias = 'bearish';
+
+  // 计算对齐度 = 多数方向的百分比
+  const alignment = Math.round((Math.max(bullishCount, bearishCount) / 5) * 100);
+
+  console.log(`[MTF] 趋势: 1d=${trends['1d']}, 4h=${trends['4h']}, 1h=${trends['1h']}, 15m=${trends['15m']}, 5m=${trends['5m']}`);
+  console.log(`[MTF] 多数投票: bullish=${bullishCount}, bearish=${bearishCount} → ${overallBias}, 对齐度=${alignment}%`);
+
+  // 5. HTF 分析（保留用于结构判断）
   const htfResult = analyzeHTF(dailyTF, h4TF);
-  console.log(`[MTF] HTF 偏向: ${htfResult.bias}, 对齐: ${htfResult.aligned}`);
-
-  // 4. MTF 分析
-  console.log(`[MTF] 1H trend: ${h1TF.trend}, structure: ${h1TF.structure}, structureType: ${h1TF.structureType}`);
   const mtfResult = analyzeMTF(h1TF, htfResult.bias);
-  console.log(`[MTF] MTF 确认: ${mtfResult.confirmed}`);
 
-  // 5. LTF 入场
+  // 6. LTF 入场（使用多数投票的 overallBias）
   let ltfEntry: EntrySetup | null = null;
-  if (htfResult.bias !== 'neutral' && mtfResult.confirmed) {
-    ltfEntry = findLTFEntry(m15ICT, m5ICT, htfResult.bias, currentPrice);
+  if (overallBias !== 'neutral' && alignment >= 60) {
+    ltfEntry = findLTFEntry(m15ICT, m5ICT, overallBias, currentPrice);
     if (ltfEntry) {
       console.log(`[MTF] LTF 入场: ${ltfEntry.type} @ ${ltfEntry.suggestedEntry.toFixed(2)}`);
     }
   }
 
-  // 6. 计算对齐度
-  let alignment = 0;
-  if (htfResult.bias !== 'neutral') {
-    alignment += 30;  // HTF 有方向
-    if (htfResult.aligned) alignment += 20;  // 日线和4H 对齐
-    if (mtfResult.confirmed) alignment += 30;  // 1H 确认
-    if (ltfEntry) alignment += 20;  // 有入场机会
-  }
-
   // 7. 构建结果
+  // 可交易条件：有明确方向且对齐度 >= 60%（至少 3/5 一致）
+  const tradeable = overallBias !== 'neutral' && alignment >= 60;
+
   const analysis: MTFAnalysis = {
     symbol,
     timestamp: Date.now(),
@@ -392,9 +413,10 @@ export async function analyzeMultiTimeframe(symbol: string): Promise<MTFAnalysis
       m15: m15Candles.slice(-16),  // 最近 16 根 (4 小时)
       m5: m5Candles.slice(-12),    // 最近 12 根 (1 小时)
     },
-    overallBias: htfResult.bias,
+    trends,
+    overallBias,
     alignment,
-    tradeable: htfResult.bias !== 'neutral' && mtfResult.confirmed && ltfEntry !== null,
+    tradeable,
     summary: '',
   };
 
