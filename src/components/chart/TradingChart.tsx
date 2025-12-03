@@ -500,7 +500,7 @@ export function TradingChart() {
     loadAllTimeframesOB();
   }, [symbol, timeframe, setMultiTimeframeOB]);
 
-  // 初始化所有周期的 Trend 数据
+  // 初始化所有周期的 Trend 数据（每 2 分钟刷新）
   useEffect(() => {
     const allTimeframes = ['5m', '15m', '1h', '4h', '1d'] as const;
 
@@ -534,8 +534,13 @@ export function TradingChart() {
       }
     };
 
-    // MTF 面板始终需要数据
+    // 初始加载
     loadAllTimeframesTrend();
+
+    // 每 2 分钟刷新一次
+    const interval = setInterval(loadAllTimeframesTrend, 2 * 60 * 1000);
+
+    return () => clearInterval(interval);
   }, [symbol, timeframe, setMultiTimeframeTrend]);
 
   // Update ICT Primitives with data
