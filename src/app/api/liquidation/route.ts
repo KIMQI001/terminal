@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 // Get relay HTTP URL from environment
 // Use HTTP API instead of WebSocket to avoid ws library bundling issues in Next.js
-const RELAY_HTTP_URL = process.env.COINANK_RELAY_HTTP || 'http://localhost:3001/api/coinank/fetch';
+// 使用 127.0.0.1 而不是 localhost 避免 IPv6 解析问题
+const RELAY_HTTP_URL = process.env.COINANK_RELAY_HTTP || 'http://127.0.0.1:3001/api/coinank/fetch';
 
 // Request timeout in milliseconds
 const REQUEST_TIMEOUT = 35000;
