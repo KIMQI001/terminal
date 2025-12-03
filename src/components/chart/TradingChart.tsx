@@ -500,6 +500,44 @@ export function TradingChart() {
     loadAllTimeframesOB();
   }, [symbol, timeframe, setMultiTimeframeOB]);
 
+  // 初始化所有周期的 Trend 数据
+  useEffect(() => {
+    const allTimeframes = ['5m', '15m', '1h', '4h', '1d'] as const;
+
+    const loadAllTimeframesTrend = async () => {
+      for (const tf of allTimeframes) {
+        // 跳过当前周期（已经由主数据加载处理）
+        if (tf === timeframe) continue;
+
+        try {
+          const limit = (symbol === "BTCUSDC" || symbol === "ETHUSDC") ? 5000 : 1000;
+          const data = await fetchKlines(symbol, tf, limit);
+
+          if (data.length > 0) {
+            // 检测 swing points
+            const swings = detectSwingPoints(data);
+            // 检测 BOS/CHoCH
+            const lastPrice = data[data.length - 1].close;
+            const { bos, choch } = detectStructure(swings, lastPrice);
+            // 计算趋势
+            let trend: 'bullish' | 'bearish' | 'neutral' = 'neutral';
+            if (choch.length > 0) {
+              trend = choch[choch.length - 1].type;
+            } else if (bos.length > 0) {
+              trend = bos[bos.length - 1].type;
+            }
+            setMultiTimeframeTrend(tf, trend);
+          }
+        } catch (error) {
+          console.error(`Failed to load Trend for ${tf}:`, error);
+        }
+      }
+    };
+
+    // MTF 面板始终需要数据
+    loadAllTimeframesTrend();
+  }, [symbol, timeframe, setMultiTimeframeTrend]);
+
   // Update ICT Primitives with data
   useEffect(() => {
     // Update Order Blocks Primitive
