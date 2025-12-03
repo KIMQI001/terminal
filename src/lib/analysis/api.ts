@@ -1,9 +1,9 @@
 /**
  * Analysis Service API Client
+ * 通过 Next.js API 路由代理访问 analysis-service
  */
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_ANALYSIS_API || "http://127.0.0.1:3002";
+const API_BASE = "/api/analysis";
 
 /** 信号记录类型 */
 export interface Signal {
