@@ -17,6 +17,7 @@ import {
   BOS,
   CHoCH,
 } from './ictAnalyzer';
+import { LiquidationData } from '../data/liquidationClient';
 
 // ============================================
 // 类型定义
@@ -97,6 +98,12 @@ export interface MTFAnalysis {
     ltfBias: Bias;            // LTF 方向 (5m/15m/1h)
     ltfAlignment: number;     // LTF 对齐度 (0-100)
     entry: EntrySetup | null; // 反转入场点
+  };
+
+  // 近期极值（最近 200 根 15m K 线）
+  recentExtreme: {
+    high: number;   // 近期最高价
+    low: number;    // 近期最低价
   };
 }
 
@@ -200,13 +207,39 @@ function analyzeMTF(
 }
 
 /**
+ * 计算与流动性峰值的最小距离
+ */
+function getMinDistanceToLiquidityPeak(
+  price: number,
+  liquidationData: LiquidationData | null | undefined,
+  bias: Bias
+): number {
+  if (!liquidationData) return Infinity;
+
+  // bullish（开多）用多头清算峰值（价格下方）
+  // bearish（开空）用空头清算峰值（价格上方）
+  const peaks = bias === 'bullish'
+    ? liquidationData.longPeaks
+    : liquidationData.shortPeaks;
+
+  if (!peaks || peaks.length === 0) return Infinity;
+
+  return Math.min(...peaks.map(p => Math.abs(price - p.price)));
+}
+
+/**
  * 在 LTF 寻找入场机会
+ *
+ * @param recentExtreme - 最近 200 根 15m K 线的极值（开多用最低，开空用最高）
+ * @param liquidationData - 流动性数据，用于优先推荐靠近流动性峰值的入场点
  */
 function findLTFEntry(
   m15: ICTAnalysisResult,
   m5: ICTAnalysisResult,
   htfBias: Bias,
-  currentPrice: number
+  currentPrice: number,
+  recentExtreme?: number,
+  liquidationData?: LiquidationData | null
 ): EntrySetup | null {
   // 优先使用 15m 的 OTE 区域
   const activeOTE = m15.oteZones.find(
@@ -241,9 +274,31 @@ function findLTFEntry(
 
   // 使用 15m 或 5m 的未填充 FVG
   const fvgCandidates = [...m15.fvgs, ...m5.fvgs]
-    .filter(fvg => !fvg.filled && fvg.type === htfBias)
+    .filter(fvg => {
+      if (fvg.filled || fvg.type !== htfBias) return false;
+
+      // 如果提供了极值，进行位置过滤
+      // 开多(bullish): 只选极值（近期最低）下方的 FVG
+      // 开空(bearish): 只选极值（近期最高）上方的 FVG
+      if (recentExtreme !== undefined) {
+        if (htfBias === 'bullish') {
+          return fvg.fib22 < recentExtreme;
+        } else {
+          return fvg.fib22 > recentExtreme;
+        }
+      }
+      return true;
+    })
     .sort((a, b) => {
-      // 按距离当前价格排序
+      // 优先按流动性峰值距离排序（越近越优先）
+      if (liquidationData) {
+        const peakDistA = getMinDistanceToLiquidityPeak(a.fib22, liquidationData, htfBias);
+        const peakDistB = getMinDistanceToLiquidityPeak(b.fib22, liquidationData, htfBias);
+        if (peakDistA !== peakDistB) {
+          return peakDistA - peakDistB;
+        }
+      }
+      // 次优先按距离当前价格排序
       const distA = htfBias === 'bullish'
         ? currentPrice - a.fib22
         : a.fib22 - currentPrice;
@@ -324,8 +379,14 @@ function generateSummary(analysis: MTFAnalysis): string {
 
 /**
  * 执行多时间框架综合分析
+ *
+ * @param symbol - 交易对符号
+ * @param liquidationData - 可选的流动性数据，用于反转入场点优先级排序
  */
-export async function analyzeMultiTimeframe(symbol: string): Promise<MTFAnalysis> {
+export async function analyzeMultiTimeframe(
+  symbol: string,
+  liquidationData?: LiquidationData | null
+): Promise<MTFAnalysis> {
   console.log(`[MTF] 开始分析 ${symbol}...`);
 
   // 1. 并行获取所有时间框架的 K 线数据（数量与前端一致，确保 trend 判断相同）
@@ -338,6 +399,14 @@ export async function analyzeMultiTimeframe(symbol: string): Promise<MTFAnalysis
   ]);
 
   const currentPrice = m5Candles[m5Candles.length - 1].close;
+
+  // 计算最近 200 根 15m K 线的极值
+  const recent200m15 = m15Candles.slice(-200);
+  const recentExtreme = {
+    high: Math.max(...recent200m15.map(c => c.high)),
+    low: Math.min(...recent200m15.map(c => c.low)),
+  };
+  console.log(`[MTF] 近期极值 (200 根 15m): 最高=${recentExtreme.high.toFixed(2)}, 最低=${recentExtreme.low.toFixed(2)}`);
 
   // 2. 分析各个时间框架
   const dailyICT = analyzeICT(dailyCandles, symbol, '1d');
@@ -412,9 +481,13 @@ export async function analyzeMultiTimeframe(symbol: string): Promise<MTFAnalysis
 
   let reversalEntry: EntrySetup | null = null;
   if (reversalDetected) {
-    reversalEntry = findLTFEntry(m15ICT, m5ICT, ltfBias, currentPrice);
+    // 反转入场时使用极值过滤和流动性排序
+    // 开多(bullish) → 只选极值低点下方的入场点
+    // 开空(bearish) → 只选极值高点上方的入场点
+    const reversalExtreme = ltfBias === 'bullish' ? recentExtreme.low : recentExtreme.high;
+    reversalEntry = findLTFEntry(m15ICT, m5ICT, ltfBias, currentPrice, reversalExtreme, liquidationData);
     if (reversalEntry) {
-      console.log(`[MTF] 反转机会: HTF=${htfResult.bias}, LTF=${ltfBias}, 入场=${reversalEntry.suggestedEntry.toFixed(2)}`);
+      console.log(`[MTF] 反转机会: HTF=${htfResult.bias}, LTF=${ltfBias}, 极值=${reversalExtreme.toFixed(2)}, 入场=${reversalEntry.suggestedEntry.toFixed(2)}`);
     }
   }
 
@@ -458,6 +531,7 @@ export async function analyzeMultiTimeframe(symbol: string): Promise<MTFAnalysis
       ltfAlignment,
       entry: reversalEntry,
     },
+    recentExtreme,
   };
 
   analysis.summary = generateSummary(analysis);

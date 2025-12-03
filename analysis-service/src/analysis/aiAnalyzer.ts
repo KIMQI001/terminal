@@ -632,6 +632,18 @@ ${keyLevels.shortLiquidation.map(l => `- $${l.price.toFixed(2)}: ${(l.amount / 1
 `;
   }
 
+  // 添加极值信息
+  const extremeInfo = `
+## 近期极值（最近 200 根 15m K 线）
+- 最高价: $${mtf.recentExtreme.high.toFixed(2)}
+- 最低价: $${mtf.recentExtreme.low.toFixed(2)}
+- 当前价: $${mtf.currentPrice.toFixed(2)}
+
+**反转入场规则**:
+- 开空信号: 入场点必须在 $${mtf.recentExtreme.high.toFixed(2)} 上方（突破后寻找空头入场）
+- 开多信号: 入场点必须在 $${mtf.recentExtreme.low.toFixed(2)} 下方（跌破后寻找多头入场）
+`;
+
   // 格式化入场设置信息
   let entryInfo = '无有效入场点';
   if (mtf.reversal.entry) {
@@ -677,6 +689,8 @@ ${keyLevels.shortLiquidation.map(l => `- $${l.price.toFixed(2)}: ${(l.amount / 1
 ${entryInfo}
 
 ${liquidationInfo}
+
+${extremeInfo}
 
 ## K线数据（用于形态分析）
 

@@ -94,17 +94,18 @@ async function analyzeSymbolMTF(symbol: string): Promise<void> {
   console.log(`\n[${key}] 开始多时间框架分析...`);
 
   try {
-    // 1. 执行 MTF 分析
-    const mtfResult = await analyzeMultiTimeframe(symbol);
+    // 1. 获取清算数据（先获取，用于反转入场点选择）
+    const baseCoin = symbol.replace('USDC', '').replace('USDT', '');
+    const liquidation = await fetchLiquidation(baseCoin, '1d');
+
+    // 2. 执行 MTF 分析（传入清算数据用于反转入场优化）
+    const mtfResult = await analyzeMultiTimeframe(symbol, liquidation);
     console.log(`[${key}] MTF 分析完成:`);
     console.log(`  HTF 偏向: ${mtfResult.htf.bias}, 对齐: ${mtfResult.htf.aligned}`);
     console.log(`  MTF 确认: ${mtfResult.mtf.confirmed}`);
     console.log(`  对齐度: ${mtfResult.alignment}%, 可交易: ${mtfResult.tradeable}`);
     console.log(`  反转检测: ${mtfResult.reversal.detected}, LTF方向: ${mtfResult.reversal.ltfBias}`);
-
-    // 2. 获取清算数据
-    const baseCoin = symbol.replace('USDC', '').replace('USDT', '');
-    const liquidation = await fetchLiquidation(baseCoin, '1d');
+    console.log(`  近期极值: 高=${mtfResult.recentExtreme.high.toFixed(2)}, 低=${mtfResult.recentExtreme.low.toFixed(2)}`);
 
     // ========== 顺势信号处理 ==========
     if (mtfResult.tradeable) {
