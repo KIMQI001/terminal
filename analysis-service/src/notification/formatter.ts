@@ -128,6 +128,7 @@ export function formatStartupMessage(): string {
 - 地界: ${config.analysis.mtf.ltf.join(', ')} (寻机缘)
 
 **轮回周期**: ${config.schedule.interval}
+
 **道法**: ${config.ai.provider}
 
 *${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}*`;
@@ -140,6 +141,7 @@ export function formatStartupMessage(): string {
 **时空法则**: ${config.analysis.singleTimeframes.join(', ')}
 
 **轮回周期**: ${config.schedule.interval}
+
 **道法**: ${config.ai.provider}
 
 *${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}*`;
