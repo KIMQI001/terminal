@@ -124,13 +124,26 @@ class OpenAIClient implements AIClient {
   }
 
   async generateContent(prompt: string): Promise<string> {
-    const response = await this.client.chat.completions.create({
-      model: this.model,
-      max_tokens: config.ai.maxTokens,
-      messages: [{ role: 'user', content: prompt }],
-    });
+    const maxRetries = 2;
+    let lastError: Error | null = null;
 
-    return response.choices[0]?.message?.content || '';
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await this.client.chat.completions.create({
+          model: this.model,
+          max_tokens: config.ai.maxTokens,
+          messages: [{ role: 'user', content: prompt }],
+        });
+        return response.choices[0]?.message?.content || '';
+      } catch (error) {
+        lastError = error as Error;
+        if (attempt < maxRetries) {
+          console.log(`[AI] 请求失败，第 ${attempt + 1} 次重试...`);
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        }
+      }
+    }
+    throw lastError;
   }
 
   getName(): string {
