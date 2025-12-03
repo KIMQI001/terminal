@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User, Maximize2, Minimize2, BarChart3 } from "lucide-react";
+import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User, Maximize2, Minimize2, BarChart3, Building2 } from "lucide-react";
 import { MTFPanel } from "@/components/chart/MTFPanel";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -208,6 +208,18 @@ export function Header() {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* 守塔策略按钮 */}
+        <Link href="/tower">
+          <Button
+            variant="outline"
+            size="sm"
+            title="守塔策略"
+          >
+            <Building2 className="w-3 h-3 mr-1.5" />
+            塔
+          </Button>
+        </Link>
 
         {/* AI 分析按钮 */}
         <Link href="/analysis">
