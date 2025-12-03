@@ -1,0 +1,475 @@
+/**
+ * ICT 指标分析器
+ * 复用前端的 ICT 指标计算逻辑
+ */
+
+import { Candle, Timeframe } from '../data/klineClient';
+
+// ============================================
+// 类型定义
+// ============================================
+
+export interface SwingPoint {
+  type: 'high' | 'low';
+  price: number;
+  time: number;
+  index: number;
+}
+
+export interface OrderBlock {
+  type: 'bullish' | 'bearish';
+  high: number;
+  low: number;
+  startTime: number;
+  mitigated: boolean;
+  strength: number;
+}
+
+export interface FVG {
+  type: 'bullish' | 'bearish';
+  high: number;
+  low: number;
+  time: number;
+  filled: boolean;
+  fillPercentage: number;
+  fib22: number;
+}
+
+export interface OTEZone {
+  type: 'bullish' | 'bearish';
+  startTime: number;
+  swingHigh: number;
+  swingLow: number;
+  fib618: number;
+  fib786: number;
+  fib675: number;
+  active: boolean;
+}
+
+export interface BOS {
+  type: 'bullish' | 'bearish';
+  level: number;
+  time: number;
+}
+
+export interface CHoCH {
+  type: 'bullish' | 'bearish';
+  level: number;
+  time: number;
+  previousTrend: 'up' | 'down';
+}
+
+export interface LiquidityZone {
+  type: 'buy-side' | 'sell-side';
+  level: number;
+  strength: number;
+  swept: boolean;
+}
+
+export interface ICTAnalysisResult {
+  symbol: string;
+  timeframe: Timeframe;
+  timestamp: number;
+  currentPrice: number;
+
+  // 核心指标
+  swingPoints: SwingPoint[];
+  orderBlocks: OrderBlock[];
+  fvgs: FVG[];
+  oteZones: OTEZone[];
+  bos: BOS[];
+  choch: CHoCH[];
+  liquidityZones: LiquidityZone[];
+
+  // 综合判断
+  trend: 'bullish' | 'bearish' | 'neutral';
+  keyLevels: { level: number; type: string; strength: number }[];
+}
+
+// ============================================
+// Swing Points 检测
+// ============================================
+
+export function detectSwingPoints(
+  candles: Candle[],
+  leftBars: number = 3,
+  rightBars: number = 3,
+  minSwingPercent: number = 1.5
+): SwingPoint[] {
+  if (candles.length < leftBars + 1) return [];
+
+  const rawSwings: SwingPoint[] = [];
+
+  for (let i = leftBars; i < candles.length; i++) {
+    const current = candles[i];
+    const actualRightBars = Math.min(rightBars, candles.length - 1 - i);
+
+    // 检查 Pivot High
+    let isPivotHigh = true;
+    for (let j = 1; j <= leftBars; j++) {
+      if (candles[i - j].high >= current.high) {
+        isPivotHigh = false;
+        break;
+      }
+    }
+    if (isPivotHigh && actualRightBars > 0) {
+      for (let j = 1; j <= actualRightBars; j++) {
+        if (candles[i + j].high > current.high) {
+          isPivotHigh = false;
+          break;
+        }
+      }
+    }
+
+    if (isPivotHigh) {
+      rawSwings.push({
+        type: 'high',
+        price: current.high,
+        time: current.time,
+        index: i,
+      });
+    }
+
+    // 检查 Pivot Low
+    let isPivotLow = true;
+    for (let j = 1; j <= leftBars; j++) {
+      if (candles[i - j].low <= current.low) {
+        isPivotLow = false;
+        break;
+      }
+    }
+    if (isPivotLow && actualRightBars > 0) {
+      for (let j = 1; j <= actualRightBars; j++) {
+        if (candles[i + j].low < current.low) {
+          isPivotLow = false;
+          break;
+        }
+      }
+    }
+
+    if (isPivotLow) {
+      rawSwings.push({
+        type: 'low',
+        price: current.low,
+        time: current.time,
+        index: i,
+      });
+    }
+  }
+
+  rawSwings.sort((a, b) => a.time - b.time);
+  if (rawSwings.length === 0) return [];
+
+  // 构建交替结构
+  const result: SwingPoint[] = [];
+  let currentGroup: SwingPoint[] = [rawSwings[0]];
+
+  for (let i = 1; i < rawSwings.length; i++) {
+    const swing = rawSwings[i];
+    const lastInGroup = currentGroup[currentGroup.length - 1];
+
+    if (swing.type === lastInGroup.type) {
+      currentGroup.push(swing);
+    } else {
+      const best = selectBestFromGroup(currentGroup);
+      const lastConfirmed = result[result.length - 1];
+      if (lastConfirmed) {
+        const priceChange =
+          (Math.abs(best.price - lastConfirmed.price) / lastConfirmed.price) * 100;
+        if (priceChange >= minSwingPercent) {
+          result.push(best);
+        }
+      } else {
+        result.push(best);
+      }
+      currentGroup = [swing];
+    }
+  }
+
+  // 处理最后一组
+  if (currentGroup.length > 0) {
+    const best = selectBestFromGroup(currentGroup);
+    const lastConfirmed = result[result.length - 1];
+    if (lastConfirmed) {
+      const priceChange =
+        (Math.abs(best.price - lastConfirmed.price) / lastConfirmed.price) * 100;
+      if (priceChange >= minSwingPercent) {
+        result.push(best);
+      }
+    } else {
+      result.push(best);
+    }
+  }
+
+  return result;
+}
+
+function selectBestFromGroup(group: SwingPoint[]): SwingPoint {
+  if (group.length === 1) return group[0];
+  const isHigh = group[0].type === 'high';
+  return group.reduce((best, current) => {
+    if (isHigh) {
+      return current.price > best.price ? current : best;
+    } else {
+      return current.price < best.price ? current : best;
+    }
+  });
+}
+
+// ============================================
+// FVG 检测
+// ============================================
+
+export function detectFVGs(candles: Candle[], minGapPercent: number = 0.1): FVG[] {
+  const fvgs: FVG[] = [];
+  if (candles.length < 3) return fvgs;
+
+  for (let i = 2; i < candles.length; i++) {
+    const c1 = candles[i - 2];
+    const c2 = candles[i - 1];
+    const c3 = candles[i];
+
+    // Bullish FVG: c3.low > c1.high
+    if (c3.low > c1.high) {
+      const gapSize = c3.low - c1.high;
+      const gapPercent = (gapSize / c2.close) * 100;
+      if (gapPercent >= minGapPercent) {
+        const fvgHigh = c3.low;
+        const fvgLow = c1.high;
+        const fvgSize = fvgHigh - fvgLow;
+        fvgs.push({
+          type: 'bullish',
+          high: fvgHigh,
+          low: fvgLow,
+          time: c2.time,
+          filled: false,
+          fillPercentage: 0,
+          fib22: fvgHigh - fvgSize * 0.22,
+        });
+      }
+    }
+
+    // Bearish FVG: c3.high < c1.low
+    if (c3.high < c1.low) {
+      const gapSize = c1.low - c3.high;
+      const gapPercent = (gapSize / c2.close) * 100;
+      if (gapPercent >= minGapPercent) {
+        const fvgHigh = c1.low;
+        const fvgLow = c3.high;
+        const fvgSize = fvgHigh - fvgLow;
+        fvgs.push({
+          type: 'bearish',
+          high: fvgHigh,
+          low: fvgLow,
+          time: c2.time,
+          filled: false,
+          fillPercentage: 0,
+          fib22: fvgLow + fvgSize * 0.22,
+        });
+      }
+    }
+  }
+
+  // 检查填充状态
+  const currentPrice = candles[candles.length - 1].close;
+  for (const fvg of fvgs) {
+    if (fvg.type === 'bullish') {
+      if (currentPrice <= fvg.low) {
+        fvg.filled = true;
+        fvg.fillPercentage = 100;
+      } else if (currentPrice < fvg.high) {
+        fvg.fillPercentage = ((fvg.high - currentPrice) / (fvg.high - fvg.low)) * 100;
+      }
+    } else {
+      if (currentPrice >= fvg.high) {
+        fvg.filled = true;
+        fvg.fillPercentage = 100;
+      } else if (currentPrice > fvg.low) {
+        fvg.fillPercentage = ((currentPrice - fvg.low) / (fvg.high - fvg.low)) * 100;
+      }
+    }
+  }
+
+  // 返回未填充的 FVG
+  return fvgs.filter(f => !f.filled && f.fillPercentage < 80).slice(-15);
+}
+
+// ============================================
+// OTE 区域检测
+// ============================================
+
+export function detectOTEZones(
+  swingPoints: SwingPoint[],
+  currentPrice: number,
+  maxZones: number = 3
+): OTEZone[] {
+  const zones: OTEZone[] = [];
+
+  for (let i = 1; i < swingPoints.length; i++) {
+    const prev = swingPoints[i - 1];
+    const curr = swingPoints[i];
+
+    if (prev.type === 'low' && curr.type === 'high') {
+      // Bullish OTE
+      const range = curr.price - prev.price;
+      const fib618 = curr.price - range * 0.618;
+      const fib786 = curr.price - range * 0.786;
+      const fib675 = curr.price - range * 0.675;
+
+      if (currentPrice > fib786 && currentPrice < curr.price) {
+        zones.push({
+          type: 'bullish',
+          startTime: prev.time,
+          swingHigh: curr.price,
+          swingLow: prev.price,
+          fib618,
+          fib786,
+          fib675,
+          active: currentPrice >= fib786 && currentPrice <= fib618,
+        });
+      }
+    } else if (prev.type === 'high' && curr.type === 'low') {
+      // Bearish OTE
+      const range = prev.price - curr.price;
+      const fib618 = curr.price + range * 0.618;
+      const fib786 = curr.price + range * 0.786;
+      const fib675 = curr.price + range * 0.675;
+
+      if (currentPrice < fib786 && currentPrice > curr.price) {
+        zones.push({
+          type: 'bearish',
+          startTime: prev.time,
+          swingHigh: prev.price,
+          swingLow: curr.price,
+          fib618,
+          fib786,
+          fib675,
+          active: currentPrice <= fib786 && currentPrice >= fib618,
+        });
+      }
+    }
+  }
+
+  return zones.slice(-maxZones);
+}
+
+// ============================================
+// BOS & CHoCH 检测
+// ============================================
+
+export function detectStructure(
+  swingPoints: SwingPoint[],
+  currentPrice: number
+): { bos: BOS[]; choch: CHoCH[] } {
+  const bos: BOS[] = [];
+  const choch: CHoCH[] = [];
+
+  if (swingPoints.length < 4) return { bos, choch };
+
+  // 确定当前趋势
+  const recentHighs = swingPoints.filter(s => s.type === 'high').slice(-3);
+  const recentLows = swingPoints.filter(s => s.type === 'low').slice(-3);
+
+  let trend: 'up' | 'down' | 'neutral' = 'neutral';
+  if (recentHighs.length >= 2 && recentLows.length >= 2) {
+    const higherHighs = recentHighs[recentHighs.length - 1].price > recentHighs[0].price;
+    const higherLows = recentLows[recentLows.length - 1].price > recentLows[0].price;
+    const lowerHighs = recentHighs[recentHighs.length - 1].price < recentHighs[0].price;
+    const lowerLows = recentLows[recentLows.length - 1].price < recentLows[0].price;
+
+    if (higherHighs && higherLows) trend = 'up';
+    else if (lowerHighs && lowerLows) trend = 'down';
+  }
+
+  // 检测 BOS 和 CHoCH
+  for (let i = 1; i < swingPoints.length; i++) {
+    const prev = swingPoints
+      .slice(0, i)
+      .filter(s => s.type === swingPoints[i].type)
+      .pop();
+    if (!prev) continue;
+
+    const curr = swingPoints[i];
+
+    if (curr.type === 'high' && curr.price > prev.price) {
+      if (trend === 'up') {
+        bos.push({ type: 'bullish', level: prev.price, time: curr.time });
+      } else if (trend === 'down') {
+        choch.push({
+          type: 'bullish',
+          level: prev.price,
+          time: curr.time,
+          previousTrend: 'down',
+        });
+      }
+    } else if (curr.type === 'low' && curr.price < prev.price) {
+      if (trend === 'down') {
+        bos.push({ type: 'bearish', level: prev.price, time: curr.time });
+      } else if (trend === 'up') {
+        choch.push({
+          type: 'bearish',
+          level: prev.price,
+          time: curr.time,
+          previousTrend: 'up',
+        });
+      }
+    }
+  }
+
+  return { bos: bos.slice(-5), choch: choch.slice(-3) };
+}
+
+// ============================================
+// 综合分析
+// ============================================
+
+export function analyzeICT(
+  candles: Candle[],
+  symbol: string,
+  timeframe: Timeframe
+): ICTAnalysisResult {
+  const currentPrice = candles[candles.length - 1].close;
+
+  // 计算所有 ICT 指标
+  const swingPoints = detectSwingPoints(candles);
+  const fvgs = detectFVGs(candles);
+  const oteZones = detectOTEZones(swingPoints, currentPrice);
+  const { bos, choch } = detectStructure(swingPoints, currentPrice);
+
+  // 判断趋势
+  let trend: 'bullish' | 'bearish' | 'neutral' = 'neutral';
+  if (choch.length > 0) {
+    trend = choch[choch.length - 1].type;
+  } else if (bos.length > 0) {
+    trend = bos[bos.length - 1].type;
+  }
+
+  // 提取关键价位
+  const keyLevels: { level: number; type: string; strength: number }[] = [];
+
+  // 添加活跃的 OTE 区域
+  for (const ote of oteZones.filter(z => z.active)) {
+    keyLevels.push({ level: ote.fib675, type: `OTE ${ote.type}`, strength: 3 });
+  }
+
+  // 添加未填充的 FVG
+  for (const fvg of fvgs.filter(f => !f.filled).slice(0, 3)) {
+    keyLevels.push({ level: fvg.fib22, type: `FVG ${fvg.type}`, strength: 2 });
+  }
+
+  return {
+    symbol,
+    timeframe,
+    timestamp: Date.now(),
+    currentPrice,
+    swingPoints,
+    orderBlocks: [], // 简化版本暂不实现 Order Blocks
+    fvgs,
+    oteZones,
+    bos,
+    choch,
+    liquidityZones: [], // 简化版本暂不实现
+    trend,
+    keyLevels,
+  };
+}
