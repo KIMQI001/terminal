@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { triggerAnalyze, AnalyzeResult } from "@/lib/analysis/api";
 
-const TIMEFRAMES = ["5m", "15m", "1h", "4h", "1d", "1w"];
+const TIMEFRAMES = ["5m", "15m", "1h", "4h", "1d"];
 
 export function AIAnalyzer() {
   const [loading, setLoading] = useState<string | null>(null);
