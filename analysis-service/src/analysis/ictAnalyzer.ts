@@ -23,6 +23,8 @@ export interface OrderBlock {
   startTime: number;
   mitigated: boolean;
   strength: number;
+  fillPercentage: number;  // 最大填充深度 (0-100)
+  fib22: number;           // 0.22 入场点
 }
 
 export interface FVG {
@@ -280,22 +282,40 @@ export function detectFVGs(candles: Candle[], minGapPercent: number = 0.1): FVG[
     }
   }
 
-  // 检查填充状态
-  const currentPrice = candles[candles.length - 1].close;
-  for (const fvg of fvgs) {
-    if (fvg.type === 'bullish') {
-      if (currentPrice <= fvg.low) {
-        fvg.filled = true;
-        fvg.fillPercentage = 100;
-      } else if (currentPrice < fvg.high) {
-        fvg.fillPercentage = ((fvg.high - currentPrice) / (fvg.high - fvg.low)) * 100;
-      }
-    } else {
-      if (currentPrice >= fvg.high) {
-        fvg.filled = true;
-        fvg.fillPercentage = 100;
-      } else if (currentPrice > fvg.low) {
-        fvg.fillPercentage = ((currentPrice - fvg.low) / (fvg.high - fvg.low)) * 100;
+  // 用历史极值计算填充度（与前端一致）
+  for (let fvgIdx = 0; fvgIdx < fvgs.length; fvgIdx++) {
+    const fvg = fvgs[fvgIdx];
+    const fvgSize = fvg.high - fvg.low;
+    if (fvgSize <= 0) continue;
+
+    // 找到 FVG 对应的 K 线索引
+    const fvgCandleIdx = candles.findIndex(c => c.time === fvg.time);
+    if (fvgCandleIdx < 0) continue;
+
+    // 遍历后续 K 线，用极值计算最大填充深度
+    for (let j = fvgCandleIdx + 1; j < candles.length; j++) {
+      if (fvg.type === 'bullish') {
+        // 看涨 FVG：价格从上方进入，用 low 极值
+        if (candles[j].low <= fvg.low) {
+          fvg.filled = true;
+          fvg.fillPercentage = 100;
+          break;
+        }
+        if (candles[j].low < fvg.high) {
+          const filled = ((fvg.high - candles[j].low) / fvgSize) * 100;
+          fvg.fillPercentage = Math.max(fvg.fillPercentage, Math.min(100, filled));
+        }
+      } else {
+        // 看跌 FVG：价格从下方进入，用 high 极值
+        if (candles[j].high >= fvg.high) {
+          fvg.filled = true;
+          fvg.fillPercentage = 100;
+          break;
+        }
+        if (candles[j].high > fvg.low) {
+          const filled = ((candles[j].high - fvg.low) / fvgSize) * 100;
+          fvg.fillPercentage = Math.max(fvg.fillPercentage, Math.min(100, filled));
+        }
       }
     }
   }
@@ -330,6 +350,7 @@ export function detectOrderBlocks(
     top: number;
     btm: number;
     loc: number;
+    locIndex: number;  // K 线索引，用于计算填充度
     breaker: boolean;
   }
 
@@ -382,6 +403,7 @@ export function detectOrderBlocks(
       let minima = getMax(candles[i - 1]);
       let maxima = getMin(candles[i - 1]);
       let loc = candles[i - 1].time;
+      let locIndex = i - 1;
 
       for (let j = 1; j < i - topSwing.index; j++) {
         const idx = i - j;
@@ -391,10 +413,11 @@ export function detectOrderBlocks(
           minima = min;
           maxima = getMax(candles[idx]);
           loc = candles[idx].time;
+          locIndex = idx;
         }
       }
 
-      bullishOBs.unshift({ top: maxima, btm: minima, loc, breaker: false });
+      bullishOBs.unshift({ top: maxima, btm: minima, loc, locIndex, breaker: false });
     }
 
     // Bearish OB: price breaks below swing low
@@ -403,6 +426,7 @@ export function detectOrderBlocks(
       let maxima = getMin(candles[i - 1]);
       let minima = getMax(candles[i - 1]);
       let loc = candles[i - 1].time;
+      let locIndex = i - 1;
 
       for (let j = 1; j < i - btmSwing.index; j++) {
         const idx = i - j;
@@ -412,10 +436,11 @@ export function detectOrderBlocks(
           maxima = max;
           minima = getMin(candles[idx]);
           loc = candles[idx].time;
+          locIndex = idx;
         }
       }
 
-      bearishOBs.unshift({ top: maxima, btm: minima, loc, breaker: false });
+      bearishOBs.unshift({ top: maxima, btm: minima, loc, locIndex, breaker: false });
     }
 
     // Check for mitigation
@@ -438,10 +463,48 @@ export function detectOrderBlocks(
     }
   }
 
+  // 用历史极值计算填充度
+  const calculateFillPercentage = (
+    obTop: number,
+    obBtm: number,
+    locIndex: number,
+    type: 'bullish' | 'bearish'
+  ): number => {
+    let fillPercentage = 0;
+    const obSize = obTop - obBtm;
+    if (obSize <= 0) return 0;
+
+    for (let j = locIndex + 1; j < candles.length; j++) {
+      if (type === 'bullish') {
+        // 看涨 OB：价格从上方进入，用 low 极值
+        if (candles[j].low <= obBtm) {
+          return 100;
+        }
+        if (candles[j].low <= obTop) {
+          const filled = ((obTop - candles[j].low) / obSize) * 100;
+          fillPercentage = Math.max(fillPercentage, Math.min(100, filled));
+        }
+      } else {
+        // 看跌 OB：价格从下方进入，用 high 极值
+        if (candles[j].high >= obTop) {
+          return 100;
+        }
+        if (candles[j].high >= obBtm) {
+          const filled = ((candles[j].high - obBtm) / obSize) * 100;
+          fillPercentage = Math.max(fillPercentage, Math.min(100, filled));
+        }
+      }
+    }
+    return fillPercentage;
+  };
+
   const result: OrderBlock[] = [];
 
   const activeBullish = bullishOBs.filter(ob => !ob.breaker).slice(0, showBull);
   for (const ob of activeBullish) {
+    const obSize = ob.top - ob.btm;
+    const fillPercentage = calculateFillPercentage(ob.top, ob.btm, ob.locIndex, 'bullish');
+    const fib22 = ob.top - obSize * 0.22;  // 看涨：顶部往下 22%
     result.push({
       type: 'bullish',
       high: ob.top,
@@ -449,11 +512,16 @@ export function detectOrderBlocks(
       startTime: ob.loc,
       mitigated: false,
       strength: 0,
+      fillPercentage,
+      fib22,
     });
   }
 
   const activeBearish = bearishOBs.filter(ob => !ob.breaker).slice(0, showBear);
   for (const ob of activeBearish) {
+    const obSize = ob.top - ob.btm;
+    const fillPercentage = calculateFillPercentage(ob.top, ob.btm, ob.locIndex, 'bearish');
+    const fib22 = ob.btm + obSize * 0.22;  // 看跌：底部往上 22%
     result.push({
       type: 'bearish',
       high: ob.top,
@@ -461,6 +529,8 @@ export function detectOrderBlocks(
       startTime: ob.loc,
       mitigated: false,
       strength: 0,
+      fillPercentage,
+      fib22,
     });
   }
 

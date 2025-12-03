@@ -283,24 +283,25 @@ ${ict.swingPoints
   .map(s => `- ${s.type.toUpperCase()}: $${s.price.toFixed(2)}`)
   .join('\n')}
 
-### Fair Value Gaps (未填充，最近15个)
+### Fair Value Gaps (按填充度排序，优先推荐低填充)
 ${
   ict.fvgs
     .filter(f => !f.filled)
-    .slice(-15)
-    .map(f => `- ${f.type.toUpperCase()} FVG: $${f.low.toFixed(2)}-$${f.high.toFixed(2)}, 入场: $${f.entry.toFixed(2)}, 止损: $${f.stopLoss.toFixed(2)}`)
+    .sort((a, b) => a.fillPercentage - b.fillPercentage)  // 低填充优先
+    .slice(0, 15)
+    .map(f => `- ${f.type.toUpperCase()} FVG: $${f.low.toFixed(2)}-$${f.high.toFixed(2)}, 填充: ${f.fillPercentage.toFixed(0)}%, 入场: $${f.entry.toFixed(2)}, 止损: $${f.stopLoss.toFixed(2)}`)
     .join('\n') || '无活跃 FVG'
 }
 
-### Order Blocks (最近10个)
+### Order Blocks (按填充度排序，优先推荐低填充)
 ${
   ict.orderBlocks
-    .slice(-10)
+    .filter(ob => !ob.mitigated && ob.fillPercentage < 80)
+    .sort((a, b) => a.fillPercentage - b.fillPercentage)  // 低填充优先
+    .slice(0, 10)
     .map(ob => {
-      const size = ob.high - ob.low;
-      const entry = ob.type === 'bullish' ? ob.high - size * 0.22 : ob.low + size * 0.22;
       const stopLoss = ob.type === 'bullish' ? ob.low : ob.high;
-      return `- ${ob.type.toUpperCase()} OB: $${ob.low.toFixed(2)}-$${ob.high.toFixed(2)}, 入场: $${entry.toFixed(2)}, 止损: $${stopLoss.toFixed(2)}`;
+      return `- ${ob.type.toUpperCase()} OB: $${ob.low.toFixed(2)}-$${ob.high.toFixed(2)}, 填充: ${ob.fillPercentage.toFixed(0)}%, 入场: $${ob.fib22.toFixed(2)}, 止损: $${stopLoss.toFixed(2)}`;
     })
     .join('\n') || '无活跃 OB'
 }
@@ -357,7 +358,8 @@ ${liquidationInfo}
 2. 止损应该放在关键结构位之外
 3. 考虑清算密集区作为潜在的流动性猎取目标
 4. 风险回报比至少 1:2 才考虑交易
-5. 优先使用上面预计算好的入场和止损价格`;
+5. 优先使用上面预计算好的入场和止损价格
+6. **优先推荐低填充度的 FVG/OB**（填充度越低，说明该区域更"新鲜"，更有交易价值）`;
 }
 
 // ============================================
