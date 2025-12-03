@@ -7,7 +7,8 @@ import { Router, Request, Response } from 'express';
 import { fetchKlines, Timeframe } from '../../data/klineClient';
 import { fetchLiquidation } from '../../data/liquidationClient';
 import { analyzeICT } from '../../analysis/ictAnalyzer';
-import { generateTradeSignal, canCallAI, getCallStats } from '../../analysis/aiAnalyzer';
+import { generateTradeSignal, generateReversalSignal, canCallAI, getCallStats } from '../../analysis/aiAnalyzer';
+import { analyzeReversal } from '../../analysis/mtfAnalyzer';
 
 export const analyzeRoutes = Router();
 
@@ -125,6 +126,79 @@ analyzeRoutes.get('/status', (_req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('[API] GET /analyze/status error:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * POST /api/analyze/reversal
+ * 反转分析（猜顶/猜底）
+ * Body: { symbol: string, mode: 'top' | 'bottom' }
+ */
+analyzeRoutes.post('/reversal', async (req: Request, res: Response) => {
+  try {
+    const { symbol = 'BTCUSDC', mode } = req.body;
+
+    // 验证模式
+    if (!mode || !['top', 'bottom'].includes(mode)) {
+      return res.status(400).json({
+        success: false,
+        error: '无效的模式，支持: top (猜顶), bottom (猜底)',
+      });
+    }
+
+    // 检查 AI 调用限制
+    const check = canCallAI();
+    if (!check.allowed) {
+      return res.status(429).json({
+        success: false,
+        error: check.reason,
+      });
+    }
+
+    console.log(`[API] 反转分析请求: ${symbol}, 模式=${mode}`);
+
+    // 1. 获取清算数据
+    const baseCoin = symbol.replace('USDC', '').replace('USDT', '');
+    const liquidation = await fetchLiquidation(baseCoin, '1d');
+
+    // 2. 执行反转分析
+    const mtfResult = await analyzeReversal(symbol, mode as 'top' | 'bottom', liquidation);
+
+    // 3. 如果有入场点，调用 AI 生成信号
+    let signal = null;
+    if (mtfResult.reversal.entry) {
+      signal = await generateReversalSignal(mtfResult, liquidation);
+    }
+
+    // 4. 返回结果
+    res.json({
+      success: true,
+      data: {
+        symbol,
+        mode,
+        currentPrice: mtfResult.currentPrice,
+        recentExtreme: mtfResult.recentExtreme,
+        trend: mtfResult.reversal.ltfBias,
+        signal: signal ? {
+          direction: signal.direction,
+          confidence: signal.confidence,
+          entry: signal.entry,
+          stopLoss: signal.stopLoss,
+          takeProfit: signal.takeProfit,
+          riskReward: signal.riskReward,
+          reasoning: signal.reasoning,
+          warnings: signal.warnings,
+        } : null,
+        entry: mtfResult.reversal.entry,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error('[API] POST /analyze/reversal error:', error);
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',

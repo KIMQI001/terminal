@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { triggerAnalyze, AnalyzeResult } from "@/lib/analysis/api";
+import { triggerAnalyze, triggerReversalAnalyze, AnalyzeResult, ReversalAnalyzeResult } from "@/lib/analysis/api";
 
 const TIMEFRAMES = ["5m", "15m", "1h", "4h", "1d"];
 
@@ -10,6 +10,10 @@ export function AIAnalyzer() {
   const [activeTimeframe, setActiveTimeframe] = useState<string | null>(null);
   const [resultsCache, setResultsCache] = useState<Record<string, AnalyzeResult>>({});
   const [error, setError] = useState<string | null>(null);
+
+  // 反转分析状态
+  const [reversalMode, setReversalMode] = useState<"top" | "bottom" | null>(null);
+  const [reversalResult, setReversalResult] = useState<ReversalAnalyzeResult | null>(null);
 
   // 当前显示的结果
   const currentResult = activeTimeframe ? resultsCache[activeTimeframe] : null;
@@ -37,8 +41,28 @@ export function AIAnalyzer() {
   };
 
   const handleRefresh = () => {
-    if (activeTimeframe) {
+    if (reversalMode) {
+      handleReversalAnalyze(reversalMode);
+    } else if (activeTimeframe) {
       handleAnalyze(activeTimeframe, true);
+    }
+  };
+
+  // 反转分析处理
+  const handleReversalAnalyze = async (mode: "top" | "bottom") => {
+    setLoading(mode === "top" ? "reversal-top" : "reversal-bottom");
+    setActiveTimeframe(null);
+    setReversalMode(mode);
+    setReversalResult(null);
+    setError(null);
+
+    try {
+      const data = await triggerReversalAnalyze("BTCUSDC", mode);
+      setReversalResult(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "反转分析失败");
+    } finally {
+      setLoading(null);
     }
   };
 
@@ -86,7 +110,7 @@ export function AIAnalyzer() {
           </span>
         </h3>
         {/* 刷新按钮 */}
-        {activeTimeframe && (
+        {(activeTimeframe || reversalMode) && (
           <button
             onClick={handleRefresh}
             disabled={loading !== null}
@@ -112,18 +136,22 @@ export function AIAnalyzer() {
 
       {/* Content */}
       <div className="p-4">
-        {/* 时间周期按钮 */}
-        <div className="flex flex-wrap gap-2 mb-4">
+        {/* 时间周期按钮 + 反转按钮 */}
+        <div className="flex flex-wrap items-center gap-2 mb-4">
           {TIMEFRAMES.map((tf) => {
             const hasCache = !!resultsCache[tf];
-            const isActive = activeTimeframe === tf;
+            const isActive = activeTimeframe === tf && !reversalMode;
             const isLoading = loading === tf;
 
             return (
               <button
                 key={tf}
                 disabled={loading !== null}
-                onClick={() => handleAnalyze(tf)}
+                onClick={() => {
+                  setReversalMode(null);
+                  setReversalResult(null);
+                  handleAnalyze(tf);
+                }}
                 className={`px-3 py-1.5 rounded text-sm transition-colors relative ${
                   isLoading
                     ? "bg-blue-500 text-white"
@@ -142,6 +170,39 @@ export function AIAnalyzer() {
               </button>
             );
           })}
+
+          {/* 分隔线 */}
+          <div className="w-px h-6 bg-[var(--border)] mx-1" />
+
+          {/* 猜顶按钮 */}
+          <button
+            disabled={loading !== null}
+            onClick={() => handleReversalAnalyze("top")}
+            className={`px-3 py-1.5 rounded text-sm transition-colors ${
+              loading === "reversal-top"
+                ? "bg-red-500 text-white"
+                : reversalMode === "top"
+                ? "bg-red-500/20 text-red-400 border border-red-500/50"
+                : "bg-red-500/10 text-red-500 border border-red-500/30 hover:bg-red-500/20"
+            } disabled:opacity-50 disabled:cursor-not-allowed`}
+          >
+            {loading === "reversal-top" ? "推演中..." : "🔴 猜顶"}
+          </button>
+
+          {/* 猜底按钮 */}
+          <button
+            disabled={loading !== null}
+            onClick={() => handleReversalAnalyze("bottom")}
+            className={`px-3 py-1.5 rounded text-sm transition-colors ${
+              loading === "reversal-bottom"
+                ? "bg-green-500 text-white"
+                : reversalMode === "bottom"
+                ? "bg-green-500/20 text-green-400 border border-green-500/50"
+                : "bg-green-500/10 text-green-500 border border-green-500/30 hover:bg-green-500/20"
+            } disabled:opacity-50 disabled:cursor-not-allowed`}
+          >
+            {loading === "reversal-bottom" ? "推演中..." : "🟢 猜底"}
+          </button>
         </div>
 
         {/* 错误提示 */}
@@ -152,10 +213,12 @@ export function AIAnalyzer() {
         )}
 
         {/* 加载中 */}
-        {loading && !currentResult && (
+        {loading && !currentResult && !reversalResult && (
           <div className="flex items-center justify-center py-8">
-            <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mr-3"></div>
-            <span className="text-[var(--text-tertiary)]">天机推演中...</span>
+            <div className={`w-6 h-6 border-2 ${loading?.startsWith('reversal') ? (loading === 'reversal-top' ? 'border-red-500' : 'border-green-500') : 'border-blue-500'} border-t-transparent rounded-full animate-spin mr-3`}></div>
+            <span className="text-[var(--text-tertiary)]">
+              {loading?.startsWith('reversal') ? (loading === 'reversal-top' ? '猜顶推演中...' : '猜底推演中...') : '天机推演中...'}
+            </span>
           </div>
         )}
 
@@ -260,8 +323,165 @@ export function AIAnalyzer() {
           </div>
         )}
 
+        {/* 反转分析结果 */}
+        {reversalResult && (
+          <div className="space-y-4">
+            {/* 基本信息 */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="p-3 bg-[var(--bg-tertiary)] rounded-lg">
+                <div className="text-xs text-[var(--text-tertiary)]">模式</div>
+                <div className={`text-lg font-semibold ${reversalResult.mode === 'top' ? 'text-red-500' : 'text-green-500'}`}>
+                  {reversalResult.mode === 'top' ? '🔴 猜顶' : '🟢 猜底'}
+                </div>
+              </div>
+              <div className="p-3 bg-[var(--bg-tertiary)] rounded-lg">
+                <div className="text-xs text-[var(--text-tertiary)]">灵石价</div>
+                <div className="text-lg font-semibold text-[var(--text-primary)]">
+                  ${reversalResult.currentPrice.toFixed(2)}
+                </div>
+              </div>
+              <div className="p-3 bg-[var(--bg-tertiary)] rounded-lg">
+                <div className="text-xs text-[var(--text-tertiary)]">
+                  {reversalResult.mode === 'top' ? '近期高点' : '近期低点'}
+                </div>
+                <div className={`text-lg font-semibold ${reversalResult.mode === 'top' ? 'text-red-400' : 'text-green-400'}`}>
+                  ${reversalResult.mode === 'top'
+                    ? reversalResult.recentExtreme.high.toFixed(2)
+                    : reversalResult.recentExtreme.low.toFixed(2)}
+                </div>
+              </div>
+              <div className="p-3 bg-[var(--bg-tertiary)] rounded-lg">
+                <div className="text-xs text-[var(--text-tertiary)]">天意</div>
+                <div className={`text-lg font-semibold ${reversalResult.signal ? getDirectionStyle(reversalResult.signal.direction) : 'text-[var(--text-tertiary)]'}`}>
+                  {reversalResult.signal ? getDirectionText(reversalResult.signal.direction) : '静修 (观望)'}
+                </div>
+              </div>
+            </div>
+
+            {/* 有信号时显示详细交易计划 */}
+            {reversalResult.signal && reversalResult.signal.direction !== 'neutral' && (
+              <div className="p-4 bg-[var(--bg-tertiary)]/50 rounded-lg space-y-3">
+                <h4 className="font-semibold text-[var(--text-primary)]">
+                  {reversalResult.mode === 'top' ? '做空心法' : '做多心法'}
+                </h4>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                  <div>
+                    <span className="text-[var(--text-tertiary)]">道心: </span>
+                    <span className="font-medium text-[var(--text-primary)]">
+                      {getConfidenceText(reversalResult.signal.confidence)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[var(--text-tertiary)]">入道: </span>
+                    <span className="font-medium text-[var(--text-primary)]">
+                      ${reversalResult.signal.entry.price.toFixed(2)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[var(--text-tertiary)]">渡劫线: </span>
+                    <span className="font-medium text-red-500">
+                      ${reversalResult.signal.stopLoss.price.toFixed(2)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[var(--text-tertiary)]">因果比: </span>
+                    <span className="font-medium text-[var(--text-primary)]">
+                      1:{reversalResult.signal.riskReward.toFixed(1)}
+                    </span>
+                  </div>
+                </div>
+                {reversalResult.signal.takeProfit.length > 0 && (
+                  <div>
+                    <span className="text-[var(--text-tertiary)] text-sm">飞升境界: </span>
+                    {reversalResult.signal.takeProfit.map((tp, i) => (
+                      <span key={i} className="text-sm text-green-500 mr-2">
+                        {i + 1}重天 ${tp.price.toFixed(2)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 无信号时显示基础入场点信息 */}
+            {!reversalResult.signal && reversalResult.entry && (
+              <div className="p-4 bg-[var(--bg-tertiary)]/50 rounded-lg space-y-3">
+                <h4 className="font-semibold text-[var(--text-primary)]">
+                  潜在入场区域
+                </h4>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                  <div>
+                    <span className="text-[var(--text-tertiary)]">类型: </span>
+                    <span className="font-medium text-[var(--text-primary)]">
+                      {reversalResult.entry.type}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[var(--text-tertiary)]">建议入场: </span>
+                    <span className="font-medium text-[var(--text-primary)]">
+                      ${reversalResult.entry.suggestedEntry.toFixed(2)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[var(--text-tertiary)]">止损: </span>
+                    <span className="font-medium text-red-500">
+                      ${reversalResult.entry.stopLoss.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+                <div className="text-sm">
+                  <span className="text-[var(--text-tertiary)]">入场区间: </span>
+                  <span className="text-[var(--text-primary)]">
+                    ${reversalResult.entry.entryZone.low.toFixed(2)} - ${reversalResult.entry.entryZone.high.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* 无可用入场点 */}
+            {!reversalResult.signal && !reversalResult.entry && (
+              <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                <p className="text-yellow-500 text-sm">
+                  当前未发现符合条件的{reversalResult.mode === 'top' ? '做空' : '做多'}入场点。
+                  {reversalResult.mode === 'top'
+                    ? `价格需回撤至高点 $${reversalResult.recentExtreme.high.toFixed(2)} 上方的 OB/FVG 区域。`
+                    : `价格需回撤至低点 $${reversalResult.recentExtreme.low.toFixed(2)} 下方的 OB/FVG 区域。`
+                  }
+                </p>
+              </div>
+            )}
+
+            {/* 分析理由 */}
+            {reversalResult.signal && (
+              <div className="p-4 bg-[var(--bg-tertiary)]/50 rounded-lg">
+                <h4 className="font-semibold text-[var(--text-primary)] mb-2">天道感悟</h4>
+                <p className="text-sm text-[var(--text-secondary)] whitespace-pre-wrap">
+                  {reversalResult.signal.reasoning}
+                </p>
+              </div>
+            )}
+
+            {/* 风险警示 */}
+            {reversalResult.signal && reversalResult.signal.warnings.length > 0 && (
+              <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                <h4 className="font-semibold text-yellow-500 mb-2">劫难预警</h4>
+                <ul className="text-sm text-yellow-500 space-y-1">
+                  {reversalResult.signal.warnings.map((w, i) => (
+                    <li key={i}>• {w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* 时间戳 */}
+            <div className="text-xs text-[var(--text-tertiary)] text-right">
+              推演时间: {new Date(reversalResult.timestamp).toLocaleString("zh-CN")}
+            </div>
+          </div>
+        )}
+
         {/* 初始状态 */}
-        {!currentResult && !error && !loading && (
+        {!currentResult && !reversalResult && !error && !loading && (
           <div className="text-center text-[var(--text-tertiary)] py-8">
             点击上方周期按钮开始天机推演
           </div>

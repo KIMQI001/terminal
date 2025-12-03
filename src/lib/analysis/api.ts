@@ -258,3 +258,53 @@ export async function triggerAnalyze(
 export async function fetchAnalyzeStatus(): Promise<AnalyzeStatus> {
   return fetchApi<AnalyzeStatus>("/analyze/status");
 }
+
+/** 反转分析结果类型 */
+export interface ReversalAnalyzeResult {
+  symbol: string;
+  mode: "top" | "bottom";
+  currentPrice: number;
+  recentExtreme: { high: number; low: number };
+  trend: "bullish" | "bearish";
+  signal: {
+    direction: "long" | "short" | "neutral";
+    confidence: "high" | "medium" | "low";
+    entry: { price: number; zone: string };
+    stopLoss: { price: number; reason: string };
+    takeProfit: Array<{ price: number; reason: string }>;
+    riskReward: number;
+    reasoning: string;
+    warnings: string[];
+  } | null;
+  entry: {
+    type: string;
+    bias: string;
+    entryZone: { high: number; low: number };
+    suggestedEntry: number;
+    stopLoss: number;
+    takeProfits: number[];
+    riskReward: number;
+  } | null;
+  timestamp: string;
+}
+
+/**
+ * 触发反转分析（猜顶/猜底）
+ */
+export async function triggerReversalAnalyze(
+  symbol: string = "BTCUSDC",
+  mode: "top" | "bottom"
+): Promise<ReversalAnalyzeResult> {
+  const res = await fetch(`${API_BASE}/analyze/reversal`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ symbol, mode }),
+  });
+  const json: ApiResponse<ReversalAnalyzeResult> = await res.json();
+
+  if (!json.success || !json.data) {
+    throw new Error(json.error || "反转分析失败");
+  }
+
+  return json.data;
+}

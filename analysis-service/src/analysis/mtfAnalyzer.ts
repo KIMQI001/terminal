@@ -539,3 +539,112 @@ export async function analyzeMultiTimeframe(
 
   return analysis;
 }
+
+/**
+ * 强制方向的反转分析（用于猜顶/猜底）
+ *
+ * @param symbol - 交易对符号
+ * @param mode - 'top'（猜顶/做空）或 'bottom'（猜底/做多）
+ * @param liquidationData - 流动性数据
+ */
+export async function analyzeReversal(
+  symbol: string,
+  mode: 'top' | 'bottom',
+  liquidationData?: LiquidationData | null
+): Promise<MTFAnalysis> {
+  console.log(`[MTF] 开始反转分析 ${symbol}, 模式=${mode}...`);
+
+  // 获取 K 线数据
+  const [h1Candles, m15Candles, m5Candles] = await Promise.all([
+    fetchKlines(symbol, '1h', 2000),
+    fetchKlines(symbol, '15m', 2000),
+    fetchKlines(symbol, '5m', 2000),
+  ]);
+
+  const currentPrice = m5Candles[m5Candles.length - 1].close;
+
+  // 计算最近 200 根 15m K 线的极值
+  const recent200m15 = m15Candles.slice(-200);
+  const recentExtreme = {
+    high: Math.max(...recent200m15.map(c => c.high)),
+    low: Math.min(...recent200m15.map(c => c.low)),
+  };
+
+  // 分析 LTF
+  const h1ICT = analyzeICT(h1Candles, symbol, '1h');
+  const m15ICT = analyzeICT(m15Candles, symbol, '15m');
+  const m5ICT = analyzeICT(m5Candles, symbol, '5m');
+
+  const h1TF = analyzeTimeframe(h1ICT);
+  const m15TF = analyzeTimeframe(m15ICT);
+  const m5TF = analyzeTimeframe(m5ICT);
+
+  // 强制方向
+  const forcedBias: Bias = mode === 'top' ? 'bearish' : 'bullish';
+  const reversalExtreme = mode === 'top' ? recentExtreme.high : recentExtreme.low;
+
+  console.log(`[MTF] 反转模式: ${mode}, 强制方向: ${forcedBias}, 极值: ${reversalExtreme.toFixed(2)}`);
+
+  // 寻找入场点
+  const reversalEntry = findLTFEntry(
+    m15ICT,
+    m5ICT,
+    forcedBias,
+    currentPrice,
+    reversalExtreme,
+    liquidationData
+  );
+
+  if (reversalEntry) {
+    console.log(`[MTF] 反转入场点: ${reversalEntry.suggestedEntry.toFixed(2)}`);
+  } else {
+    console.log(`[MTF] 未找到符合条件的反转入场点`);
+  }
+
+  // 构建结果（简化版 MTFAnalysis）
+  const trends: TrendsByTimeframe = {
+    '1d': 'neutral',
+    '4h': 'neutral',
+    '1h': h1TF.trend,
+    '15m': m15TF.trend,
+    '5m': m5TF.trend,
+  };
+
+  return {
+    symbol,
+    timestamp: Date.now(),
+    currentPrice,
+    htf: {
+      daily: { timeframe: '1d', trend: 'neutral', structure: 'none', swingPoints: [] },
+      h4: { timeframe: '4h', trend: 'neutral', structure: 'none', swingPoints: [] },
+      bias: forcedBias === 'bearish' ? 'bullish' : 'bearish', // HTF 与反转方向相反
+      aligned: false,
+    },
+    mtf: {
+      h1: h1TF,
+      confirmed: false,
+    },
+    ltf: {
+      m15: m15TF,
+      m5: m5TF,
+      entry: null,
+    },
+    klines: {
+      h1: h1Candles.slice(-24),
+      m15: m15Candles.slice(-16),
+      m5: m5Candles.slice(-12),
+    },
+    trends,
+    overallBias: 'neutral',
+    alignment: 0,
+    tradeable: false,
+    summary: `反转分析 (${mode === 'top' ? '猜顶' : '猜底'})`,
+    reversal: {
+      detected: true,
+      ltfBias: forcedBias,
+      ltfAlignment: 100, // 强制 100%
+      entry: reversalEntry,
+    },
+    recentExtreme,
+  };
+}
