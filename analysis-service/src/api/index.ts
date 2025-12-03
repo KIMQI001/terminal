@@ -7,6 +7,7 @@ import express from 'express';
 import cors from 'cors';
 import { signalRoutes } from './routes/signals';
 import { performanceRoutes } from './routes/performance';
+import { analyzeRoutes } from './routes/analyze';
 
 /**
  * 启动 HTTP API 服务器
@@ -30,6 +31,7 @@ export function startApiServer(port: number = 3002): void {
   // 路由
   app.use('/api/signals', signalRoutes);
   app.use('/api/performance', performanceRoutes);
+  app.use('/api/analyze', analyzeRoutes);
 
   // 404 处理
   app.use((_req, res) => {
@@ -61,5 +63,7 @@ export function startApiServer(port: number = 3002): void {
     console.log('  - GET /api/performance/stats?days=30');
     console.log('  - GET /api/performance/equity-curve?days=30');
     console.log('  - GET /api/performance/overview');
+    console.log('  - POST /api/analyze (手动触发分析)');
+    console.log('  - GET /api/analyze/status (AI调用状态)');
   });
 }

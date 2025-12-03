@@ -8,6 +8,7 @@ import { PerformanceCards } from "@/components/analysis/PerformanceCards";
 import { SignalTable } from "@/components/analysis/SignalTable";
 import { EquityCurve } from "@/components/analysis/EquityCurve";
 import { DistributionCharts } from "@/components/analysis/DistributionCharts";
+import { AIAnalyzer } from "@/components/analysis/AIAnalyzer";
 import {
   fetchPerformanceStats,
   fetchSignals,
@@ -156,6 +157,9 @@ export default function AnalysisPage() {
 
           {isConnected === true && (
             <>
+              {/* AI Analyzer */}
+              <AIAnalyzer />
+
               {/* Performance Cards */}
               <PerformanceCards stats={stats || null} isLoading={statsLoading} />
 

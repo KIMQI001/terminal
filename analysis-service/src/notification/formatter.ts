@@ -121,7 +121,9 @@ export function formatStartupMessage(): string {
     return `## ⚔️ 天道轮盘已开启
 
 **观测灵石**: ${symbols}
+
 **修炼法门**: 三界同观 (MTF)
+
 **时空法则**:
 - 天界: ${config.analysis.mtf.htf.join(', ')} (定乾坤)
 - 人界: ${config.analysis.mtf.mtf.join(', ')} (察因果)
@@ -137,7 +139,9 @@ export function formatStartupMessage(): string {
   return `## ⚔️ 天道轮盘已开启
 
 **观测灵石**: ${symbols}
+
 **修炼法门**: 单境推演
+
 **时空法则**: ${config.analysis.singleTimeframes.join(', ')}
 
 **轮回周期**: ${config.schedule.interval}

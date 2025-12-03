@@ -195,3 +195,66 @@ export async function checkHealth(): Promise<boolean> {
     return false;
   }
 }
+
+/** AI 分析结果类型 */
+export interface AnalyzeResult {
+  symbol: string;
+  timeframe: string;
+  currentPrice: number;
+  trend: "bullish" | "bearish" | "neutral";
+  signal: {
+    direction: "long" | "short" | "neutral";
+    confidence: "high" | "medium" | "low";
+    entry: { price: number; zone: string };
+    stopLoss: { price: number; reason: string };
+    takeProfit: Array<{ price: number; reason: string }>;
+    riskReward: number;
+    reasoning: string;
+    warnings: string[];
+  };
+  ict: {
+    swingPoints: Array<{ type: string; price: number }>;
+    fvgs: Array<{ type: string; high: number; low: number }>;
+    oteZones: Array<{ type: string; fib618: number; fib786: number }>;
+    bos: Array<{ type: string; level: number }>;
+    choch: Array<{ type: string; level: number }>;
+  };
+  timestamp: string;
+}
+
+/** AI 调用状态 */
+export interface AnalyzeStatus {
+  canCall: boolean;
+  reason: string | null;
+  hourlyUsed: number;
+  dailyUsed: number;
+  timeframes: string[];
+}
+
+/**
+ * 手动触发 AI 分析
+ */
+export async function triggerAnalyze(
+  symbol: string = "BTCUSDC",
+  timeframe: string
+): Promise<AnalyzeResult> {
+  const res = await fetch(`${API_BASE}/analyze`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ symbol, timeframe }),
+  });
+  const json: ApiResponse<AnalyzeResult> = await res.json();
+
+  if (!json.success || !json.data) {
+    throw new Error(json.error || "AI 分析失败");
+  }
+
+  return json.data;
+}
+
+/**
+ * 获取 AI 调用状态
+ */
+export async function fetchAnalyzeStatus(): Promise<AnalyzeStatus> {
+  return fetchApi<AnalyzeStatus>("/analyze/status");
+}
