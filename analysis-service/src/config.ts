@@ -9,7 +9,7 @@ export const config = {
 
   // 监控的交易对和周期
   watchlist: [
-    { symbol: 'BTCUSDC', timeframes: ['15m', '1h', '4h'] as const },
+    { symbol: 'BTCUSDC', timeframes: ['5m', '15m', '1h', '4h', '1d', '1w'] as const },
   ],
 
   // AI 配置
@@ -18,9 +18,9 @@ export const config = {
     apiKey: process.env.AI_API_KEY || '',
     model: process.env.AI_MODEL || '', // 留空则使用默认模型
     maxTokens: 1500,
-    // 成本控制
-    maxCallsPerHour: 20,
-    maxCallsPerDay: 300,
+    // 成本控制 (6周期 × 4次/小时 = 24次/小时)
+    maxCallsPerHour: 30,
+    maxCallsPerDay: 500,
     // 各提供商默认模型
     defaultModels: {
       gemini: 'gemini-1.5-flash',
