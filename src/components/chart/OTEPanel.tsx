@@ -6,7 +6,7 @@ import { useChartStore } from "@/stores/chartStore";
 import { useOrderStore, OTEPrefillData, TradingLine } from "@/stores/orderStore";
 import { OTEZone } from "@/lib/chart/indicators/ote";
 
-const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d', '1w'] as const;
+const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d'] as const;
 
 export function OTEPanel() {
   const [isCollapsed, setIsCollapsed] = useState(false);

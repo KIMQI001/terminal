@@ -6,7 +6,7 @@ import { useChartStore } from "@/stores/chartStore";
 import { useOrderStore, OTEPrefillData, TradingLine } from "@/stores/orderStore";
 import { OrderBlock } from "@/types/indicator";
 
-const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d', '1w'] as const;
+const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d'] as const;
 
 export function OBPanel() {
   const [isCollapsed, setIsCollapsed] = useState(false);

@@ -140,7 +140,7 @@ export function TradingChart() {
       const obs = detectOrderBlocks(candleData);
       setOrderBlocks(obs);
       // 保存到多周期 OB 存储（按时间排序取最新的一个）
-      const targetTimeframes = ['5m', '15m', '1h', '4h', '1d', '1w'] as const;
+      const targetTimeframes = ['5m', '15m', '1h', '4h', '1d'] as const;
       if (targetTimeframes.includes(timeframe as typeof targetTimeframes[number])) {
         const sortedObs = [...obs].sort((a, b) => b.startTime - a.startTime);
         setMultiTimeframeOB(timeframe, sortedObs[0] || null);
@@ -150,7 +150,7 @@ export function TradingChart() {
       const fvgs = detectFVGs(candleData);
       setFVGs(fvgs);
       // 保存到多周期 FVG 存储（只保存最新的一个）
-      const targetTimeframes2 = ['5m', '15m', '1h', '4h', '1d', '1w'] as const;
+      const targetTimeframes2 = ['5m', '15m', '1h', '4h', '1d'] as const;
       if (targetTimeframes2.includes(timeframe as typeof targetTimeframes2[number])) {
         setMultiTimeframeFVG(timeframe, fvgs[fvgs.length - 1] || null);
       }
@@ -172,7 +172,7 @@ export function TradingChart() {
       const otes = detectOTEZones(detectedSwingPoints, lastPrice, candleData);
       setOTEZones(otes);
       // 保存到多周期 OTE 存储（只保存最新的一个）
-      const targetTimeframes3 = ['5m', '15m', '1h', '4h', '1d', '1w'] as const;
+      const targetTimeframes3 = ['5m', '15m', '1h', '4h', '1d'] as const;
       if (targetTimeframes3.includes(timeframe as typeof targetTimeframes3[number])) {
         setMultiTimeframeOTE(timeframe, otes[0] || null);
       }
@@ -399,7 +399,7 @@ export function TradingChart() {
 
   // 初始化所有周期的 OTE 数据
   useEffect(() => {
-    const allTimeframes = ['5m', '15m', '1h', '4h', '1d', '1w'] as const;
+    const allTimeframes = ['5m', '15m', '1h', '4h', '1d'] as const;
 
     const loadAllTimeframesOTE = async () => {
       for (const tf of allTimeframes) {
@@ -431,7 +431,7 @@ export function TradingChart() {
 
   // 初始化所有周期的 FVG 数据
   useEffect(() => {
-    const allTimeframes = ['5m', '15m', '1h', '4h', '1d', '1w'] as const;
+    const allTimeframes = ['5m', '15m', '1h', '4h', '1d'] as const;
 
     const loadAllTimeframesFVG = async () => {
       for (const tf of allTimeframes) {
@@ -460,7 +460,7 @@ export function TradingChart() {
 
   // 初始化所有周期的 OB 数据
   useEffect(() => {
-    const allTimeframes = ['5m', '15m', '1h', '4h', '1d', '1w'] as const;
+    const allTimeframes = ['5m', '15m', '1h', '4h', '1d'] as const;
 
     const loadAllTimeframesOB = async () => {
       for (const tf of allTimeframes) {
