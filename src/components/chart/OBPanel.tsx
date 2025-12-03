@@ -11,10 +11,21 @@ const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d'] as const;
 export function OBPanel() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const { orderBlocks, multiTimeframeOB } = useIndicatorStore();
-  const { candles } = useChartStore();
+  const { candles, timeframe } = useChartStore();
   const { setPrefillData, setTradingLines, openModal } = useOrderStore();
 
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
+
+  // 获取指定周期的 OB（当前周期优先使用 orderBlocks 数组，保证数据最新）
+  const getOBForTimeframe = (tf: string): OrderBlock | null => {
+    if (tf === timeframe && orderBlocks.length > 0) {
+      // 当前周期：从 orderBlocks 数组取最新的（按时间降序）
+      const sorted = [...orderBlocks].sort((a, b) => b.startTime - a.startTime);
+      return sorted[0];
+    }
+    // 其他周期：从 multiTimeframeOB 取
+    return multiTimeframeOB[tf as keyof typeof multiTimeframeOB] || null;
+  };
 
   // 找到距离当前价格最近的OB周期
   const nearestTF = useMemo(() => {
@@ -24,7 +35,15 @@ export function OBPanel() {
     let nearest: string | null = null;
 
     for (const tf of TIMEFRAMES) {
-      const ob = multiTimeframeOB[tf];
+      // 内联 getOBForTimeframe 逻辑
+      let ob: OrderBlock | null = null;
+      if (tf === timeframe && orderBlocks.length > 0) {
+        const sorted = [...orderBlocks].sort((a, b) => b.startTime - a.startTime);
+        ob = sorted[0];
+      } else {
+        ob = multiTimeframeOB[tf] || null;
+      }
+
       if (ob) {
         // 使用 0.22 位置作为推荐入场点（类似 FVG fib22）
         const mid = ob.type === "bullish"
@@ -39,7 +58,7 @@ export function OBPanel() {
     }
 
     return nearest;
-  }, [multiTimeframeOB, currentPrice]);
+  }, [multiTimeframeOB, orderBlocks, timeframe, currentPrice]);
 
   // 点击OB条目，填充交易参数
   const handleOBClick = (ob: OrderBlock) => {
@@ -122,7 +141,7 @@ export function OBPanel() {
               </div>
 
               {TIMEFRAMES.map((tf) => {
-                const ob = multiTimeframeOB[tf];
+                const ob = getOBForTimeframe(tf);
                 const isNearest = tf === nearestTF;
 
                 if (!ob) {

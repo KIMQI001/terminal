@@ -11,8 +11,19 @@ const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d'] as const;
 export function FVGPanel() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const { fvgs, multiTimeframeFVG } = useIndicatorStore();
-  const { candles } = useChartStore();
+  const { candles, timeframe } = useChartStore();
   const { setPrefillData, setTradingLines, openModal } = useOrderStore();
+
+  // 获取指定周期的 FVG（当前周期优先使用 fvgs 数组，保证数据最新）
+  const getFVGForTimeframe = (tf: string): FVG | null => {
+    if (tf === timeframe && fvgs.length > 0) {
+      // 当前周期：从 fvgs 数组取最新的（按时间降序）
+      const sorted = [...fvgs].sort((a, b) => b.time - a.time);
+      return sorted[0];
+    }
+    // 其他周期：从 multiTimeframeFVG 取
+    return multiTimeframeFVG[tf as keyof typeof multiTimeframeFVG] || null;
+  };
 
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
 
@@ -24,7 +35,15 @@ export function FVGPanel() {
     let nearest: string | null = null;
 
     for (const tf of TIMEFRAMES) {
-      const fvg = multiTimeframeFVG[tf];
+      // 内联 getFVGForTimeframe 逻辑
+      let fvg: FVG | null = null;
+      if (tf === timeframe && fvgs.length > 0) {
+        const sorted = [...fvgs].sort((a, b) => b.time - a.time);
+        fvg = sorted[0];
+      } else {
+        fvg = multiTimeframeFVG[tf] || null;
+      }
+
       if (fvg) {
         const distance = Math.abs(fvg.fib22 - currentPrice);
         if (distance < minDistance) {
@@ -35,7 +54,7 @@ export function FVGPanel() {
     }
 
     return nearest;
-  }, [multiTimeframeFVG, currentPrice]);
+  }, [multiTimeframeFVG, fvgs, timeframe, currentPrice]);
 
   // 点击FVG条目，填充交易参数
   const handleFVGClick = (fvg: FVG) => {
@@ -95,7 +114,7 @@ export function FVGPanel() {
               </div>
 
               {TIMEFRAMES.map((tf) => {
-                const fvg = multiTimeframeFVG[tf];
+                const fvg = getFVGForTimeframe(tf);
                 const isNearest = tf === nearestTF;
 
                 if (!fvg) {
