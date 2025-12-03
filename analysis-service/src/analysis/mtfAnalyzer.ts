@@ -320,13 +320,13 @@ function generateSummary(analysis: MTFAnalysis): string {
 export async function analyzeMultiTimeframe(symbol: string): Promise<MTFAnalysis> {
   console.log(`[MTF] 开始分析 ${symbol}...`);
 
-  // 1. 并行获取所有时间框架的 K 线数据
+  // 1. 并行获取所有时间框架的 K 线数据（数量与前端一致，确保 trend 判断相同）
   const [dailyCandles, h4Candles, h1Candles, m15Candles, m5Candles] = await Promise.all([
-    fetchKlines(symbol, '1d', 100),
-    fetchKlines(symbol, '4h', 150),
-    fetchKlines(symbol, '1h', 200),
-    fetchKlines(symbol, '15m', 200),
-    fetchKlines(symbol, '5m', 200),
+    fetchKlines(symbol, '1d', 500),
+    fetchKlines(symbol, '4h', 1000),
+    fetchKlines(symbol, '1h', 2000),
+    fetchKlines(symbol, '15m', 2000),
+    fetchKlines(symbol, '5m', 2000),
   ]);
 
   const currentPrice = m5Candles[m5Candles.length - 1].close;
