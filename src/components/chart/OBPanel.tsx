@@ -26,7 +26,10 @@ export function OBPanel() {
     for (const tf of TIMEFRAMES) {
       const ob = multiTimeframeOB[tf];
       if (ob) {
-        const mid = (ob.high + ob.low) / 2;
+        // 使用 0.22 位置作为推荐入场点（类似 FVG fib22）
+        const mid = ob.type === "bullish"
+          ? ob.high - (ob.high - ob.low) * 0.22  // 看涨: 接近顶部
+          : ob.low + (ob.high - ob.low) * 0.22;  // 看跌: 接近底部
         const distance = Math.abs(mid - currentPrice);
         if (distance < minDistance) {
           minDistance = distance;
@@ -42,8 +45,11 @@ export function OBPanel() {
   const handleOBClick = (ob: OrderBlock) => {
     const isBullish = ob.type === "bullish";
     const side = isBullish ? "buy" : "sell";
-    const entry = (ob.high + ob.low) / 2; // 入场点在OB中间
+    // 入场点使用 0.22 位置（类似 FVG fib22）
     const size = ob.high - ob.low;
+    const entry = isBullish
+      ? ob.high - size * 0.22  // 看涨: 接近顶部 22%
+      : ob.low + size * 0.22;  // 看跌: 接近底部 22%
     const stopLoss = isBullish ? ob.low : ob.high; // 止损在OB边界
 
     // 止盈 = size的5倍
@@ -134,7 +140,10 @@ export function OBPanel() {
                 const typeColor = isBullish ? "text-green-600" : "text-red-500";
                 const typeLabel = isBullish ? "BUY" : "SELL";
                 const obHeight = ob.high - ob.low;
-                const midPrice = (ob.high + ob.low) / 2;
+                // 使用 0.22 位置作为推荐入场点
+                const midPrice = isBullish
+                  ? ob.high - obHeight * 0.22
+                  : ob.low + obHeight * 0.22;
                 const sizePercent = ((obHeight / midPrice) * 100).toFixed(2);
 
                 // 计算填充百分比
@@ -186,7 +195,10 @@ export function OBPanel() {
                   const hoverColor = isBullish ? "hover:bg-green-100" : "hover:bg-red-100";
                   const label = isBullish ? "BUY" : "SELL";
                   const obHeight = ob.high - ob.low;
-                  const midPrice = (ob.high + ob.low) / 2;
+                  // 使用 0.22 位置作为推荐入场点
+                  const midPrice = isBullish
+                    ? ob.high - obHeight * 0.22
+                    : ob.low + obHeight * 0.22;
                   const sizePercent = ((obHeight / midPrice) * 100).toFixed(2);
 
                   // 计算填充百分比
