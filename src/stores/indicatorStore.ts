@@ -35,6 +35,18 @@ interface MultiTimeframeOB {
   '1w': OrderBlock | null;
 }
 
+// 趋势类型
+export type TrendType = 'bullish' | 'bearish' | 'neutral';
+
+// 多周期趋势类型
+interface MultiTimeframeTrend {
+  '5m': TrendType;
+  '15m': TrendType;
+  '1h': TrendType;
+  '4h': TrendType;
+  '1d': TrendType;
+}
+
 interface IndicatorStoreState {
   enabled: IndicatorState;
   swingPoints: SwingPoint[];
@@ -49,6 +61,7 @@ interface IndicatorStoreState {
   multiTimeframeOTE: MultiTimeframeOTE;
   multiTimeframeFVG: MultiTimeframeFVG;
   multiTimeframeOB: MultiTimeframeOB;
+  multiTimeframeTrend: MultiTimeframeTrend;
 
   toggleIndicator: (key: keyof IndicatorState) => void;
   setSwingPoints: (points: SwingPoint[]) => void;
@@ -63,6 +76,7 @@ interface IndicatorStoreState {
   setMultiTimeframeOTE: (timeframe: Timeframe, ote: OTEZone | null) => void;
   setMultiTimeframeFVG: (timeframe: Timeframe, fvg: FVG | null) => void;
   setMultiTimeframeOB: (timeframe: Timeframe, ob: OrderBlock | null) => void;
+  setMultiTimeframeTrend: (timeframe: Timeframe, trend: TrendType) => void;
   clearAll: () => void;
 }
 
@@ -112,6 +126,13 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
     '1d': null,
     '1w': null,
   },
+  multiTimeframeTrend: {
+    '5m': 'neutral',
+    '15m': 'neutral',
+    '1h': 'neutral',
+    '4h': 'neutral',
+    '1d': 'neutral',
+  },
 
   toggleIndicator: (key) =>
     set((state) => ({
@@ -149,6 +170,13 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
       multiTimeframeOB: {
         ...state.multiTimeframeOB,
         [timeframe]: ob,
+      },
+    })),
+  setMultiTimeframeTrend: (timeframe, trend) =>
+    set((state) => ({
+      multiTimeframeTrend: {
+        ...state.multiTimeframeTrend,
+        [timeframe]: trend,
       },
     })),
   clearAll: () =>

@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User, Maximize2, Minimize2, BarChart3 } from "lucide-react";
+import { MTFPanel } from "@/components/chart/MTFPanel";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -141,6 +142,9 @@ export function Header() {
             </Button>
           ))}
         </div>
+
+        {/* MTF Panel */}
+        <MTFPanel />
       </div>
 
       {/* Tools & Trade & Indicators */}

@@ -94,6 +94,7 @@ export function TradingChart() {
     setMultiTimeframeOTE,
     setMultiTimeframeFVG,
     setMultiTimeframeOB,
+    setMultiTimeframeTrend,
   } = useIndicatorStore();
 
   const {
@@ -155,11 +156,22 @@ export function TradingChart() {
         setMultiTimeframeFVG(timeframe, fvgs[fvgs.length - 1] || null);
       }
 
-      if (enabled.bos || enabled.choch) {
-        const lastPrice = candleData[candleData.length - 1].close;
-        const { bos, choch } = detectStructure(detectedSwingPoints, lastPrice);
-        if (enabled.bos) setBOSSignals(bos);
-        if (enabled.choch) setCHoCHSignals(choch);
+      // BOS/CHoCH 始终计算（MTF Trend 面板需要数据）
+      const lastPriceForStructure = candleData[candleData.length - 1].close;
+      const { bos, choch } = detectStructure(detectedSwingPoints, lastPriceForStructure);
+      if (enabled.bos) setBOSSignals(bos);
+      if (enabled.choch) setCHoCHSignals(choch);
+
+      // 计算并保存多周期趋势
+      const targetTimeframes4 = ['5m', '15m', '1h', '4h', '1d'] as const;
+      if (targetTimeframes4.includes(timeframe as typeof targetTimeframes4[number])) {
+        let trend: 'bullish' | 'bearish' | 'neutral' = 'neutral';
+        if (choch.length > 0) {
+          trend = choch[choch.length - 1].type;
+        } else if (bos.length > 0) {
+          trend = bos[bos.length - 1].type;
+        }
+        setMultiTimeframeTrend(timeframe, trend);
       }
 
       if (enabled.liquidityZones) {
@@ -190,7 +202,7 @@ export function TradingChart() {
         setInducements(inducements);
       }
     },
-    [enabled, timeframe, setSwingPoints, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB]
+    [enabled, timeframe, setSwingPoints, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend]
   );
 
   // Initialize chart
