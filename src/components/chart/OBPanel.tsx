@@ -181,7 +181,7 @@ export function OBPanel() {
           <div className="w-px bg-gray-200 my-2" />
 
           {/* 右侧: Zones */}
-          <div className="px-2 py-2 min-w-[130px] max-h-[180px] overflow-y-auto">
+          <div className="px-2 py-2 min-w-[130px] max-h-[140px] overflow-y-auto">
             <div className="text-[10px] font-semibold text-gray-500 mb-1">Zones ({orderBlocks.length})</div>
             {orderBlocks.length === 0 ? (
               <div className="text-[9px] text-gray-400">No zones</div>
