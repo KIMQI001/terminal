@@ -210,36 +210,48 @@ analyzeRoutes.get('/tower', async (req: Request, res: Response) => {
         }
       }
 
-      // 收集 OTE（活跃且填充度 < 22%）
+      // 收集 OTE（填充度 < 22%）
+      // 不再要求 active，因为守塔策略需要预埋单
       for (const ote of ictResult.oteZones) {
-        if (ote.active) {
-          // 计算 OTE 填充度
-          const zoneHeight = ote.fib618 - ote.fib786;
-          let fillPercent = 0;
-          if (zoneHeight > 0) {
-            if (ote.type === 'bullish') {
-              if (currentPrice >= ote.fib618) fillPercent = 0;
-              else if (currentPrice <= ote.fib786) fillPercent = 100;
-              else fillPercent = ((ote.fib618 - currentPrice) / zoneHeight) * 100;
+        // 计算 OTE 填充度
+        // bullish OTE: 价格从上往下填充，fib618 是顶部，fib786 是底部
+        // bearish OTE: 价格从下往上填充，fib786 是顶部，fib618 是底部
+        const zoneHeight = Math.abs(ote.fib618 - ote.fib786);
+        let fillPercent = 0;
+
+        if (zoneHeight > 0) {
+          if (ote.type === 'bullish') {
+            // Bullish OTE: 价格需要下跌到区域，从 fib618 向 fib786 填充
+            if (currentPrice >= ote.fib618) {
+              fillPercent = 0; // 价格在区域上方，未填充
+            } else if (currentPrice <= ote.fib786) {
+              fillPercent = 100; // 价格穿透区域，完全填充
             } else {
-              if (currentPrice <= ote.fib786) fillPercent = 0;
-              else if (currentPrice >= ote.fib618) fillPercent = 100;
-              else fillPercent = ((currentPrice - ote.fib786) / zoneHeight) * 100;
+              fillPercent = ((ote.fib618 - currentPrice) / zoneHeight) * 100;
+            }
+          } else {
+            // Bearish OTE: 价格需要上涨到区域，从 fib618 向 fib786 填充
+            if (currentPrice <= ote.fib618) {
+              fillPercent = 0; // 价格在区域下方，未填充
+            } else if (currentPrice >= ote.fib786) {
+              fillPercent = 100; // 价格穿透区域，完全填充
+            } else {
+              fillPercent = ((currentPrice - ote.fib618) / zoneHeight) * 100;
             }
           }
+        }
 
-          if (fillPercent < 22) {
-            towerBlocks.push({
-              id: `ote-${tf}-${ote.startTime}`,
-              type: ote.type,
-              source: 'OTE',
-              timeframe: tf,
-              high: ote.fib618,
-              low: ote.fib786,
-              entry: ote.fib675,
-              fillPercent,
-            });
-          }
+        if (fillPercent < 22) {
+          towerBlocks.push({
+            id: `ote-${tf}-${ote.startTime}`,
+            type: ote.type,
+            source: 'OTE',
+            timeframe: tf,
+            high: ote.type === 'bullish' ? ote.fib618 : ote.fib786,
+            low: ote.type === 'bullish' ? ote.fib786 : ote.fib618,
+            entry: ote.fib675,
+            fillPercent,
+          });
         }
       }
     }
