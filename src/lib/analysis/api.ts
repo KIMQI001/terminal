@@ -116,7 +116,7 @@ export async function fetchSignals(
   days: number = 30
 ): Promise<Signal[]> {
   const res = await fetch(
-    `${API_BASE}/api/signals?status=${status}&days=${days}`
+    `${API_BASE}/signals?status=${status}&days=${days}`
   );
   const json: ApiResponse<Signal[]> = await res.json();
 
@@ -131,14 +131,14 @@ export async function fetchSignals(
  * 获取单个信号详情
  */
 export async function fetchSignalById(id: string): Promise<Signal> {
-  return fetchApi<Signal>(`/api/signals/${id}`);
+  return fetchApi<Signal>(`/signals/${id}`);
 }
 
 /**
  * 获取信号统计
  */
 export async function fetchSignalStats(days: number = 30): Promise<SignalStats> {
-  return fetchApi<SignalStats>(`/api/signals/stats?days=${days}`);
+  return fetchApi<SignalStats>(`/signals/stats?days=${days}`);
 }
 
 /**
@@ -147,7 +147,7 @@ export async function fetchSignalStats(days: number = 30): Promise<SignalStats> 
 export async function fetchPerformanceStats(
   days: number = 30
 ): Promise<PerformanceStats> {
-  return fetchApi<PerformanceStats>(`/api/performance/stats?days=${days}`);
+  return fetchApi<PerformanceStats>(`/performance/stats?days=${days}`);
 }
 
 /**
@@ -156,7 +156,7 @@ export async function fetchPerformanceStats(
 export async function fetchEquityCurve(
   days: number = 30
 ): Promise<EquityPoint[]> {
-  return fetchApi<EquityPoint[]>(`/api/performance/equity-curve?days=${days}`);
+  return fetchApi<EquityPoint[]>(`/performance/equity-curve?days=${days}`);
 }
 
 /**
@@ -180,7 +180,7 @@ export async function fetchOverview(): Promise<{
     totalPnlPercent: number;
   };
 }> {
-  return fetchApi(`/api/performance/overview`);
+  return fetchApi(`/performance/overview`);
 }
 
 /**
@@ -188,7 +188,7 @@ export async function fetchOverview(): Promise<{
  */
 export async function checkHealth(): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/api/health`);
+    const res = await fetch(`${API_BASE}/health`);
     const json = await res.json();
     return json.success === true;
   } catch {
