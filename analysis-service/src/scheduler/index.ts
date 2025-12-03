@@ -119,6 +119,7 @@ async function analyzeSymbolMTF(symbol: string): Promise<void> {
     }
 
     console.log(`[${key}] AI 分析完成 - 方向: ${signal.direction}, 置信度: ${signal.confidence}`);
+    console.log(`[${key}] AI reasoning: ${signal.reasoning}`);
 
     // 5. 过滤信号
     if (signal.direction === 'neutral') {
@@ -194,6 +195,7 @@ async function analyzeSymbolSingle(symbol: string, timeframe: Timeframe): Promis
     }
 
     console.log(`[${key}] AI 分析完成 - 方向: ${signal.direction}, 置信度: ${signal.confidence}`);
+    console.log(`[${key}] AI reasoning: ${signal.reasoning}`);
 
     // 5. 过滤低置信度信号
     if (signal.direction === 'neutral') {
