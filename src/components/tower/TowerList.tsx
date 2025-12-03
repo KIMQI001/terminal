@@ -8,12 +8,13 @@ import { TowerBlockData } from "@/lib/analysis/api";
 interface TowerListProps {
   currentPrice: number;
   blocks: TowerBlockData[];
+  onOrder?: (block: TowerBlock) => void;
 }
 
 const MAX_SL_DISTANCE = 200; // Maximum stop loss distance in points
 const MIN_TP_DISTANCE = 1000; // Minimum take profit distance in points
 
-export function TowerList({ currentPrice, blocks }: TowerListProps) {
+export function TowerList({ currentPrice, blocks, onOrder }: TowerListProps) {
   const { bearishBlocks, bullishBlocks } = useMemo(() => {
     // Convert API blocks to TowerBlocks with SL/TP calculations
     const towerBlocks: TowerBlock[] = blocks.map((b) => ({
@@ -118,7 +119,7 @@ export function TowerList({ currentPrice, blocks }: TowerListProps) {
         {bearishBlocks.length > 0 ? (
           <div className="space-y-2">
             {bearishBlocks.map((block) => (
-              <TowerCard key={block.id} block={block} />
+              <TowerCard key={block.id} block={block} onOrder={onOrder} />
             ))}
           </div>
         ) : (
@@ -153,7 +154,7 @@ export function TowerList({ currentPrice, blocks }: TowerListProps) {
         {bullishBlocks.length > 0 ? (
           <div className="space-y-2">
             {bullishBlocks.map((block) => (
-              <TowerCard key={block.id} block={block} />
+              <TowerCard key={block.id} block={block} onOrder={onOrder} />
             ))}
           </div>
         ) : (

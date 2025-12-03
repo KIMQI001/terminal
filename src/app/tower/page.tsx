@@ -4,13 +4,15 @@ import { useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { AuthGuard } from "@/components/auth/AuthGuard";
-import { TowerList } from "@/components/tower";
+import { TowerList, TowerOrderModal } from "@/components/tower";
+import { TowerBlock } from "@/components/tower/types";
 import { fetchTowerBlocks, TowerBlocksResult } from "@/lib/analysis/api";
 import { useChartStore } from "@/stores/chartStore";
 
 export default function TowerPage() {
   const { symbol } = useChartStore();
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [selectedBlock, setSelectedBlock] = useState<TowerBlock | null>(null);
 
   // Fetch tower blocks from backend
   const {
@@ -29,6 +31,14 @@ export default function TowerPage() {
     refetch();
     setLastRefresh(new Date());
   }, [refetch]);
+
+  const handleOrder = useCallback((block: TowerBlock) => {
+    setSelectedBlock(block);
+  }, []);
+
+  const handleCloseModal = useCallback(() => {
+    setSelectedBlock(null);
+  }, []);
 
   return (
     <AuthGuard>
@@ -142,6 +152,7 @@ export default function TowerPage() {
             <TowerList
               currentPrice={data.currentPrice}
               blocks={data.blocks}
+              onOrder={handleOrder}
             />
           )}
 
@@ -170,6 +181,11 @@ export default function TowerPage() {
             )}
           </p>
         </footer>
+
+        {/* Order Modal */}
+        {selectedBlock && (
+          <TowerOrderModal block={selectedBlock} onClose={handleCloseModal} />
+        )}
       </div>
     </AuthGuard>
   );

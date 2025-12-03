@@ -4,9 +4,10 @@ import { TowerBlock } from "./types";
 
 interface TowerCardProps {
   block: TowerBlock;
+  onOrder?: (block: TowerBlock) => void;
 }
 
-export function TowerCard({ block }: TowerCardProps) {
+export function TowerCard({ block, onOrder }: TowerCardProps) {
   const isBearish = block.type === "bearish";
   const typeColor = isBearish ? "text-red-500" : "text-green-500";
   const bgColor = isBearish ? "bg-red-500/5" : "bg-green-500/5";
@@ -81,6 +82,20 @@ export function TowerCard({ block }: TowerCardProps) {
           </div>
         </div>
       </div>
+
+      {/* Order Button */}
+      {onOrder && (
+        <button
+          onClick={() => onOrder(block)}
+          className={`w-full mt-3 py-2 rounded-lg text-sm font-medium transition-all ${
+            isBearish
+              ? "bg-red-500/20 hover:bg-red-500/30 text-red-400 hover:text-red-300"
+              : "bg-green-500/20 hover:bg-green-500/30 text-green-400 hover:text-green-300"
+          }`}
+        >
+          {isBearish ? "做空" : "做多"}
+        </button>
+      )}
     </div>
   );
 }
