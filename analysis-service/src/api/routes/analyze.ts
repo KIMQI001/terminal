@@ -138,6 +138,130 @@ analyzeRoutes.get('/status', (_req: Request, res: Response) => {
  * 反转分析（猜顶/猜底）
  * Body: { symbol: string, mode: 'top' | 'bottom' }
  */
+/**
+ * GET /api/analyze/tower
+ * 获取所有周期的塔块数据（FVG/OB/OTE）
+ * Query: { symbol: string }
+ */
+analyzeRoutes.get('/tower', async (req: Request, res: Response) => {
+  try {
+    const symbol = (req.query.symbol as string) || 'BTCUSDC';
+    const timeframes: Timeframe[] = ['5m', '15m', '1h', '4h', '1d'];
+
+    console.log(`[API] 塔块数据请求: ${symbol}`);
+
+    // 并行获取所有周期的 K 线数据
+    const candlesPromises = timeframes.map(tf => fetchKlines(symbol, tf, 500));
+    const allCandles = await Promise.all(candlesPromises);
+
+    // 分析每个周期的 ICT 指标
+    const towerBlocks: Array<{
+      id: string;
+      type: 'bullish' | 'bearish';
+      source: 'FVG' | 'OB' | 'OTE';
+      timeframe: string;
+      high: number;
+      low: number;
+      entry: number;
+      fillPercent: number;
+    }> = [];
+
+    // 获取当前价格
+    const latestCandles = allCandles[0]; // 5m 最新
+    const currentPrice = latestCandles.length > 0 ? latestCandles[latestCandles.length - 1].close : 0;
+
+    for (let i = 0; i < timeframes.length; i++) {
+      const tf = timeframes[i];
+      const candles = allCandles[i];
+
+      if (candles.length < 50) continue;
+
+      const ictResult = analyzeICT(candles, symbol, tf);
+
+      // 收集 FVG（填充度 < 22%）
+      for (const fvg of ictResult.fvgs) {
+        if (!fvg.filled && fvg.fillPercentage < 22) {
+          towerBlocks.push({
+            id: `fvg-${tf}-${fvg.time}`,
+            type: fvg.type,
+            source: 'FVG',
+            timeframe: tf,
+            high: fvg.high,
+            low: fvg.low,
+            entry: fvg.fib22,
+            fillPercent: fvg.fillPercentage,
+          });
+        }
+      }
+
+      // 收集 OB（不限填充度，但未被触发）
+      for (const ob of ictResult.orderBlocks) {
+        if (!ob.mitigated) {
+          towerBlocks.push({
+            id: `ob-${tf}-${ob.startTime}`,
+            type: ob.type,
+            source: 'OB',
+            timeframe: tf,
+            high: ob.high,
+            low: ob.low,
+            entry: ob.fib22,
+            fillPercent: ob.fillPercentage,
+          });
+        }
+      }
+
+      // 收集 OTE（活跃且填充度 < 22%）
+      for (const ote of ictResult.oteZones) {
+        if (ote.active) {
+          // 计算 OTE 填充度
+          const zoneHeight = ote.fib618 - ote.fib786;
+          let fillPercent = 0;
+          if (zoneHeight > 0) {
+            if (ote.type === 'bullish') {
+              if (currentPrice >= ote.fib618) fillPercent = 0;
+              else if (currentPrice <= ote.fib786) fillPercent = 100;
+              else fillPercent = ((ote.fib618 - currentPrice) / zoneHeight) * 100;
+            } else {
+              if (currentPrice <= ote.fib786) fillPercent = 0;
+              else if (currentPrice >= ote.fib618) fillPercent = 100;
+              else fillPercent = ((currentPrice - ote.fib786) / zoneHeight) * 100;
+            }
+          }
+
+          if (fillPercent < 22) {
+            towerBlocks.push({
+              id: `ote-${tf}-${ote.startTime}`,
+              type: ote.type,
+              source: 'OTE',
+              timeframe: tf,
+              high: ote.fib618,
+              low: ote.fib786,
+              entry: ote.fib675,
+              fillPercent,
+            });
+          }
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        symbol,
+        currentPrice,
+        blocks: towerBlocks,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error('[API] GET /analyze/tower error:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 analyzeRoutes.post('/reversal', async (req: Request, res: Response) => {
   try {
     const { symbol = 'BTCUSDC', mode } = req.body;

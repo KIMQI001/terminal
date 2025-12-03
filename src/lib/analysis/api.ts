@@ -308,3 +308,39 @@ export async function triggerReversalAnalyze(
 
   return json.data;
 }
+
+/** 塔块数据类型 */
+export interface TowerBlockData {
+  id: string;
+  type: "bullish" | "bearish";
+  source: "FVG" | "OB" | "OTE";
+  timeframe: string;
+  high: number;
+  low: number;
+  entry: number;
+  fillPercent: number;
+}
+
+/** 塔块响应类型 */
+export interface TowerBlocksResult {
+  symbol: string;
+  currentPrice: number;
+  blocks: TowerBlockData[];
+  timestamp: string;
+}
+
+/**
+ * 获取所有周期的塔块数据
+ */
+export async function fetchTowerBlocks(
+  symbol: string = "BTCUSDC"
+): Promise<TowerBlocksResult> {
+  const res = await fetch(`${API_BASE}/analyze/tower?symbol=${symbol}`);
+  const json: ApiResponse<TowerBlocksResult> = await res.json();
+
+  if (!json.success || !json.data) {
+    throw new Error(json.error || "获取塔块数据失败");
+  }
+
+  return json.data;
+}
