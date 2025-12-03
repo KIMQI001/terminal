@@ -126,8 +126,8 @@ export function formatStartupMessage(): string {
 - 天界: ${config.analysis.mtf.htf.join(', ')} (定乾坤)
 - 人界: ${config.analysis.mtf.mtf.join(', ')} (察因果)
 - 地界: ${config.analysis.mtf.ltf.join(', ')} (寻机缘)
-**轮回周期**: ${config.schedule.interval}
 
+**轮回周期**: ${config.schedule.interval}
 **道法**: ${config.ai.provider}
 
 *${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}*`;
@@ -138,8 +138,8 @@ export function formatStartupMessage(): string {
 **观测灵石**: ${symbols}
 **修炼法门**: 单境推演
 **时空法则**: ${config.analysis.singleTimeframes.join(', ')}
-**轮回周期**: ${config.schedule.interval}
 
+**轮回周期**: ${config.schedule.interval}
 **道法**: ${config.ai.provider}
 
 *${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}*`;
