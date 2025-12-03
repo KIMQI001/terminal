@@ -112,11 +112,33 @@ ${signal.warnings.map(w => `- ${w}`).join('\n')}`
  * 格式化服务启动消息
  */
 export function formatStartupMessage(): string {
+  // 动态导入配置（避免循环依赖）
+  const { config } = require('../config');
+  const mode = config.analysis.mode;
+  const symbols = config.watchlist.map((w: { symbol: string }) => w.symbol).join(', ');
+
+  if (mode === 'mtf') {
+    return `## 🚀 分析服务已启动
+
+**监控交易对**: ${symbols}
+**分析模式**: 多时间框架综合分析 (MTF)
+**时间框架**:
+- HTF: ${config.analysis.mtf.htf.join(', ')} (确定方向)
+- MTF: ${config.analysis.mtf.mtf.join(', ')} (确认结构)
+- LTF: ${config.analysis.mtf.ltf.join(', ')} (寻找入场)
+**执行间隔**: ${config.schedule.interval}
+**AI**: ${config.ai.provider}
+
+*${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}*`;
+  }
+
   return `## 🚀 分析服务已启动
 
-**监控交易对**: BTCUSDC
-**时间周期**: 15m, 1h, 4h
-**执行间隔**: 每 15 分钟
+**监控交易对**: ${symbols}
+**分析模式**: 独立周期分析
+**时间周期**: ${config.analysis.singleTimeframes.join(', ')}
+**执行间隔**: ${config.schedule.interval}
+**AI**: ${config.ai.provider}
 
 *${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}*`;
 }
