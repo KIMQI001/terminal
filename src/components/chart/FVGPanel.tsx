@@ -171,8 +171,8 @@ export function FVGPanel() {
                     onClick={() => handleFVGClick(fvg)}
                     className={`relative grid grid-cols-4 gap-1 text-[9px] py-0.5 items-center rounded border border-dashed ${borderColor} overflow-hidden cursor-pointer hover:bg-gray-100 transition-colors`}
                   >
-                    {/* 填充背景 - 从左到右填充 */}
-                    {isNearest && displayFillPercent > 0 && (
+                    {/* 填充背景 - 从左到右填充（所有周期都显示） */}
+                    {displayFillPercent > 0 && (
                       <div
                         className={`absolute inset-y-0 left-0 ${fillColor} opacity-50`}
                         style={{ width: `${Math.min(100, Math.max(0, displayFillPercent))}%` }}
