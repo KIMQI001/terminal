@@ -244,12 +244,30 @@ analyzeRoutes.get('/tower', async (req: Request, res: Response) => {
       }
     }
 
+    // 过滤塔块：
+    // 1. bearish 塔块入场点必须 > 当前价格（做空需要价格上涨到阻力区）
+    // 2. bullish 塔块入场点必须 < 当前价格（做多需要价格下跌到支撑区）
+    // 3. 只保留当前价格上下 6000 点范围内的塔块
+    const PRICE_RANGE = 6000;
+    const filteredBlocks = towerBlocks.filter(block => {
+      const distanceFromPrice = Math.abs(block.entry - currentPrice);
+      if (distanceFromPrice > PRICE_RANGE) return false;
+
+      if (block.type === 'bearish') {
+        // 空塔块：入场点必须在当前价格上方
+        return block.entry > currentPrice;
+      } else {
+        // 多塔块：入场点必须在当前价格下方
+        return block.entry < currentPrice;
+      }
+    });
+
     res.json({
       success: true,
       data: {
         symbol,
         currentPrice,
-        blocks: towerBlocks,
+        blocks: filteredBlocks,
         timestamp: new Date().toISOString(),
       },
     });
