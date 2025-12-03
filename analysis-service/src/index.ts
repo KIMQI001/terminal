@@ -16,14 +16,21 @@ import { config, validateConfig } from './config';
 import { startScheduler } from './scheduler';
 import { sendDingtalkMarkdown } from './notification/dingtalk';
 import { formatStartupMessage } from './notification/formatter';
+import { initDatabase, closeDatabase } from './db';
+import { startSignalTracker } from './signals/signalTracker';
+import { startReviewScheduler } from './review/reviewScheduler';
+import { startApiServer } from './api';
 
 async function main(): Promise<void> {
   console.log('═══════════════════════════════════════');
-  console.log('🤖 ICT + AI 分析服务');
+  console.log('🤖 ICT + AI 分析服务 v2.0');
   console.log('═══════════════════════════════════════');
 
   // 验证配置
   validateConfig();
+
+  // 初始化数据库
+  initDatabase();
 
   // 发送启动通知
   if (config.dingtalk.webhook) {
@@ -31,18 +38,29 @@ async function main(): Promise<void> {
     await sendDingtalkMarkdown('分析服务启动', startupMsg);
   }
 
-  // 启动调度器
+  // 启动 HTTP API 服务器
+  startApiServer(3002);
+
+  // 启动信号跟踪器（每分钟检查价格）
+  startSignalTracker();
+
+  // 启动复盘调度器（每日/每周）
+  startReviewScheduler();
+
+  // 启动主调度器
   startScheduler();
 }
 
 // 优雅退出
 process.on('SIGINT', () => {
   console.log('\n📴 收到 SIGINT 信号，正在退出...');
+  closeDatabase();
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
   console.log('\n📴 收到 SIGTERM 信号，正在退出...');
+  closeDatabase();
   process.exit(0);
 });
 

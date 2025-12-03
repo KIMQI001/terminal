@@ -11,6 +11,7 @@ import { analyzeICT } from '../analysis/ictAnalyzer';
 import { generateTradeSignal, getCallStats } from '../analysis/aiAnalyzer';
 import { sendDingtalkMarkdown } from '../notification/dingtalk';
 import { formatSignalMessage } from '../notification/formatter';
+import { saveSignal, hasDuplicatePendingSignal } from '../signals/signalStore';
 
 // 上次推送的信号缓存（防止重复推送）
 const lastSignals: Map<string, string> = new Map();
@@ -102,15 +103,31 @@ async function analyzeSymbol(symbol: string, timeframe: Timeframe): Promise<void
       return;
     }
 
-    // 6. 检查是否重复信号
+    // 6. 检查是否重复信号（内存缓存 + 数据库双重检查）
     const signalHash = `${signal.direction}-${signal.entry.price.toFixed(0)}-${signal.stopLoss.price.toFixed(0)}`;
     if (lastSignals.get(key) === signalHash) {
-      console.log(`[${key}] 重复信号，不推送`);
+      console.log(`[${key}] 重复信号（缓存），不推送`);
       return;
     }
+
+    // 检查数据库中是否已有相似的待处理信号
+    if (hasDuplicatePendingSignal(symbol, timeframe, signal.direction, signal.entry.price)) {
+      console.log(`[${key}] 重复信号（数据库），不推送`);
+      return;
+    }
+
     lastSignals.set(key, signalHash);
 
-    // 7. 推送钉钉
+    // 7. 保存信号到数据库
+    try {
+      const signalId = saveSignal(signal, symbol, timeframe);
+      console.log(`[${key}] 信号已保存: ${signalId}`);
+    } catch (dbError) {
+      console.error(`[${key}] 信号保存失败:`, dbError);
+      // 即使保存失败也继续推送
+    }
+
+    // 8. 推送钉钉
     const message = formatSignalMessage(signal, ictResult);
     const sent = await sendDingtalkMarkdown(`${symbol} ${timeframe} 信号`, message);
     console.log(`[${key}] 钉钉推送: ${sent ? '成功' : '失败'}`);

@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User, Maximize2, Minimize2 } from "lucide-react";
+import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User, Maximize2, Minimize2, BarChart3 } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -204,6 +205,18 @@ export function Header() {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* AI 分析按钮 */}
+        <Link href="/analysis">
+          <Button
+            variant="outline"
+            size="sm"
+            title="AI 分析统计"
+          >
+            <BarChart3 className="w-3 h-3 mr-1.5" />
+            分析
+          </Button>
+        </Link>
 
         {/* 全屏按钮 */}
         <Button
