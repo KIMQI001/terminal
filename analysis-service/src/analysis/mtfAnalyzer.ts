@@ -66,6 +66,13 @@ export interface MTFAnalysis {
     entry: EntrySetup | null;
   };
 
+  // 原始 K 线数据（供 AI 分析形态）
+  klines: {
+    h1: Candle[];   // 最近 24 根
+    m15: Candle[];  // 最近 16 根
+    m5: Candle[];   // 最近 12 根
+  };
+
   // 综合结果
   overallBias: Bias;
   alignment: number;  // 0-100 对齐度
@@ -385,6 +392,12 @@ export async function analyzeMultiTimeframe(symbol: string): Promise<MTFAnalysis
       m15: m15TF,
       m5: m5TF,
       entry: ltfEntry,
+    },
+    // 原始 K 线数据供 AI 分析形态
+    klines: {
+      h1: h1Candles.slice(-24),    // 最近 24 根 (24 小时)
+      m15: m15Candles.slice(-16),  // 最近 16 根 (4 小时)
+      m5: m5Candles.slice(-12),    // 最近 12 根 (1 小时)
     },
     overallBias: htfResult.bias,
     alignment,

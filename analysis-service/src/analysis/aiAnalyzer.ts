@@ -10,6 +10,7 @@ import { config } from '../config';
 import { ICTAnalysisResult } from './ictAnalyzer';
 import { LiquidationData, extractKeyLiquidationLevels } from '../data/liquidationClient';
 import { MTFAnalysis } from './mtfAnalyzer';
+import { Candle } from '../data/klineClient';
 
 // ============================================
 // 类型定义
@@ -376,6 +377,39 @@ function parseAIResponse(text: string): TradeSignal | null {
 // ============================================
 
 /**
+ * 格式化时间戳为可读时间
+ */
+function formatKlineTime(timestamp: number): string {
+  const date = new Date(timestamp);
+  return date.toLocaleString('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).replace(/\//g, '-');
+}
+
+/**
+ * 格式化 K 线数据为紧凑表格
+ */
+function formatKlines(candles: Candle[], label: string): string {
+  if (!candles || candles.length === 0) return '';
+
+  const lines = candles.map(c => {
+    const change = ((c.close - c.open) / c.open * 100).toFixed(2);
+    const emoji = c.close >= c.open ? '🟢' : '🔴';
+    const changeStr = Number(change) >= 0 ? `+${change}` : change;
+    return `| ${emoji} | ${formatKlineTime(c.time)} | ${c.open.toFixed(0)} | ${c.high.toFixed(0)} | ${c.low.toFixed(0)} | ${c.close.toFixed(0)} | ${changeStr}% |`;
+  });
+
+  return `### ${label} K线 (最近 ${candles.length} 根)
+| 方向 | 时间 | 开盘 | 最高 | 最低 | 收盘 | 涨跌 |
+|:----:|:----:|-----:|-----:|-----:|-----:|-----:|
+${lines.join('\n')}`;
+}
+
+/**
  * 构建 MTF 分析 Prompt
  */
 function buildMTFPrompt(mtf: MTFAnalysis, liq: LiquidationData | null): string {
@@ -437,6 +471,16 @@ ${keyLevels.shortLiquidation.map(l => `- $${l.price.toFixed(2)}: ${(l.amount / 1
 ${entryInfo}
 
 ${liquidationInfo}
+
+## K线数据（用于形态分析）
+
+${formatKlines(mtf.klines.h1, '1H')}
+
+${formatKlines(mtf.klines.m15, '15M')}
+
+${formatKlines(mtf.klines.m5, '5M')}
+
+**请结合 K 线形态（如吞没、Pin Bar、内包、Doji、锤子线等）与 ICT 指标进行综合分析。**
 
 ## 请提供交易建议
 
