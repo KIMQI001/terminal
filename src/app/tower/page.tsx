@@ -203,8 +203,8 @@ export default function TowerPage() {
     }
   }, [isDataStale, refetch]);
 
-  // 一键守塔
-  const handleAutoTower = useCallback(async () => {
+  // 一键守塔（silent=true 时不弹窗，用于托管模式）
+  const handleAutoTower = useCallback(async (silent = false) => {
     if (!data?.blocks || !data.currentPrice) return;
 
     const currentPrice = data.currentPrice;
@@ -325,7 +325,7 @@ export default function TowerPage() {
     const selectedBlocks = [...bullishBlocks, ...bearishBlocks];
 
     if (selectedBlocks.length === 0) {
-      alert("没有符合条件的塔块");
+      if (!silent) alert("没有符合条件的塔块");
       return;
     }
 
@@ -339,15 +339,20 @@ export default function TowerPage() {
     };
     const totalMargin = calcTotalMargin(bullishBlocks.length) + calcTotalMargin(bearishBlocks.length);
 
-    const confirmed = confirm(
-      `即将下 ${selectedBlocks.length} 个塔单\n` +
-        `多塔: ${bullishBlocks.length} 个（第${bullishStartLayer}层起），空塔: ${bearishBlocks.length} 个（第${bearishStartLayer}层起）\n` +
-        `基础保证金: ${baseMargin} USDT，递增: ${marginIncrement} USDT\n` +
-        `总保证金: ${totalMargin} USDT\n` +
-        `确定继续吗？`
-    );
+    // 非静默模式下弹窗确认
+    if (!silent) {
+      const confirmed = confirm(
+        `即将下 ${selectedBlocks.length} 个塔单\n` +
+          `多塔: ${bullishBlocks.length} 个（第${bullishStartLayer}层起），空塔: ${bearishBlocks.length} 个（第${bearishStartLayer}层起）\n` +
+          `基础保证金: ${baseMargin} USDT，递增: ${marginIncrement} USDT\n` +
+          `总保证金: ${totalMargin} USDT\n` +
+          `确定继续吗？`
+      );
 
-    if (!confirmed) return;
+      if (!confirmed) return;
+    } else {
+      console.log(`[托管] 下单: ${selectedBlocks.length} 个塔单，总保证金: ${totalMargin} USDT`);
+    }
 
     setIsAutoOrdering(true);
     setOrderProgress({ current: 0, total: selectedBlocks.length, errors: [] });
@@ -411,10 +416,19 @@ export default function TowerPage() {
 
     setIsAutoOrdering(false);
 
-    if (errors.length > 0) {
-      alert(`下单完成，但有 ${errors.length} 个错误:\n${errors.join("\n")}`);
+    // 非静默模式下显示结果
+    if (!silent) {
+      if (errors.length > 0) {
+        alert(`下单完成，但有 ${errors.length} 个错误:\n${errors.join("\n")}`);
+      } else {
+        alert(`成功下 ${ordersToPlace.length} 个塔单！`);
+      }
     } else {
-      alert(`成功下 ${ordersToPlace.length} 个塔单！`);
+      if (errors.length > 0) {
+        console.error(`[托管] 下单完成，但有 ${errors.length} 个错误:`, errors);
+      } else {
+        console.log(`[托管] 成功下 ${ordersToPlace.length} 个塔单`);
+      }
     }
 
     setOrderProgress(null);
@@ -494,7 +508,7 @@ export default function TowerPage() {
     setOrderProgress(null);
 
     // 2. 重新下单（静默模式）
-    handleAutoTower();
+    handleAutoTower(true);
   }, [symbol, cancelAllOrders, handleAutoTower, isAutoOrdering, ensureFreshData]);
 
   // 托管定时器
@@ -742,7 +756,7 @@ export default function TowerPage() {
             <div className="flex items-center gap-2 pt-1 border-t border-[var(--border)]">
               {/* 守塔按钮 */}
               <button
-                onClick={handleAutoTower}
+                onClick={() => handleAutoTower(false)}
                 disabled={isAutoOrdering || !data?.blocks?.length}
                 className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white text-xs font-medium rounded transition-colors"
               >
