@@ -105,16 +105,16 @@ export function OrderCancelOverlay({
       {buttonPositions.map(({ groupIndex, y, group }) => (
         <button
           key={groupIndex}
-          className="absolute pointer-events-auto w-4 h-4 flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded transition-colors text-xs font-bold"
+          className="absolute pointer-events-auto w-4 h-4 flex items-center justify-center text-gray-500 hover:text-red-500 transition-colors text-sm"
           style={{
-            right: 72, // 价格轴宽度左侧
+            left: 4,
             top: y - 8,
           }}
           onClick={() => handleCancelGroup(group, groupIndex)}
           disabled={cancellingGroup === groupIndex}
           title="取消这组订单"
         >
-          {cancellingGroup === groupIndex ? "..." : "×"}
+          {cancellingGroup === groupIndex ? "·" : "×"}
         </button>
       ))}
     </div>
