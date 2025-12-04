@@ -16,6 +16,8 @@ const STORAGE_KEYS = {
   BASE_MARGIN: "tower_base_margin",
   TOWER_LAYERS: "tower_layers",
   MARGIN_INCREMENT: "tower_margin_increment",
+  BULLISH_START_LAYER: "tower_bullish_start",
+  BEARISH_START_LAYER: "tower_bearish_start",
 };
 
 export default function TowerPage() {
@@ -29,6 +31,8 @@ export default function TowerPage() {
   const [baseMargin, setBaseMargin] = useState(100);
   const [marginIncrement, setMarginIncrement] = useState(0);
   const [towerLayers, setTowerLayers] = useState(3);
+  const [bullishStartLayer, setBullishStartLayer] = useState(1);
+  const [bearishStartLayer, setBearishStartLayer] = useState(1);
   const [isAutoOrdering, setIsAutoOrdering] = useState(false);
   const [orderProgress, setOrderProgress] = useState<{
     current: number;
@@ -41,10 +45,14 @@ export default function TowerPage() {
     const savedMargin = localStorage.getItem(STORAGE_KEYS.BASE_MARGIN);
     const savedIncrement = localStorage.getItem(STORAGE_KEYS.MARGIN_INCREMENT);
     const savedLayers = localStorage.getItem(STORAGE_KEYS.TOWER_LAYERS);
+    const savedBullishStart = localStorage.getItem(STORAGE_KEYS.BULLISH_START_LAYER);
+    const savedBearishStart = localStorage.getItem(STORAGE_KEYS.BEARISH_START_LAYER);
 
     if (savedMargin) setBaseMargin(Number(savedMargin));
     if (savedIncrement) setMarginIncrement(Number(savedIncrement));
     if (savedLayers) setTowerLayers(Number(savedLayers));
+    if (savedBullishStart) setBullishStartLayer(Number(savedBullishStart));
+    if (savedBearishStart) setBearishStartLayer(Number(savedBearishStart));
   }, []);
 
   // 保存设置到 localStorage
@@ -61,6 +69,16 @@ export default function TowerPage() {
   const handleLayersChange = (value: number) => {
     setTowerLayers(value);
     localStorage.setItem(STORAGE_KEYS.TOWER_LAYERS, String(value));
+  };
+
+  const handleBullishStartChange = (value: number) => {
+    setBullishStartLayer(value);
+    localStorage.setItem(STORAGE_KEYS.BULLISH_START_LAYER, String(value));
+  };
+
+  const handleBearishStartChange = (value: number) => {
+    setBearishStartLayer(value);
+    localStorage.setItem(STORAGE_KEYS.BEARISH_START_LAYER, String(value));
   };
 
   // Fetch tower blocks from backend
@@ -180,15 +198,16 @@ export default function TowerPage() {
     const minDistance = currentPrice * MIN_DISTANCE_RATIO;
 
     // 筛选当前价格上下各 N 层的塔块（至少距离当前价格千分之三）
+    // 起始层：跳过前 N-1 层，从第 N 层开始
     const bullishBlocks = allBullish
       .filter((b) => b.entry < currentPrice && currentPrice - b.entry >= minDistance)
       .sort((a, b) => b.entry - a.entry)
-      .slice(0, towerLayers);
+      .slice(bullishStartLayer - 1, bullishStartLayer - 1 + towerLayers);
 
     const bearishBlocks = allBearish
       .filter((b) => b.entry > currentPrice && b.entry - currentPrice >= minDistance)
       .sort((a, b) => a.entry - b.entry)
-      .slice(0, towerLayers);
+      .slice(bearishStartLayer - 1, bearishStartLayer - 1 + towerLayers);
 
     const selectedBlocks = [...bullishBlocks, ...bearishBlocks];
 
@@ -209,7 +228,7 @@ export default function TowerPage() {
 
     const confirmed = confirm(
       `即将下 ${selectedBlocks.length} 个塔单\n` +
-        `多塔: ${bullishBlocks.length} 个，空塔: ${bearishBlocks.length} 个\n` +
+        `多塔: ${bullishBlocks.length} 个（第${bullishStartLayer}层起），空塔: ${bearishBlocks.length} 个（第${bearishStartLayer}层起）\n` +
         `基础保证金: ${baseMargin} USDT，递增: ${marginIncrement} USDT\n` +
         `总保证金: ${totalMargin} USDT\n` +
         `确定继续吗？`
@@ -286,7 +305,7 @@ export default function TowerPage() {
     }
 
     setOrderProgress(null);
-  }, [data, towerLayers, baseMargin, marginIncrement, calculateQuantity, placeOrder, symbol]);
+  }, [data, towerLayers, bullishStartLayer, bearishStartLayer, baseMargin, marginIncrement, calculateQuantity, placeOrder, symbol]);
 
   // 统计塔块数量和多空比例
   const stats = useMemo(() => {
@@ -465,7 +484,7 @@ export default function TowerPage() {
               {/* 守塔层数设置 */}
               <div className="flex items-center gap-2">
                 <label className="text-xs text-[var(--text-tertiary)]">
-                  守塔层数:
+                  层数:
                 </label>
                 <select
                   value={towerLayers}
@@ -474,7 +493,43 @@ export default function TowerPage() {
                 >
                   {[1, 2, 3, 4, 5].map((n) => (
                     <option key={n} value={n}>
-                      {n} 层
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 多塔起始层 */}
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-[var(--text-tertiary)]">
+                  多起:
+                </label>
+                <select
+                  value={bullishStartLayer}
+                  onChange={(e) => handleBullishStartChange(Number(e.target.value))}
+                  className="px-2 py-1 text-sm bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                >
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 空塔起始层 */}
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-[var(--text-tertiary)]">
+                  空起:
+                </label>
+                <select
+                  value={bearishStartLayer}
+                  onChange={(e) => handleBearishStartChange(Number(e.target.value))}
+                  className="px-2 py-1 text-sm bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                >
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
                     </option>
                   ))}
                 </select>
