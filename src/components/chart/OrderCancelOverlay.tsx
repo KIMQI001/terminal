@@ -107,7 +107,7 @@ export function OrderCancelOverlay({
           key={groupIndex}
           className="absolute pointer-events-auto w-4 h-4 flex items-center justify-center text-gray-500 hover:text-red-500 transition-colors text-sm"
           style={{
-            left: 4,
+            left: 140, // 价格标签宽度约 130px，放在其右侧
             top: y - 8,
           }}
           onClick={() => handleCancelGroup(group, groupIndex)}
