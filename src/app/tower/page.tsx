@@ -47,7 +47,7 @@ interface TowerRecord {
 
 export default function TowerPage() {
   const { symbol } = useChartStore();
-  const { placeOrder, cancelAllOrders } = useOrderStore();
+  const { placeOrder, cancelAllOrders, fetchOpenOrders, realOrders } = useOrderStore();
   const { currentLeverage, fetchLeverage } = usePositionStore();
   const [selectedBlock, setSelectedBlock] = useState<TowerBlock | null>(null);
 
@@ -507,14 +507,56 @@ export default function TowerPage() {
     handleAutoTower();
   }, [symbol, cancelAllOrders, handleAutoTower, isDataStale, ensureFreshData]);
 
+  // 检查现有订单数量是否满足要求
+  const checkOrdersCount = useCallback(async (): Promise<{ bullish: number; bearish: number; sufficient: boolean }> => {
+    // 先刷新订单列表
+    await fetchOpenOrders(symbol.replace("/", ""));
+
+    // 等待状态更新
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    // 统计 ict_tower 前缀的多空订单
+    // 只统计限价单（入场单），不统计止损止盈单
+    const towerOrders = realOrders.filter(
+      (o) => o.clientOrderId?.startsWith("ict_tower") && o.type === "limit"
+    );
+
+    const bullish = towerOrders.filter((o) => o.side === "buy").length;
+    const bearish = towerOrders.filter((o) => o.side === "sell").length;
+
+    // 如果多空各有 >= towerLayers 单，则足够
+    const sufficient = bullish >= towerLayers && bearish >= towerLayers;
+
+    console.log(`[托管] 订单检查: 多${bullish}单, 空${bearish}单, 需要各${towerLayers}单, ${sufficient ? "足够" : "不足"}`);
+
+    return { bullish, bearish, sufficient };
+  }, [fetchOpenOrders, realOrders, symbol, towerLayers]);
+
   // 静默更新守塔（托管用，不弹确认框）
   const handleSilentRefreshTower = useCallback(async () => {
     if (isAutoOrdering) return;
 
+    // 0. 先检查订单数量是否满足
+    const orderCheck = await checkOrdersCount();
+    if (orderCheck.sufficient) {
+      console.log("[托管] 订单数量足够，跳过本次更新");
+      // 记录跳过
+      const record: TowerRecord = {
+        time: new Date(),
+        bullishCount: orderCheck.bullish,
+        bearishCount: orderCheck.bearish,
+        totalMargin: 0,
+        success: true,
+        errors: ["订单充足，已跳过"],
+      };
+      setTowerRecords(prev => [record, ...prev].slice(0, 20));
+      return;
+    }
+
     setIsAutoOrdering(true);
     setOrderProgress({ current: 0, total: 1, errors: [] });
 
-    // 0. 检查数据新鲜度，如需刷新则先刷新
+    // 1. 检查数据新鲜度，如需刷新则先刷新
     const dataFresh = await ensureFreshData();
     if (!dataFresh) {
       console.error("[托管] 刷新数据失败，跳过本次更新");
@@ -523,7 +565,7 @@ export default function TowerPage() {
       return;
     }
 
-    // 1. 取消所有订单
+    // 2. 取消所有订单
     const cancelSuccess = await cancelAllOrders(symbol.replace("/", ""));
     if (!cancelSuccess) {
       console.error("[托管] 取消订单失败");
@@ -536,9 +578,9 @@ export default function TowerPage() {
     setIsAutoOrdering(false);
     setOrderProgress(null);
 
-    // 2. 重新下单（静默模式）
+    // 3. 重新下单（静默模式）
     handleAutoTower(true);
-  }, [symbol, cancelAllOrders, handleAutoTower, isAutoOrdering, ensureFreshData]);
+  }, [symbol, cancelAllOrders, handleAutoTower, isAutoOrdering, ensureFreshData, checkOrdersCount]);
 
   // 托管定时器
   useEffect(() => {
