@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { usePositionStore } from "@/stores/positionStore";
 import { useChartStore } from "@/stores/chartStore";
@@ -8,6 +8,7 @@ import { useChartStore } from "@/stores/chartStore";
 export function PositionList() {
   const { positions, isLoadingPositions, fetchPositions, closePosition } = usePositionStore();
   const { symbol } = useChartStore();
+  const [closingId, setClosingId] = useState<string | null>(null);
 
   // 获取真实持仓 + 3秒轮询
   useEffect(() => {
@@ -24,6 +25,15 @@ export function PositionList() {
   const currentPositions = symbol
     ? positions.filter(p => p.symbol === symbol.replace('/', ''))
     : positions;
+
+  const handleClose = async (id: string) => {
+    setClosingId(id);
+    try {
+      await closePosition(id);
+    } finally {
+      setClosingId(null);
+    }
+  };
 
   if (isLoadingPositions && positions.length === 0) {
     return (
@@ -70,9 +80,10 @@ export function PositionList() {
               variant="outline"
               size="sm"
               className="h-6 text-xs"
-              onClick={() => closePosition(position.id)}
+              onClick={() => handleClose(position.id)}
+              disabled={closingId === position.id}
             >
-              平仓
+              {closingId === position.id ? "平仓中..." : "平仓"}
             </Button>
           </div>
 
@@ -104,8 +115,28 @@ export function PositionList() {
             </div>
           </div>
 
+          {/* 止盈止损信息 */}
+          <div className="flex gap-4 text-xs pt-1 border-t border-[var(--border)]">
+            <div className="flex items-center gap-1">
+              <span className="text-[var(--text-secondary)]">止损:</span>
+              {position.stopLoss ? (
+                <span className="text-[var(--negative)]">{position.stopLoss.toLocaleString()}</span>
+              ) : (
+                <span className="text-[var(--text-secondary)]">未设置</span>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-[var(--text-secondary)]">止盈:</span>
+              {position.takeProfit ? (
+                <span className="text-[var(--positive)]">{position.takeProfit.toLocaleString()}</span>
+              ) : (
+                <span className="text-[var(--text-secondary)]">未设置</span>
+              )}
+            </div>
+          </div>
+
           {position.liquidationPrice && position.liquidationPrice > 0 && (
-            <div className="text-xs text-[var(--text-secondary)] pt-1 border-t border-[var(--border)]">
+            <div className="text-xs text-[var(--text-secondary)]">
               强平价: <span className="text-[var(--negative)]">{position.liquidationPrice.toLocaleString()}</span>
             </div>
           )}

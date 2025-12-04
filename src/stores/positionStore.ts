@@ -13,7 +13,7 @@ interface PositionState {
   // Actions
   addPosition: (position: Omit<Position, "id" | "unrealizedPnl" | "unrealizedPnlPercent">) => void;
   updatePosition: (id: string, updates: Partial<Position>) => void;
-  closePosition: (id: string) => void;
+  closePosition: (id: string) => Promise<void>;
   updateCurrentPrice: (symbol: string, price: number) => void;
   setBalances: (balances: Balance[]) => void;
   getBalance: (asset: string) => Balance | undefined;
@@ -55,10 +55,53 @@ export const usePositionStore = create<PositionState>((set, get) => ({
     }));
   },
 
-  closePosition: (id) => {
-    set((state) => ({
-      positions: state.positions.filter((pos) => pos.id !== id),
-    }));
+  closePosition: async (id) => {
+    const token = useUserStore.getState().token;
+    if (!token) {
+      console.log('No token found, cannot close position');
+      return;
+    }
+
+    // 找到要平仓的仓位
+    const position = get().positions.find(p => p.id === id);
+    if (!position) {
+      console.error('Position not found:', id);
+      return;
+    }
+
+    try {
+      // 从 id 解析 positionSide (格式: BTCUSDC_LONG 或 BTCUSDC_SHORT)
+      const positionSide = position.side === 'long' ? 'LONG' : 'SHORT';
+
+      const response = await fetch('/api/user/positions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          symbol: position.symbol,
+          positionSide,
+          quantity: position.quantity,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        // 平仓成功，从列表中移除
+        set((state) => ({
+          positions: state.positions.filter((pos) => pos.id !== id),
+        }));
+        console.log('Position closed successfully:', data.orderId);
+      } else {
+        console.error('Failed to close position:', data.error);
+        alert(`平仓失败: ${data.error}`);
+      }
+    } catch (error) {
+      console.error('Failed to close position:', error);
+      alert('平仓失败，请稍后重试');
+    }
   },
 
   updateCurrentPrice: (symbol, price) => {
@@ -154,6 +197,9 @@ export const usePositionStore = create<PositionState>((set, get) => ({
           unrealizedPnl: number;
           leverage: number;
           liquidationPrice: number;
+          stopLoss: number | null;
+          takeProfit: number | null;
+          takeProfitType: string | null;
         }) => ({
           id: `${p.symbol}_${p.positionSide}`,
           symbol: p.symbol,
@@ -165,6 +211,8 @@ export const usePositionStore = create<PositionState>((set, get) => ({
           unrealizedPnlPercent: p.entryPrice > 0 ? (p.unrealizedPnl / (p.entryPrice * p.quantity)) * 100 : 0,
           leverage: p.leverage,
           liquidationPrice: p.liquidationPrice,
+          stopLoss: p.stopLoss ?? undefined,
+          takeProfit: p.takeProfit ?? undefined,
         }));
         set({ positions });
       }
