@@ -19,7 +19,18 @@ const STORAGE_KEYS = {
   BULLISH_START_LAYER: "tower_bullish_start",
   BEARISH_START_LAYER: "tower_bearish_start",
   MIN_SPACING_RATIO: "tower_min_spacing",
+  AUTO_INTERVAL: "tower_auto_interval",
 };
+
+// 托管间隔选项（分钟）
+const AUTO_INTERVALS = [
+  { value: 0, label: "关闭" },
+  { value: 5, label: "5分钟" },
+  { value: 10, label: "10分钟" },
+  { value: 15, label: "15分钟" },
+  { value: 30, label: "30分钟" },
+  { value: 60, label: "1小时" },
+];
 
 export default function TowerPage() {
   const { symbol } = useChartStore();
@@ -35,6 +46,8 @@ export default function TowerPage() {
   const [bullishStartLayer, setBullishStartLayer] = useState(1);
   const [bearishStartLayer, setBearishStartLayer] = useState(1);
   const [minSpacingRatio, setMinSpacingRatio] = useState(5); // 万分之几，默认5（万分之五）
+  const [autoInterval, setAutoInterval] = useState(0); // 托管间隔（分钟），0=关闭
+  const [nextAutoTime, setNextAutoTime] = useState<Date | null>(null); // 下次自动执行时间
   const [isAutoOrdering, setIsAutoOrdering] = useState(false);
   const [orderProgress, setOrderProgress] = useState<{
     current: number;
@@ -57,6 +70,8 @@ export default function TowerPage() {
     if (savedBearishStart) setBearishStartLayer(Number(savedBearishStart));
     const savedSpacing = localStorage.getItem(STORAGE_KEYS.MIN_SPACING_RATIO);
     if (savedSpacing) setMinSpacingRatio(Number(savedSpacing));
+    const savedAutoInterval = localStorage.getItem(STORAGE_KEYS.AUTO_INTERVAL);
+    if (savedAutoInterval) setAutoInterval(Number(savedAutoInterval));
   }, []);
 
   // 保存设置到 localStorage
@@ -88,6 +103,17 @@ export default function TowerPage() {
   const handleSpacingChange = (value: number) => {
     setMinSpacingRatio(value);
     localStorage.setItem(STORAGE_KEYS.MIN_SPACING_RATIO, String(value));
+  };
+
+  const handleAutoIntervalChange = (value: number) => {
+    setAutoInterval(value);
+    localStorage.setItem(STORAGE_KEYS.AUTO_INTERVAL, String(value));
+    if (value > 0) {
+      // 设置下次执行时间
+      setNextAutoTime(new Date(Date.now() + value * 60 * 1000));
+    } else {
+      setNextAutoTime(null);
+    }
   };
 
   // Fetch tower blocks from backend
@@ -383,6 +409,55 @@ export default function TowerPage() {
     handleAutoTower();
   }, [symbol, cancelAllOrders, handleAutoTower]);
 
+  // 静默更新守塔（托管用，不弹确认框）
+  const handleSilentRefreshTower = useCallback(async () => {
+    if (isAutoOrdering) return;
+
+    setIsAutoOrdering(true);
+    setOrderProgress({ current: 0, total: 1, errors: [] });
+
+    // 1. 取消所有订单
+    const cancelSuccess = await cancelAllOrders(symbol.replace("/", ""));
+    if (!cancelSuccess) {
+      console.error("[托管] 取消订单失败");
+      setIsAutoOrdering(false);
+      setOrderProgress(null);
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    setIsAutoOrdering(false);
+    setOrderProgress(null);
+
+    // 2. 重新下单（静默模式）
+    handleAutoTower();
+  }, [symbol, cancelAllOrders, handleAutoTower, isAutoOrdering]);
+
+  // 托管定时器
+  useEffect(() => {
+    if (autoInterval <= 0 || !data?.blocks?.length) {
+      setNextAutoTime(null);
+      return;
+    }
+
+    // 设置初始下次执行时间
+    if (!nextAutoTime) {
+      setNextAutoTime(new Date(Date.now() + autoInterval * 60 * 1000));
+    }
+
+    const timer = setInterval(() => {
+      const now = Date.now();
+      if (nextAutoTime && now >= nextAutoTime.getTime()) {
+        console.log("[托管] 自动更新守塔");
+        handleSilentRefreshTower();
+        // 设置下次执行时间
+        setNextAutoTime(new Date(now + autoInterval * 60 * 1000));
+      }
+    }, 1000); // 每秒检查
+
+    return () => clearInterval(timer);
+  }, [autoInterval, nextAutoTime, data?.blocks?.length, handleSilentRefreshTower]);
+
   // 统计塔块数量和多空比例
   const stats = useMemo(() => {
     if (!data?.blocks) return { total: 0, bullish: 0, bearish: 0, ratio: "0:0" };
@@ -599,6 +674,26 @@ export default function TowerPage() {
                   ))}
                 </select>
               </div>
+              <div className="h-4 w-px bg-[var(--border)]" />
+              {/* 托管设置 */}
+              <div className="flex items-center gap-1.5">
+                <span className={`text-xs ${autoInterval > 0 ? "text-green-500" : "text-[var(--text-tertiary)]"}`}>
+                  托管
+                </span>
+                <select
+                  value={autoInterval}
+                  onChange={(e) => handleAutoIntervalChange(Number(e.target.value))}
+                  className={`w-16 px-1 py-0.5 text-xs border rounded text-center focus:outline-none focus:border-blue-500 ${
+                    autoInterval > 0
+                      ? "bg-green-500/20 border-green-500/50 text-green-400"
+                      : "bg-[var(--bg-tertiary)] border-[var(--border)] text-[var(--text-primary)]"
+                  }`}
+                >
+                  {AUTO_INTERVALS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
               <div className="flex-1" />
               {/* 按钮组 */}
               <div className="flex items-center gap-1">
@@ -619,6 +714,12 @@ export default function TowerPage() {
                 </button>
               </div>
             </div>
+            {/* 托管状态 */}
+            {autoInterval > 0 && nextAutoTime && (
+              <div className="text-xs text-green-400 mt-1">
+                ⏱️ 托管中 · 下次更新: {nextAutoTime.toLocaleTimeString("zh-CN")}
+              </div>
+            )}
             {/* 下单进度 */}
             {orderProgress && (
               <div>
