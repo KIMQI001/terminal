@@ -48,7 +48,8 @@ export default function TowerPage() {
   const [bullishStartLayer, setBullishStartLayer] = useState(1);
   const [bearishStartLayer, setBearishStartLayer] = useState(1);
   const [minSpacingRatio, setMinSpacingRatio] = useState(5); // 万分之几，默认5（万分之五）
-  const [autoInterval, setAutoInterval] = useState(0); // 托管间隔（分钟），0=关闭
+  const [autoInterval, setAutoInterval] = useState(5); // 托管间隔（分钟），默认5分钟
+  const [isAutoManaged, setIsAutoManaged] = useState(false); // 托管是否激活
   const [nextAutoTime, setNextAutoTime] = useState<Date | null>(null); // 下次自动执行时间
   const [isAutoOrdering, setIsAutoOrdering] = useState(false);
   const [orderProgress, setOrderProgress] = useState<{
@@ -110,11 +111,24 @@ export default function TowerPage() {
   const handleAutoIntervalChange = (value: number) => {
     setAutoInterval(value);
     localStorage.setItem(STORAGE_KEYS.AUTO_INTERVAL, String(value));
-    if (value > 0) {
-      // 设置下次执行时间
+    // 如果正在托管中，更新下次执行时间
+    if (isAutoManaged && value > 0) {
       setNextAutoTime(new Date(Date.now() + value * 60 * 1000));
-    } else {
+    }
+  };
+
+  // 启动/停止托管
+  const handleToggleAutoManage = () => {
+    if (isAutoManaged) {
+      // 停止托管
+      setIsAutoManaged(false);
       setNextAutoTime(null);
+    } else {
+      // 启动托管
+      if (autoInterval > 0) {
+        setIsAutoManaged(true);
+        setNextAutoTime(new Date(Date.now() + autoInterval * 60 * 1000));
+      }
     }
   };
 
@@ -485,14 +499,9 @@ export default function TowerPage() {
 
   // 托管定时器
   useEffect(() => {
-    if (autoInterval <= 0 || !data?.blocks?.length) {
-      setNextAutoTime(null);
+    // 只有托管激活时才启动定时器
+    if (!isAutoManaged || autoInterval <= 0 || !data?.blocks?.length) {
       return;
-    }
-
-    // 设置初始下次执行时间
-    if (!nextAutoTime) {
-      setNextAutoTime(new Date(Date.now() + autoInterval * 60 * 1000));
     }
 
     const timer = setInterval(() => {
@@ -506,7 +515,7 @@ export default function TowerPage() {
     }, 1000); // 每秒检查
 
     return () => clearInterval(timer);
-  }, [autoInterval, nextAutoTime, data?.blocks?.length, handleSilentRefreshTower]);
+  }, [isAutoManaged, autoInterval, nextAutoTime, data?.blocks?.length, handleSilentRefreshTower]);
 
   // 统计塔块数量和多空比例
   const stats = useMemo(() => {
@@ -647,129 +656,144 @@ export default function TowerPage() {
           )}
 
           {/* Tower Settings */}
-          <div className="mb-4 p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
-            {/* 第一行：保证金设置 */}
-            <div className="flex items-center gap-3 mb-2">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-[var(--text-tertiary)] w-8">基础</span>
+          <div className="mb-4 p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)] space-y-2">
+            {/* 第一行：保证金和层数设置 */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-[var(--text-tertiary)]">保证金</span>
                 <input
                   type="number"
                   value={baseMargin}
                   onChange={(e) => handleMarginChange(Number(e.target.value))}
-                  className="w-14 px-1.5 py-0.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
+                  className="w-14 px-1.5 py-1 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
                   min={10}
                   max={10000}
                   step={10}
                 />
-              </div>
-              <div className="flex items-center gap-1.5">
                 <span className="text-xs text-[var(--text-tertiary)]">+</span>
                 <input
                   type="number"
                   value={marginIncrement}
                   onChange={(e) => handleIncrementChange(Number(e.target.value))}
-                  className="w-12 px-1.5 py-0.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
+                  className="w-12 px-1.5 py-1 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
                   min={0}
                   max={1000}
                   step={5}
                 />
-                <span className="text-xs text-[var(--text-tertiary)]">U</span>
+                <span className="text-xs text-[var(--text-tertiary)]">U/层</span>
               </div>
+
               <div className="h-4 w-px bg-[var(--border)]" />
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-[var(--text-tertiary)]">层</span>
+
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-[var(--text-tertiary)]">层数</span>
                 <select
                   value={towerLayers}
                   onChange={(e) => handleLayersChange(Number(e.target.value))}
-                  className="w-10 px-1 py-0.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
+                  className="w-12 px-1 py-1 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
                 >
                   {[1, 2, 3, 4, 5].map((n) => (
                     <option key={n} value={n}>{n}</option>
                   ))}
                 </select>
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-green-500">多</span>
+
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-green-500">多起</span>
                 <select
                   value={bullishStartLayer}
                   onChange={(e) => handleBullishStartChange(Number(e.target.value))}
-                  className="w-10 px-1 py-0.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
+                  className="w-10 px-1 py-1 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
                 >
                   {[1, 2, 3, 4, 5].map((n) => (
                     <option key={n} value={n}>{n}</option>
                   ))}
                 </select>
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-red-500">空</span>
+
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-red-500">空起</span>
                 <select
                   value={bearishStartLayer}
                   onChange={(e) => handleBearishStartChange(Number(e.target.value))}
-                  className="w-10 px-1 py-0.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
+                  className="w-10 px-1 py-1 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
                 >
                   {[1, 2, 3, 4, 5].map((n) => (
                     <option key={n} value={n}>{n}</option>
                   ))}
                 </select>
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-[var(--text-tertiary)]">距</span>
+
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-[var(--text-tertiary)]">间距</span>
                 <select
                   value={minSpacingRatio}
                   onChange={(e) => handleSpacingChange(Number(e.target.value))}
-                  className="w-12 px-1 py-0.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
+                  className="w-14 px-1 py-1 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
                 >
                   {[0, 3, 5, 8, 10, 15, 20].map((n) => (
                     <option key={n} value={n}>{n}‱</option>
                   ))}
                 </select>
               </div>
-              <div className="h-4 w-px bg-[var(--border)]" />
+            </div>
+
+            {/* 第二行：操作按钮 */}
+            <div className="flex items-center gap-2 pt-1 border-t border-[var(--border)]">
+              {/* 守塔按钮 */}
+              <button
+                onClick={handleAutoTower}
+                disabled={isAutoOrdering || !data?.blocks?.length}
+                className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white text-xs font-medium rounded transition-colors"
+              >
+                {isAutoOrdering ? "下单中..." : "🏯 守塔"}
+              </button>
+
+              {/* 更新按钮 */}
+              <button
+                onClick={handleRefreshTower}
+                disabled={isAutoOrdering || !data?.blocks?.length}
+                className="px-2 py-1.5 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white text-xs rounded transition-colors"
+                title="取消所有订单并重新下单"
+              >
+                🔄 更新
+              </button>
+
+              <div className="h-5 w-px bg-[var(--border)]" />
+
               {/* 托管设置 */}
               <div className="flex items-center gap-1.5">
-                <span className={`text-xs ${autoInterval > 0 ? "text-green-500" : "text-[var(--text-tertiary)]"}`}>
-                  托管
-                </span>
                 <select
                   value={autoInterval}
                   onChange={(e) => handleAutoIntervalChange(Number(e.target.value))}
-                  className={`w-16 px-1 py-0.5 text-xs border rounded text-center focus:outline-none focus:border-blue-500 ${
-                    autoInterval > 0
-                      ? "bg-green-500/20 border-green-500/50 text-green-400"
-                      : "bg-[var(--bg-tertiary)] border-[var(--border)] text-[var(--text-primary)]"
-                  }`}
+                  disabled={isAutoManaged}
+                  className="w-16 px-1 py-1.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500 disabled:opacity-60"
                 >
-                  {AUTO_INTERVALS.map((opt) => (
+                  {AUTO_INTERVALS.filter(opt => opt.value > 0).map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </select>
-              </div>
-              <div className="flex-1" />
-              {/* 按钮组 */}
-              <div className="flex items-center gap-1">
+
                 <button
-                  onClick={handleAutoTower}
+                  onClick={handleToggleAutoManage}
                   disabled={isAutoOrdering || !data?.blocks?.length}
-                  className="px-2.5 py-1 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white text-xs font-medium rounded transition-colors"
+                  className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                    isAutoManaged
+                      ? "bg-green-500 hover:bg-green-600 text-white"
+                      : "bg-[var(--bg-tertiary)] hover:bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-[var(--border)]"
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
-                  {isAutoOrdering ? "..." : "🏯 守塔"}
-                </button>
-                <button
-                  onClick={handleRefreshTower}
-                  disabled={isAutoOrdering || !data?.blocks?.length}
-                  className="p-1 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white text-xs rounded transition-colors"
-                  title="取消所有订单并重新下单"
-                >
-                  🔄
+                  {isAutoManaged ? "⏹ 停止托管" : "▶ 启动托管"}
                 </button>
               </div>
+
+              {/* 托管状态 */}
+              {isAutoManaged && nextAutoTime && (
+                <span className="text-xs text-green-400 ml-auto">
+                  下次: {nextAutoTime.toLocaleTimeString("zh-CN")}
+                </span>
+              )}
             </div>
-            {/* 托管状态 */}
-            {autoInterval > 0 && nextAutoTime && (
-              <div className="text-xs text-green-400 mt-1">
-                ⏱️ 托管中 · 下次更新: {nextAutoTime.toLocaleTimeString("zh-CN")}
-              </div>
-            )}
             {/* 下单进度 */}
             {orderProgress && (
               <div>
