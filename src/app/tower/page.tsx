@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { AuthGuard } from "@/components/auth/AuthGuard";
 import { TowerList, TowerOrderModal } from "@/components/tower";
@@ -10,6 +10,7 @@ import { fetchTowerBlocks, TowerBlocksResult } from "@/lib/analysis/api";
 import { useChartStore } from "@/stores/chartStore";
 import { useOrderStore } from "@/stores/orderStore";
 import { usePositionStore } from "@/stores/positionStore";
+import { useUserStore } from "@/stores/userStore";
 
 // localStorage keys
 const STORAGE_KEYS = {
@@ -35,7 +36,49 @@ const AUTO_INTERVALS = [
 // 数据新鲜度阈值（毫秒）- 5分钟
 const DATA_FRESHNESS_THRESHOLD = 5 * 60 * 1000;
 
-// 守塔战绩记录
+// 后端托管状态接口
+interface TowerManagementConfig {
+  id: number;
+  userId: number;
+  symbol: string;
+  isActive: boolean;
+  intervalMinutes: number;
+  baseMargin: number;
+  marginIncrement: number;
+  towerLayers: number;
+  bullishStartLayer: number;
+  bearishStartLayer: number;
+  minSpacingRatio: number;
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface TowerManagementRecord {
+  id: number;
+  managementId: number;
+  executedAt: string;
+  status: "success" | "failed" | "skipped";
+  bullishCount: number;
+  bearishCount: number;
+  totalMargin: number;
+  errorMessage: string | null;
+}
+
+interface TowerManagementResponse {
+  success: boolean;
+  management: TowerManagementConfig | null;
+  records: TowerManagementRecord[];
+  stats: {
+    totalExecutions: number;
+    successCount: number;
+    failedCount: number;
+    skippedCount: number;
+  };
+}
+
+// 守塔战绩记录（本地 UI 用）
 interface TowerRecord {
   time: Date;
   bullishCount: number;
@@ -47,8 +90,10 @@ interface TowerRecord {
 
 export default function TowerPage() {
   const { symbol } = useChartStore();
-  const { placeOrder, cancelAllOrders, fetchOpenOrders, realOrders } = useOrderStore();
+  const { placeOrder, cancelAllOrders } = useOrderStore();
   const { currentLeverage, fetchLeverage } = usePositionStore();
+  const { user } = useUserStore();
+  const queryClient = useQueryClient();
   const [selectedBlock, setSelectedBlock] = useState<TowerBlock | null>(null);
 
   // 设置状态
@@ -59,8 +104,6 @@ export default function TowerPage() {
   const [bearishStartLayer, setBearishStartLayer] = useState(1);
   const [minSpacingRatio, setMinSpacingRatio] = useState(5); // 万分之几，默认5（万分之五）
   const [autoInterval, setAutoInterval] = useState(5); // 托管间隔（分钟），默认5分钟
-  const [isAutoManaged, setIsAutoManaged] = useState(false); // 托管是否激活
-  const [nextAutoTime, setNextAutoTime] = useState<Date | null>(null); // 下次自动执行时间
   const [isAutoOrdering, setIsAutoOrdering] = useState(false);
   const [orderProgress, setOrderProgress] = useState<{
     current: number;
@@ -68,9 +111,77 @@ export default function TowerPage() {
     errors: string[];
   } | null>(null);
 
-  // 守塔战绩状态
+  // 守塔战绩状态（本地一键守塔用）
   const [towerRecords, setTowerRecords] = useState<TowerRecord[]>([]);
   const [towerStats, setTowerStats] = useState({ success: 0, failed: 0 });
+
+  // 从后端获取托管状态
+  const { data: managementData, refetch: refetchManagement } = useQuery<TowerManagementResponse>({
+    queryKey: ["tower-management", user?.id, symbol],
+    queryFn: async () => {
+      if (!user?.id) throw new Error("未登录");
+      const symbolFormatted = symbol.replace("/", "");
+      const response = await fetch(`/api/analysis/tower-management?userId=${user.id}&symbol=${symbolFormatted}`);
+      return response.json();
+    },
+    enabled: !!user?.id,
+    refetchInterval: 30000, // 每 30 秒刷新一次托管状态
+  });
+
+  // 后端托管状态
+  const isAutoManaged = managementData?.management?.isActive ?? false;
+  const nextAutoTime = managementData?.management?.nextRunAt
+    ? new Date(managementData.management.nextRunAt)
+    : null;
+  const backendRecords = managementData?.records ?? [];
+  const backendStats = managementData?.stats ?? { totalExecutions: 0, successCount: 0, failedCount: 0, skippedCount: 0 };
+
+  // 启动托管 mutation
+  const startManagementMutation = useMutation({
+    mutationFn: async () => {
+      if (!user?.id) throw new Error("未登录");
+      const symbolFormatted = symbol.replace("/", "");
+      const response = await fetch("/api/analysis/tower-management/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: user.id,
+          symbol: symbolFormatted,
+          intervalMinutes: autoInterval,
+          baseMargin,
+          marginIncrement,
+          towerLayers,
+          bullishStartLayer,
+          bearishStartLayer,
+          minSpacingRatio,
+        }),
+      });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tower-management", user?.id, symbol] });
+    },
+  });
+
+  // 停止托管 mutation
+  const stopManagementMutation = useMutation({
+    mutationFn: async () => {
+      if (!user?.id) throw new Error("未登录");
+      const symbolFormatted = symbol.replace("/", "");
+      const response = await fetch("/api/analysis/tower-management/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: user.id,
+          symbol: symbolFormatted,
+        }),
+      });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tower-management", user?.id, symbol] });
+    },
+  });
 
   // 从 localStorage 加载设置
   useEffect(() => {
@@ -125,23 +236,18 @@ export default function TowerPage() {
   const handleAutoIntervalChange = (value: number) => {
     setAutoInterval(value);
     localStorage.setItem(STORAGE_KEYS.AUTO_INTERVAL, String(value));
-    // 如果正在托管中，更新下次执行时间
-    if (isAutoManaged && value > 0) {
-      setNextAutoTime(new Date(Date.now() + value * 60 * 1000));
-    }
+    // 注意：托管间隔变更需要重新启动托管才会生效
   };
 
-  // 启动/停止托管
+  // 启动/停止托管（调用后端 API）
   const handleToggleAutoManage = () => {
     if (isAutoManaged) {
       // 停止托管
-      setIsAutoManaged(false);
-      setNextAutoTime(null);
+      stopManagementMutation.mutate();
     } else {
       // 启动托管
       if (autoInterval > 0) {
-        setIsAutoManaged(true);
-        setNextAutoTime(new Date(Date.now() + autoInterval * 60 * 1000));
+        startManagementMutation.mutate();
       }
     }
   };
@@ -507,100 +613,8 @@ export default function TowerPage() {
     handleAutoTower();
   }, [symbol, cancelAllOrders, handleAutoTower, isDataStale, ensureFreshData]);
 
-  // 检查现有订单数量是否满足要求
-  const checkOrdersCount = useCallback(async (): Promise<{ bullish: number; bearish: number; sufficient: boolean }> => {
-    // 先刷新订单列表
-    await fetchOpenOrders(symbol.replace("/", ""));
-
-    // 等待状态更新
-    await new Promise((resolve) => setTimeout(resolve, 300));
-
-    // 统计 ict_tower 前缀的多空订单
-    // 只统计限价单（入场单），不统计止损止盈单
-    const towerOrders = realOrders.filter(
-      (o) => o.clientOrderId?.startsWith("ict_tower") && o.type === "limit"
-    );
-
-    const bullish = towerOrders.filter((o) => o.side === "buy").length;
-    const bearish = towerOrders.filter((o) => o.side === "sell").length;
-
-    // 如果多空各有 >= towerLayers 单，则足够
-    const sufficient = bullish >= towerLayers && bearish >= towerLayers;
-
-    console.log(`[托管] 订单检查: 多${bullish}单, 空${bearish}单, 需要各${towerLayers}单, ${sufficient ? "足够" : "不足"}`);
-
-    return { bullish, bearish, sufficient };
-  }, [fetchOpenOrders, realOrders, symbol, towerLayers]);
-
-  // 静默更新守塔（托管用，不弹确认框）
-  const handleSilentRefreshTower = useCallback(async () => {
-    if (isAutoOrdering) return;
-
-    // 0. 先检查订单数量是否满足
-    const orderCheck = await checkOrdersCount();
-    if (orderCheck.sufficient) {
-      console.log("[托管] 订单数量足够，跳过本次更新");
-      // 记录跳过
-      const record: TowerRecord = {
-        time: new Date(),
-        bullishCount: orderCheck.bullish,
-        bearishCount: orderCheck.bearish,
-        totalMargin: 0,
-        success: true,
-        errors: ["订单充足，已跳过"],
-      };
-      setTowerRecords(prev => [record, ...prev].slice(0, 20));
-      return;
-    }
-
-    setIsAutoOrdering(true);
-    setOrderProgress({ current: 0, total: 1, errors: [] });
-
-    // 1. 检查数据新鲜度，如需刷新则先刷新
-    const dataFresh = await ensureFreshData();
-    if (!dataFresh) {
-      console.error("[托管] 刷新数据失败，跳过本次更新");
-      setIsAutoOrdering(false);
-      setOrderProgress(null);
-      return;
-    }
-
-    // 2. 取消所有订单
-    const cancelSuccess = await cancelAllOrders(symbol.replace("/", ""));
-    if (!cancelSuccess) {
-      console.error("[托管] 取消订单失败");
-      setIsAutoOrdering(false);
-      setOrderProgress(null);
-      return;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    setIsAutoOrdering(false);
-    setOrderProgress(null);
-
-    // 3. 重新下单（静默模式）
-    handleAutoTower(true);
-  }, [symbol, cancelAllOrders, handleAutoTower, isAutoOrdering, ensureFreshData, checkOrdersCount]);
-
-  // 托管定时器
-  useEffect(() => {
-    // 只有托管激活时才启动定时器
-    if (!isAutoManaged || autoInterval <= 0 || !data?.blocks?.length) {
-      return;
-    }
-
-    const timer = setInterval(() => {
-      const now = Date.now();
-      if (nextAutoTime && now >= nextAutoTime.getTime()) {
-        console.log("[托管] 自动更新守塔");
-        handleSilentRefreshTower();
-        // 设置下次执行时间
-        setNextAutoTime(new Date(now + autoInterval * 60 * 1000));
-      }
-    }, 1000); // 每秒检查
-
-    return () => clearInterval(timer);
-  }, [isAutoManaged, autoInterval, nextAutoTime, data?.blocks?.length, handleSilentRefreshTower]);
+  // 托管由后端 analysis-service 定时执行，前端只显示状态
+  // 不再需要本地定时器和相关函数
 
   // 统计塔块数量和多空比例
   const stats = useMemo(() => {
@@ -909,47 +923,59 @@ export default function TowerPage() {
             <div className="mb-4 p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-medium text-[var(--text-primary)]">
-                  🏯 守塔战绩
+                  🏯 守塔战绩 <span className="text-xs font-normal text-green-400">(后台运行中)</span>
                 </h3>
                 <div className="flex items-center gap-3">
                   <span className="text-xs">
-                    <span className="text-green-400">{towerStats.success}</span>
+                    <span className="text-green-400">{backendStats.successCount}</span>
                     <span className="text-[var(--text-tertiary)]"> 成功</span>
                   </span>
                   <span className="text-xs">
-                    <span className="text-red-400">{towerStats.failed}</span>
+                    <span className="text-red-400">{backendStats.failedCount}</span>
                     <span className="text-[var(--text-tertiary)]"> 失败</span>
                   </span>
-                  {towerStats.success + towerStats.failed > 0 && (
+                  <span className="text-xs">
+                    <span className="text-yellow-400">{backendStats.skippedCount}</span>
+                    <span className="text-[var(--text-tertiary)]"> 跳过</span>
+                  </span>
+                  {backendStats.totalExecutions > 0 && (
                     <span className="text-xs text-[var(--text-tertiary)]">
-                      ({Math.round((towerStats.success / (towerStats.success + towerStats.failed)) * 100)}%)
+                      ({Math.round((backendStats.successCount / backendStats.totalExecutions) * 100)}%)
                     </span>
                   )}
                 </div>
               </div>
 
               {/* 记录列表 */}
-              {towerRecords.length === 0 ? (
+              {backendRecords.length === 0 ? (
                 <div className="text-xs text-[var(--text-tertiary)] text-center py-4">
                   托管已启动，等待首次执行...
                 </div>
               ) : (
                 <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                  {towerRecords.map((record, index) => (
+                  {backendRecords.map((record) => (
                     <div
-                      key={index}
+                      key={record.id}
                       className={`flex items-center justify-between px-2 py-1.5 rounded text-xs ${
-                        record.success
+                        record.status === "success"
                           ? "bg-green-500/10 border border-green-500/20"
+                          : record.status === "skipped"
+                          ? "bg-yellow-500/10 border border-yellow-500/20"
                           : "bg-red-500/10 border border-red-500/20"
                       }`}
                     >
                       <div className="flex items-center gap-2">
-                        <span className={record.success ? "text-green-400" : "text-red-400"}>
-                          {record.success ? "✓" : "✗"}
+                        <span className={
+                          record.status === "success"
+                            ? "text-green-400"
+                            : record.status === "skipped"
+                            ? "text-yellow-400"
+                            : "text-red-400"
+                        }>
+                          {record.status === "success" ? "✓" : record.status === "skipped" ? "⏭" : "✗"}
                         </span>
                         <span className="text-[var(--text-tertiary)]">
-                          {record.time.toLocaleTimeString("zh-CN")}
+                          {new Date(record.executedAt).toLocaleTimeString("zh-CN")}
                         </span>
                         <span className="text-[var(--text-secondary)]">
                           <span className="text-green-400">{record.bullishCount}多</span>
@@ -961,9 +987,9 @@ export default function TowerPage() {
                         <span className="text-[var(--text-tertiary)]">
                           {record.totalMargin}U
                         </span>
-                        {record.errors.length > 0 && (
-                          <span className="text-red-400" title={record.errors.join("\n")}>
-                            {record.errors.length}错误
+                        {record.errorMessage && (
+                          <span className="text-red-400" title={record.errorMessage}>
+                            有错误
                           </span>
                         )}
                       </div>

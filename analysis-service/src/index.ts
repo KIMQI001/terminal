@@ -22,6 +22,7 @@ import { startReviewScheduler } from './review/reviewScheduler';
 import { startApiServer } from './api';
 import { startOrderMonitor, stopOrderMonitor } from './order/orderMonitor';
 import { getFirstBinanceApiConfig, closeApiConfigReader } from './order/apiConfigReader';
+import { startTowerScheduler, stopTowerScheduler } from './tower/towerScheduler';
 
 async function main(): Promise<void> {
   console.log('═══════════════════════════════════════');
@@ -64,11 +65,15 @@ async function main(): Promise<void> {
   } else {
     console.warn('[OrderMonitor] 未找到 Binance API 配置，订单监控未启动');
   }
+
+  // 启动守塔托管调度器（后台定时执行守塔策略）
+  startTowerScheduler();
 }
 
 // 优雅退出
 process.on('SIGINT', () => {
   console.log('\n📴 收到 SIGINT 信号，正在退出...');
+  stopTowerScheduler();
   stopOrderMonitor();
   closeApiConfigReader();
   closeDatabase();
@@ -77,6 +82,7 @@ process.on('SIGINT', () => {
 
 process.on('SIGTERM', () => {
   console.log('\n📴 收到 SIGTERM 信号，正在退出...');
+  stopTowerScheduler();
   stopOrderMonitor();
   closeApiConfigReader();
   closeDatabase();

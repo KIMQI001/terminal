@@ -9,6 +9,7 @@ import { signalRoutes } from './routes/signals';
 import { performanceRoutes } from './routes/performance';
 import { analyzeRoutes } from './routes/analyze';
 import { pendingOrdersRoutes } from './routes/pendingOrders';
+import { towerManagementRoutes } from './routes/towerManagement';
 
 /**
  * 启动 HTTP API 服务器
@@ -34,6 +35,7 @@ export function startApiServer(port: number = 3002): void {
   app.use('/api/performance', performanceRoutes);
   app.use('/api/analyze', analyzeRoutes);
   app.use('/api/pending-orders', pendingOrdersRoutes);
+  app.use('/api/tower-management', towerManagementRoutes);
 
   // 404 处理
   app.use((_req, res) => {
@@ -70,5 +72,9 @@ export function startApiServer(port: number = 3002): void {
     console.log('  - POST /api/pending-orders (添加待处理订单)');
     console.log('  - GET /api/pending-orders (获取待处理订单)');
     console.log('  - DELETE /api/pending-orders?clientOrderId=xxx (删除待处理订单)');
+    console.log('  - GET /api/tower-management?userId=1&symbol=BTCUSDC (获取托管配置)');
+    console.log('  - POST /api/tower-management (更新托管配置)');
+    console.log('  - POST /api/tower-management/start (启动托管)');
+    console.log('  - POST /api/tower-management/stop (停止托管)');
   });
 }
