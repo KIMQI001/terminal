@@ -32,11 +32,13 @@ const AUTO_INTERVALS = [
   { value: 60, label: "1小时" },
 ];
 
+// 数据新鲜度阈值（毫秒）- 5分钟
+const DATA_FRESHNESS_THRESHOLD = 5 * 60 * 1000;
+
 export default function TowerPage() {
   const { symbol } = useChartStore();
   const { placeOrder, cancelAllOrders } = useOrderStore();
   const { currentLeverage, fetchLeverage } = usePositionStore();
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [selectedBlock, setSelectedBlock] = useState<TowerBlock | null>(null);
 
   // 设置状态
@@ -131,7 +133,6 @@ export default function TowerPage() {
 
   const handleRefresh = useCallback(() => {
     refetch();
-    setLastRefresh(new Date());
   }, [refetch]);
 
   const handleOrder = useCallback((block: TowerBlock) => {
@@ -162,6 +163,31 @@ export default function TowerPage() {
   const MAX_SL_DISTANCE = 200;
   const MIN_TP_DISTANCE = 1000;
   const MIN_DISTANCE_RATIO = 0.003; // 最小距离：千分之三
+
+  // 检查数据是否过期（超过5分钟）
+  const isDataStale = useCallback(() => {
+    if (!data?.timestamp) return true;
+    const dataTime = new Date(data.timestamp).getTime();
+    const now = Date.now();
+    return now - dataTime > DATA_FRESHNESS_THRESHOLD;
+  }, [data?.timestamp]);
+
+  // 确保数据新鲜后再执行回调
+  const ensureFreshData = useCallback(async (): Promise<boolean> => {
+    if (!isDataStale()) {
+      return true;
+    }
+    console.log("[守塔] 数据过期，先刷新数据...");
+    try {
+      await refetch();
+      // 等待数据更新
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      return true;
+    } catch (err) {
+      console.error("[守塔] 刷新数据失败:", err);
+      return false;
+    }
+  }, [isDataStale, refetch]);
 
   // 一键守塔
   const handleAutoTower = useCallback(async () => {
@@ -382,13 +408,28 @@ export default function TowerPage() {
 
   // 更新守塔：取消所有订单后重新下单
   const handleRefreshTower = useCallback(async () => {
-    const confirmed = confirm(
-      `将取消 ${symbol.replace("/", "")} 的所有挂单，然后重新下守塔单\n确定继续吗？`
-    );
+    // 检查数据新鲜度
+    const stale = isDataStale();
+    const confirmMsg = stale
+      ? `数据已过期，将先刷新数据\n然后取消 ${symbol.replace("/", "")} 的所有挂单，重新下守塔单\n确定继续吗？`
+      : `将取消 ${symbol.replace("/", "")} 的所有挂单，然后重新下守塔单\n确定继续吗？`;
+
+    const confirmed = confirm(confirmMsg);
     if (!confirmed) return;
 
     setIsAutoOrdering(true);
     setOrderProgress({ current: 0, total: 1, errors: [] });
+
+    // 0. 如需刷新数据
+    if (stale) {
+      const dataFresh = await ensureFreshData();
+      if (!dataFresh) {
+        alert("刷新数据失败，请稍后重试");
+        setIsAutoOrdering(false);
+        setOrderProgress(null);
+        return;
+      }
+    }
 
     // 1. 取消所有订单
     const cancelSuccess = await cancelAllOrders(symbol.replace("/", ""));
@@ -407,7 +448,7 @@ export default function TowerPage() {
 
     // 2. 重新下单
     handleAutoTower();
-  }, [symbol, cancelAllOrders, handleAutoTower]);
+  }, [symbol, cancelAllOrders, handleAutoTower, isDataStale, ensureFreshData]);
 
   // 静默更新守塔（托管用，不弹确认框）
   const handleSilentRefreshTower = useCallback(async () => {
@@ -415,6 +456,15 @@ export default function TowerPage() {
 
     setIsAutoOrdering(true);
     setOrderProgress({ current: 0, total: 1, errors: [] });
+
+    // 0. 检查数据新鲜度，如需刷新则先刷新
+    const dataFresh = await ensureFreshData();
+    if (!dataFresh) {
+      console.error("[托管] 刷新数据失败，跳过本次更新");
+      setIsAutoOrdering(false);
+      setOrderProgress(null);
+      return;
+    }
 
     // 1. 取消所有订单
     const cancelSuccess = await cancelAllOrders(symbol.replace("/", ""));
@@ -431,7 +481,7 @@ export default function TowerPage() {
 
     // 2. 重新下单（静默模式）
     handleAutoTower();
-  }, [symbol, cancelAllOrders, handleAutoTower, isAutoOrdering]);
+  }, [symbol, cancelAllOrders, handleAutoTower, isAutoOrdering, ensureFreshData]);
 
   // 托管定时器
   useEffect(() => {
