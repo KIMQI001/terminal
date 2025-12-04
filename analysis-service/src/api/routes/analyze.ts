@@ -266,12 +266,45 @@ analyzeRoutes.get('/tower', async (req: Request, res: Response) => {
       }
     });
 
+    // 去重：入场价格相近（50点内）的同类型塔块只保留一个
+    // 优先保留：1. 更高周期 2. 填充度更低
+    const DEDUP_THRESHOLD = 50; // 50点内视为重复
+    const timeframePriority: Record<string, number> = {
+      '1d': 5, '4h': 4, '1h': 3, '15m': 2, '5m': 1
+    };
+
+    const dedupedBlocks = filteredBlocks.reduce((acc, block) => {
+      // 查找是否已有相近入场价的同类型塔块
+      const existingIndex = acc.findIndex(b =>
+        b.type === block.type &&
+        Math.abs(b.entry - block.entry) < DEDUP_THRESHOLD
+      );
+
+      if (existingIndex === -1) {
+        // 没有重复，直接添加
+        acc.push(block);
+      } else {
+        // 有重复，比较优先级
+        const existing = acc[existingIndex];
+        const existingPriority = timeframePriority[existing.timeframe] || 0;
+        const newPriority = timeframePriority[block.timeframe] || 0;
+
+        // 优先保留更高周期，同周期保留填充度更低的
+        if (newPriority > existingPriority ||
+            (newPriority === existingPriority && block.fillPercent < existing.fillPercent)) {
+          acc[existingIndex] = block;
+        }
+      }
+
+      return acc;
+    }, [] as typeof filteredBlocks);
+
     res.json({
       success: true,
       data: {
         symbol,
         currentPrice,
-        blocks: filteredBlocks,
+        blocks: dedupedBlocks,
         timestamp: new Date().toISOString(),
       },
     });
