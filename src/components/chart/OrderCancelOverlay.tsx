@@ -15,6 +15,7 @@ interface ButtonPosition {
   groupIndex: number;
   y: number;
   group: RealOrder[];
+  isLong: boolean; // 用于确定颜色
 }
 
 export function OrderCancelOverlay({
@@ -57,6 +58,7 @@ export function OrderCancelOverlay({
         groupIndex,
         y,
         group,
+        isLong: limitOrder.positionSide === "LONG",
       });
     });
 
@@ -102,19 +104,20 @@ export function OrderCancelOverlay({
 
   return (
     <div className="absolute inset-0 pointer-events-none z-20">
-      {buttonPositions.map(({ groupIndex, y, group }) => (
+      {buttonPositions.map(({ groupIndex, y, group, isLong }) => (
         <button
           key={groupIndex}
-          className="absolute pointer-events-auto w-4 h-4 flex items-center justify-center text-gray-500 hover:text-red-500 transition-colors text-sm"
+          className="absolute pointer-events-auto h-5 px-1 flex items-center justify-center text-white/70 hover:text-white transition-colors text-xs font-medium rounded-sm"
           style={{
             left: 140, // 价格标签宽度约 130px，放在其右侧
-            top: y - 8,
+            top: y - 10,
+            backgroundColor: isLong ? "#3b82f6" : "#a855f7", // 蓝色(做多) / 紫色(做空)
           }}
           onClick={() => handleCancelGroup(group, groupIndex)}
           disabled={cancellingGroup === groupIndex}
           title="取消这组订单"
         >
-          {cancellingGroup === groupIndex ? "·" : "×"}
+          {cancellingGroup === groupIndex ? "···" : "×"}
         </button>
       ))}
     </div>
