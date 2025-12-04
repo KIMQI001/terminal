@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { IChartApi, ISeriesApi } from "lightweight-charts";
 import { useOrderStore, groupOrders, RealOrder } from "@/stores/orderStore";
 import { useChartStore } from "@/stores/chartStore";
@@ -26,6 +26,7 @@ export function OrderCancelOverlay({
   const { symbol } = useChartStore();
   const [buttonPositions, setButtonPositions] = useState<ButtonPosition[]>([]);
   const [cancellingGroup, setCancellingGroup] = useState<number | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   const currentSymbol = symbol.replace("/", "");
 
@@ -62,30 +63,27 @@ export function OrderCancelOverlay({
     setButtonPositions(positions);
   }, [orderGroups, seriesRef, containerRef]);
 
-  // 监听图表滚动/缩放
+  // 使用 requestAnimationFrame 持续更新位置（处理价格轴缩放）
   useEffect(() => {
-    if (!chartRef.current) return;
-
-    const chart = chartRef.current;
-
-    // 订阅时间轴变化
-    const handleTimeRangeChange = () => {
+    const tick = () => {
       updatePositions();
+      rafRef.current = requestAnimationFrame(tick);
     };
 
-    chart.timeScale().subscribeVisibleTimeRangeChange(handleTimeRangeChange);
-
-    // 初始计算
-    updatePositions();
+    // 延迟启动，确保图表已初始化
+    const timer = setTimeout(() => {
+      tick();
+    }, 500);
 
     return () => {
-      chart
-        .timeScale()
-        .unsubscribeVisibleTimeRangeChange(handleTimeRangeChange);
+      clearTimeout(timer);
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+      }
     };
-  }, [chartRef, updatePositions]);
+  }, [updatePositions]);
 
-  // 订单变化时更新
+  // 订单变化时立即更新
   useEffect(() => {
     updatePositions();
   }, [orderGroups, updatePositions]);
