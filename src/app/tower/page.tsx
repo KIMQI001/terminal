@@ -15,6 +15,7 @@ import { usePositionStore } from "@/stores/positionStore";
 const STORAGE_KEYS = {
   BASE_MARGIN: "tower_base_margin",
   TOWER_LAYERS: "tower_layers",
+  MARGIN_INCREMENT: "tower_margin_increment",
 };
 
 export default function TowerPage() {
@@ -26,6 +27,7 @@ export default function TowerPage() {
 
   // 设置状态
   const [baseMargin, setBaseMargin] = useState(100);
+  const [marginIncrement, setMarginIncrement] = useState(0);
   const [towerLayers, setTowerLayers] = useState(3);
   const [isAutoOrdering, setIsAutoOrdering] = useState(false);
   const [orderProgress, setOrderProgress] = useState<{
@@ -37,9 +39,11 @@ export default function TowerPage() {
   // 从 localStorage 加载设置
   useEffect(() => {
     const savedMargin = localStorage.getItem(STORAGE_KEYS.BASE_MARGIN);
+    const savedIncrement = localStorage.getItem(STORAGE_KEYS.MARGIN_INCREMENT);
     const savedLayers = localStorage.getItem(STORAGE_KEYS.TOWER_LAYERS);
 
     if (savedMargin) setBaseMargin(Number(savedMargin));
+    if (savedIncrement) setMarginIncrement(Number(savedIncrement));
     if (savedLayers) setTowerLayers(Number(savedLayers));
   }, []);
 
@@ -47,6 +51,11 @@ export default function TowerPage() {
   const handleMarginChange = (value: number) => {
     setBaseMargin(value);
     localStorage.setItem(STORAGE_KEYS.BASE_MARGIN, String(value));
+  };
+
+  const handleIncrementChange = (value: number) => {
+    setMarginIncrement(value);
+    localStorage.setItem(STORAGE_KEYS.MARGIN_INCREMENT, String(value));
   };
 
   const handleLayersChange = (value: number) => {
@@ -188,10 +197,21 @@ export default function TowerPage() {
       return;
     }
 
+    // 计算总保证金（考虑递增）
+    const calcTotalMargin = (count: number) => {
+      let total = 0;
+      for (let i = 0; i < count; i++) {
+        total += baseMargin + i * marginIncrement;
+      }
+      return total;
+    };
+    const totalMargin = calcTotalMargin(bullishBlocks.length) + calcTotalMargin(bearishBlocks.length);
+
     const confirmed = confirm(
       `即将下 ${selectedBlocks.length} 个塔单\n` +
         `多塔: ${bullishBlocks.length} 个，空塔: ${bearishBlocks.length} 个\n` +
-        `每单保证金: ${baseMargin} USDT\n` +
+        `基础保证金: ${baseMargin} USDT，递增: ${marginIncrement} USDT\n` +
+        `总保证金: ${totalMargin} USDT\n` +
         `确定继续吗？`
     );
 
@@ -202,9 +222,31 @@ export default function TowerPage() {
 
     const errors: string[] = [];
 
-    for (let i = 0; i < selectedBlocks.length; i++) {
-      const block = selectedBlocks[i];
-      const quantity = calculateQuantity(baseMargin, block.entry);
+    // 分别处理多空，按层递增保证金
+    // bullishBlocks 已按 entry 从高到低排序（离当前价格近的在前）
+    // bearishBlocks 已按 entry 从低到高排序（离当前价格近的在前）
+    const ordersToPlace: Array<{
+      block: typeof selectedBlocks[0];
+      margin: number;
+    }> = [];
+
+    for (let i = 0; i < bullishBlocks.length; i++) {
+      ordersToPlace.push({
+        block: bullishBlocks[i],
+        margin: baseMargin + i * marginIncrement,
+      });
+    }
+
+    for (let i = 0; i < bearishBlocks.length; i++) {
+      ordersToPlace.push({
+        block: bearishBlocks[i],
+        margin: baseMargin + i * marginIncrement,
+      });
+    }
+
+    for (let i = 0; i < ordersToPlace.length; i++) {
+      const { block, margin } = ordersToPlace[i];
+      const quantity = calculateQuantity(margin, block.entry);
 
       try {
         const result = await placeOrder(
@@ -229,7 +271,7 @@ export default function TowerPage() {
         );
       }
 
-      setOrderProgress({ current: i + 1, total: selectedBlocks.length, errors });
+      setOrderProgress({ current: i + 1, total: ordersToPlace.length, errors });
 
       // 添加小延迟避免请求过快
       await new Promise((resolve) => setTimeout(resolve, 300));
@@ -240,11 +282,11 @@ export default function TowerPage() {
     if (errors.length > 0) {
       alert(`下单完成，但有 ${errors.length} 个错误:\n${errors.join("\n")}`);
     } else {
-      alert(`成功下 ${selectedBlocks.length} 个塔单！`);
+      alert(`成功下 ${ordersToPlace.length} 个塔单！`);
     }
 
     setOrderProgress(null);
-  }, [data, towerLayers, baseMargin, calculateQuantity, placeOrder, symbol]);
+  }, [data, towerLayers, baseMargin, marginIncrement, calculateQuantity, placeOrder, symbol]);
 
   // 统计塔块数量和多空比例
   const stats = useMemo(() => {
@@ -390,16 +432,32 @@ export default function TowerPage() {
               {/* 基础数量设置 */}
               <div className="flex items-center gap-2">
                 <label className="text-xs text-[var(--text-tertiary)]">
-                  基础数量:
+                  基础:
                 </label>
                 <input
                   type="number"
                   value={baseMargin}
                   onChange={(e) => handleMarginChange(Number(e.target.value))}
-                  className="w-20 px-2 py-1 text-sm bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                  className="w-16 px-2 py-1 text-sm bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
                   min={10}
                   max={10000}
                   step={10}
+                />
+              </div>
+
+              {/* 递增设置 */}
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-[var(--text-tertiary)]">
+                  递增:
+                </label>
+                <input
+                  type="number"
+                  value={marginIncrement}
+                  onChange={(e) => handleIncrementChange(Number(e.target.value))}
+                  className="w-16 px-2 py-1 text-sm bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                  min={0}
+                  max={1000}
+                  step={5}
                 />
                 <span className="text-xs text-[var(--text-tertiary)]">USDT</span>
               </div>
