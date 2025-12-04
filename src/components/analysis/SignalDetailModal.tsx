@@ -20,7 +20,8 @@ function formatDate(dateStr: string | null): string {
   });
 }
 
-function formatPrice(price: number): string {
+function formatPrice(price: number | null | undefined): string {
+  if (price == null) return "-";
   if (price >= 1000) return price.toFixed(2);
   if (price >= 1) return price.toFixed(4);
   return price.toFixed(6);
@@ -174,10 +175,10 @@ export function SignalDetailModal({ signal, onClose }: SignalDetailModalProps) {
                 计划盈亏比
               </div>
               <div className="text-[var(--text-primary)]">
-                {signal.riskReward.toFixed(2)}
+                {(signal.riskReward ?? 0).toFixed(2)}
               </div>
             </div>
-            {signal.actualRR !== null && (
+            {signal.actualRR != null && (
               <div>
                 <div className="text-xs text-[var(--text-tertiary)] mb-1">
                   实际盈亏比
@@ -188,14 +189,14 @@ export function SignalDetailModal({ signal, onClose }: SignalDetailModalProps) {
                   }
                 >
                   {signal.actualRR >= 0 ? "+" : ""}
-                  {signal.actualRR.toFixed(2)}
+                  {(signal.actualRR ?? 0).toFixed(2)}
                 </div>
               </div>
             )}
           </div>
 
           {/* PnL */}
-          {signal.pnlPercent !== null && (
+          {signal.pnlPercent != null && (
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <div className="text-xs text-[var(--text-tertiary)] mb-1">
@@ -207,7 +208,7 @@ export function SignalDetailModal({ signal, onClose }: SignalDetailModalProps) {
                   }`}
                 >
                   {signal.pnlPercent >= 0 ? "+" : ""}
-                  {signal.pnlPercent.toFixed(2)}%
+                  {(signal.pnlPercent ?? 0).toFixed(2)}%
                 </div>
               </div>
               {signal.exitPrice !== null && (

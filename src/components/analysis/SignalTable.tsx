@@ -59,7 +59,8 @@ function formatDate(dateStr: string): string {
   });
 }
 
-function formatPrice(price: number): string {
+function formatPrice(price: number | null | undefined): string {
+  if (price == null) return "-";
   if (price >= 1000) return price.toFixed(0);
   if (price >= 1) return price.toFixed(2);
   return price.toFixed(4);

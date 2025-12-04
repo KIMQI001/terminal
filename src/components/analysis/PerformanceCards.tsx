@@ -64,9 +64,9 @@ export function PerformanceCards({ stats, isLoading }: PerformanceCardsProps) {
     );
   }
 
-  const winRatePercent = (stats.winRate * 100).toFixed(1);
-  const expectancyFormatted = `${stats.expectancy >= 0 ? "+" : ""}${stats.expectancy.toFixed(2)}R`;
-  const pnlFormatted = `${stats.totalPnlPercent >= 0 ? "+" : ""}${stats.totalPnlPercent.toFixed(2)}%`;
+  const winRatePercent = ((stats.winRate ?? 0) * 100).toFixed(1);
+  const expectancyFormatted = `${(stats.expectancy ?? 0) >= 0 ? "+" : ""}${(stats.expectancy ?? 0).toFixed(2)}R`;
+  const pnlFormatted = `${(stats.totalPnlPercent ?? 0) >= 0 ? "+" : ""}${(stats.totalPnlPercent ?? 0).toFixed(2)}%`;
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -84,17 +84,17 @@ export function PerformanceCards({ stats, isLoading }: PerformanceCardsProps) {
       />
       <StatCard
         title="盈亏比"
-        value={stats.avgRR.toFixed(2)}
+        value={(stats.avgRR ?? 0).toFixed(2)}
         subtitle={`期望: ${expectancyFormatted}`}
-        positive={stats.avgRR >= 1}
+        positive={(stats.avgRR ?? 0) >= 1}
       />
       <StatCard
         title="累计盈亏"
         value={pnlFormatted}
         subtitle={`盈利因子: ${
-          stats.profitFactor === Infinity ? "∞" : stats.profitFactor.toFixed(2)
+          stats.profitFactor === Infinity ? "∞" : (stats.profitFactor ?? 0).toFixed(2)
         }`}
-        positive={stats.totalPnlPercent >= 0}
+        positive={(stats.totalPnlPercent ?? 0) >= 0}
       />
     </div>
   );
