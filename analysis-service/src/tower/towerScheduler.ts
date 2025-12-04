@@ -161,8 +161,11 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     // 等待订单取消完成
     await delay(500);
 
-    // 4. 计算要下的订单
-    const orders = calculateOrders(towerData, management);
+    // 4. 获取杠杆
+    const leverage = await getLeverage(apiConfig, management.symbol);
+
+    // 5. 计算要下的订单
+    const orders = calculateOrders(towerData, management, leverage);
     if (orders.length === 0) {
       console.log('[TowerScheduler] 没有符合条件的塔块');
       addRecord({
@@ -200,7 +203,7 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     updateRunTime(management.id);
 
     const duration = Date.now() - startTime;
-    console.log(`[TowerScheduler] 执行完成: ${orders.length}单, ${result.errors.length}错误, 耗时${duration}ms`);
+    console.log(`[TowerScheduler] 执行完成: ${orders.length}单(入场+止盈止损), 杠杆=${leverage}x, 总保证金=${totalMargin} USDT, ${result.errors.length}错误, 耗时${duration}ms`);
 
     // 发送钉钉通知（如果有错误）
     if (result.errors.length > 0) {
@@ -281,6 +284,51 @@ async function checkOrdersCount(
 }
 
 /**
+ * 获取杠杆倍数
+ */
+async function getLeverage(
+  apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
+  symbol: string
+): Promise<number> {
+  const baseUrl = apiConfig.isTestnet
+    ? 'https://testnet.binancefuture.com'
+    : 'https://fapi.binance.com';
+
+  try {
+    const timestamp = Date.now();
+    const queryString = `symbol=${symbol}&timestamp=${timestamp}`;
+    const signature = generateSignature(queryString, apiConfig.apiSecret);
+
+    const response = await fetch(
+      `${baseUrl}/fapi/v2/positionRisk?${queryString}&signature=${signature}`,
+      { headers: { 'X-MBX-APIKEY': apiConfig.apiKey } }
+    );
+
+    if (!response.ok) {
+      console.warn('[TowerScheduler] 获取杠杆失败，使用默认值 20x');
+      return 20;
+    }
+
+    const positions = await response.json() as Array<{
+      symbol: string;
+      leverage: string;
+    }>;
+
+    const position = positions.find(p => p.symbol === symbol);
+    if (position) {
+      const leverage = parseInt(position.leverage, 10);
+      console.log(`[TowerScheduler] 获取杠杆: ${symbol} = ${leverage}x`);
+      return leverage;
+    }
+
+    return 20;
+  } catch (error) {
+    console.error('[TowerScheduler] 获取杠杆异常:', error);
+    return 20;
+  }
+}
+
+/**
  * 取消所有守塔订单
  */
 async function cancelAllTowerOrders(
@@ -333,10 +381,13 @@ interface TowerOrder {
 
 function calculateOrders(
   towerData: { currentPrice: number; blocks: Array<{ type: string; entry: number; high: number; low: number; source: string; timeframe: string }> },
-  management: TowerManagementConfig
+  management: TowerManagementConfig,
+  leverage: number
 ): TowerOrder[] {
   const { currentPrice, blocks } = towerData;
   const { baseMargin, marginIncrement, towerLayers, bullishStartLayer, bearishStartLayer, minSpacingRatio } = management;
+
+  console.log(`[TowerScheduler] 计算订单: 基础保证金=${baseMargin}, 递增=${marginIncrement}, 杠杆=${leverage}x`);
 
   // 分离多空并添加止损止盈
   const allBearish = blocks
@@ -448,9 +499,6 @@ function calculateOrders(
   // 转换为订单
   const orders: TowerOrder[] = [];
 
-  // 获取杠杆（假设 20x，实际应该从 API 获取）
-  const leverage = 20;
-
   for (let i = 0; i < selectedBullish.length; i++) {
     const block = selectedBullish[i];
     const margin = baseMargin + i * marginIncrement;
@@ -489,7 +537,7 @@ function calculateOrders(
 }
 
 /**
- * 下单
+ * 下单（入场单 + 止盈止损单）
  */
 async function placeOrders(
   apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
@@ -508,7 +556,8 @@ async function placeOrders(
       const timestamp = Date.now();
       const clientOrderId = `ict_tower_${timestamp}_${Math.random().toString(36).substring(2, 8)}`;
 
-      const params: Record<string, string | number> = {
+      // 1. 下入场单（限价单）
+      const entryParams: Record<string, string | number> = {
         symbol,
         side: order.side,
         positionSide: order.positionSide,
@@ -520,29 +569,102 @@ async function placeOrders(
         timestamp,
       };
 
-      const queryString = Object.entries(params)
+      const entryQueryString = Object.entries(entryParams)
         .map(([k, v]) => `${k}=${v}`)
         .join('&');
-      const signature = generateSignature(queryString, apiConfig.apiSecret);
+      const entrySignature = generateSignature(entryQueryString, apiConfig.apiSecret);
 
-      const response = await fetch(`${baseUrl}/fapi/v1/order`, {
+      const entryResponse = await fetch(`${baseUrl}/fapi/v1/order`, {
         method: 'POST',
         headers: {
           'X-MBX-APIKEY': apiConfig.apiKey,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: `${queryString}&signature=${signature}`,
+        body: `${entryQueryString}&signature=${entrySignature}`,
       });
 
-      if (!response.ok) {
-        const data = await response.json() as { msg?: string };
-        errors.push(`${order.side} @ ${order.price}: ${data.msg || response.status}`);
+      if (!entryResponse.ok) {
+        const data = await entryResponse.json() as { msg?: string };
+        errors.push(`入场 ${order.side} @ ${order.price}: ${data.msg || entryResponse.status}`);
         continue;
+      }
+
+      console.log(`[TowerScheduler] 入场单: ${order.side} @ ${order.price}, 保证金=${order.margin}, 数量=${order.quantity.toFixed(3)}, SL=${order.stopLoss.toFixed(1)}, TP=${order.takeProfit.toFixed(1)}`);
+
+      // 平仓方向
+      const closeSide = order.side === 'BUY' ? 'SELL' : 'BUY';
+
+      // 2. 下止损单（STOP_MARKET）
+      await delay(100);
+      const slTimestamp = Date.now();
+      const slParams: Record<string, string | number | boolean> = {
+        symbol,
+        side: closeSide,
+        positionSide: order.positionSide,
+        type: 'STOP_MARKET',
+        quantity: order.quantity.toFixed(3),
+        stopPrice: order.stopLoss.toFixed(1),
+        reduceOnly: 'true',
+        newClientOrderId: `${clientOrderId}_sl`,
+        timestamp: slTimestamp,
+      };
+
+      const slQueryString = Object.entries(slParams)
+        .map(([k, v]) => `${k}=${v}`)
+        .join('&');
+      const slSignature = generateSignature(slQueryString, apiConfig.apiSecret);
+
+      const slResponse = await fetch(`${baseUrl}/fapi/v1/order`, {
+        method: 'POST',
+        headers: {
+          'X-MBX-APIKEY': apiConfig.apiKey,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `${slQueryString}&signature=${slSignature}`,
+      });
+
+      if (!slResponse.ok) {
+        const data = await slResponse.json() as { msg?: string };
+        console.warn(`[TowerScheduler] 止损单失败: ${data.msg || slResponse.status}`);
+      }
+
+      // 3. 下止盈单（TAKE_PROFIT_MARKET）
+      await delay(100);
+      const tpTimestamp = Date.now();
+      const tpParams: Record<string, string | number | boolean> = {
+        symbol,
+        side: closeSide,
+        positionSide: order.positionSide,
+        type: 'TAKE_PROFIT_MARKET',
+        quantity: order.quantity.toFixed(3),
+        stopPrice: order.takeProfit.toFixed(1),
+        reduceOnly: 'true',
+        newClientOrderId: `${clientOrderId}_tp`,
+        timestamp: tpTimestamp,
+      };
+
+      const tpQueryString = Object.entries(tpParams)
+        .map(([k, v]) => `${k}=${v}`)
+        .join('&');
+      const tpSignature = generateSignature(tpQueryString, apiConfig.apiSecret);
+
+      const tpResponse = await fetch(`${baseUrl}/fapi/v1/order`, {
+        method: 'POST',
+        headers: {
+          'X-MBX-APIKEY': apiConfig.apiKey,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `${tpQueryString}&signature=${tpSignature}`,
+      });
+
+      if (!tpResponse.ok) {
+        const data = await tpResponse.json() as { msg?: string };
+        console.warn(`[TowerScheduler] 止盈单失败: ${data.msg || tpResponse.status}`);
       }
 
       success++;
 
-      // 保存待处理订单（用于成交后下止盈止损）
+      // 保存待处理订单（用于成交后补下追踪止盈）
       await savePendingOrder({
         clientOrderId,
         symbol,
@@ -555,7 +677,7 @@ async function placeOrders(
       });
 
       // 延迟避免请求过快
-      await delay(200);
+      await delay(100);
     } catch (error) {
       errors.push(`${order.side} @ ${order.price}: ${error instanceof Error ? error.message : '未知错误'}`);
     }
