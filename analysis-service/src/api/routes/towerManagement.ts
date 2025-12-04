@@ -131,11 +131,21 @@ towerManagementRoutes.post('/', (req: Request, res: Response) => {
 /**
  * POST /api/tower-management/start
  * 启动托管
- * Body: { userId: number, symbol: string, intervalMinutes?: number }
+ * Body: { userId, symbol, intervalMinutes, baseMargin, marginIncrement, towerLayers, bullishStartLayer, bearishStartLayer, minSpacingRatio }
  */
 towerManagementRoutes.post('/start', (req: Request, res: Response) => {
   try {
-    const { userId, symbol, intervalMinutes = 5 } = req.body;
+    const {
+      userId,
+      symbol,
+      intervalMinutes = 5,
+      baseMargin = 100,
+      marginIncrement = 0,
+      towerLayers = 3,
+      bullishStartLayer = 1,
+      bearishStartLayer = 1,
+      minSpacingRatio = 5,
+    } = req.body;
 
     if (!userId || !symbol) {
       res.status(400).json({
@@ -145,29 +155,21 @@ towerManagementRoutes.post('/start', (req: Request, res: Response) => {
       return;
     }
 
-    // 确保配置存在
-    let config = getManagement(userId, symbol);
-    if (!config) {
-      // 创建默认配置
-      config = upsertManagement({
-        userId,
-        symbol,
-        isActive: true,
-        intervalMinutes,
-        baseMargin: 100,
-        marginIncrement: 0,
-        towerLayers: 3,
-        bullishStartLayer: 1,
-        bearishStartLayer: 1,
-        minSpacingRatio: 5,
-      });
-    } else {
-      // 启动现有配置
-      startManagement(userId, symbol, intervalMinutes);
-      config = getManagement(userId, symbol)!;
-    }
+    // 使用前端传来的参数创建/更新配置并启动
+    const config = upsertManagement({
+      userId,
+      symbol,
+      isActive: true,
+      intervalMinutes,
+      baseMargin,
+      marginIncrement,
+      towerLayers,
+      bullishStartLayer,
+      bearishStartLayer,
+      minSpacingRatio,
+    });
 
-    console.log(`[TowerManagement API] 启动托管: userId=${userId}, symbol=${symbol}`);
+    console.log(`[TowerManagement API] 启动托管: userId=${userId}, symbol=${symbol}, baseMargin=${baseMargin}, layers=${towerLayers}`);
 
     res.json({
       success: true,
