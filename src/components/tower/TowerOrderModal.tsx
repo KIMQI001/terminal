@@ -6,17 +6,28 @@ import { useOrderStore } from "@/stores/orderStore";
 import { usePositionStore } from "@/stores/positionStore";
 import { useChartStore } from "@/stores/chartStore";
 
+// localStorage key for base margin
+const STORAGE_KEY_BASE_MARGIN = "tower_base_margin";
+
 interface TowerOrderModalProps {
   block: TowerBlock;
   onClose: () => void;
+  defaultMargin?: number;
 }
 
-export function TowerOrderModal({ block, onClose }: TowerOrderModalProps) {
+export function TowerOrderModal({ block, onClose, defaultMargin }: TowerOrderModalProps) {
   const { placeOrder, isPlacingOrder, orderError } = useOrderStore();
   const { currentLeverage, fetchLeverage } = usePositionStore();
   const { symbol } = useChartStore();
 
-  const [marginAmount, setMarginAmount] = useState<string>("100");
+  // 使用传入的默认值，或从 localStorage 读取，或使用 100
+  const getInitialMargin = () => {
+    if (defaultMargin !== undefined) return String(defaultMargin);
+    const saved = localStorage.getItem(STORAGE_KEY_BASE_MARGIN);
+    return saved || "100";
+  };
+
+  const [marginAmount, setMarginAmount] = useState<string>(getInitialMargin);
   const [orderSuccess, setOrderSuccess] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [orderWarnings, setOrderWarnings] = useState<string[]>([]);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { AuthGuard } from "@/components/auth/AuthGuard";
@@ -8,11 +8,51 @@ import { TowerList, TowerOrderModal } from "@/components/tower";
 import { TowerBlock } from "@/components/tower/types";
 import { fetchTowerBlocks, TowerBlocksResult } from "@/lib/analysis/api";
 import { useChartStore } from "@/stores/chartStore";
+import { useOrderStore } from "@/stores/orderStore";
+import { usePositionStore } from "@/stores/positionStore";
+
+// localStorage keys
+const STORAGE_KEYS = {
+  BASE_MARGIN: "tower_base_margin",
+  TOWER_LAYERS: "tower_layers",
+};
 
 export default function TowerPage() {
   const { symbol } = useChartStore();
+  const { placeOrder } = useOrderStore();
+  const { currentLeverage, fetchLeverage } = usePositionStore();
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [selectedBlock, setSelectedBlock] = useState<TowerBlock | null>(null);
+
+  // 设置状态
+  const [baseMargin, setBaseMargin] = useState(100);
+  const [towerLayers, setTowerLayers] = useState(3);
+  const [isAutoOrdering, setIsAutoOrdering] = useState(false);
+  const [orderProgress, setOrderProgress] = useState<{
+    current: number;
+    total: number;
+    errors: string[];
+  } | null>(null);
+
+  // 从 localStorage 加载设置
+  useEffect(() => {
+    const savedMargin = localStorage.getItem(STORAGE_KEYS.BASE_MARGIN);
+    const savedLayers = localStorage.getItem(STORAGE_KEYS.TOWER_LAYERS);
+
+    if (savedMargin) setBaseMargin(Number(savedMargin));
+    if (savedLayers) setTowerLayers(Number(savedLayers));
+  }, []);
+
+  // 保存设置到 localStorage
+  const handleMarginChange = (value: number) => {
+    setBaseMargin(value);
+    localStorage.setItem(STORAGE_KEYS.BASE_MARGIN, String(value));
+  };
+
+  const handleLayersChange = (value: number) => {
+    setTowerLayers(value);
+    localStorage.setItem(STORAGE_KEYS.TOWER_LAYERS, String(value));
+  };
 
   // Fetch tower blocks from backend
   const {
@@ -39,6 +79,172 @@ export default function TowerPage() {
   const handleCloseModal = useCallback(() => {
     setSelectedBlock(null);
   }, []);
+
+  // 获取当前杠杆
+  useEffect(() => {
+    fetchLeverage(symbol.replace("/", ""));
+  }, [symbol, fetchLeverage]);
+
+  // 计算下单数量（基于保证金）
+  const calculateQuantity = useCallback(
+    (margin: number, price: number) => {
+      // 仓位价值 = 保证金 × 杠杆
+      const positionValue = margin * currentLeverage;
+      // 数量 = 仓位价值 / 价格，保留3位小数
+      return Math.floor((positionValue / price) * 1000) / 1000;
+    },
+    [currentLeverage]
+  );
+
+  // 止损止盈参数（与 TowerList 一致）
+  const MAX_SL_DISTANCE = 200;
+  const MIN_TP_DISTANCE = 1000;
+  const MIN_DISTANCE_RATIO = 0.003; // 最小距离：千分之三
+
+  // 一键守塔
+  const handleAutoTower = useCallback(async () => {
+    if (!data?.blocks || !data.currentPrice) return;
+
+    const currentPrice = data.currentPrice;
+    const rawBlocks = data.blocks;
+
+    // 转换为带止损止盈的塔块（与 TowerList 逻辑一致）
+    const allRawBlocks = rawBlocks.map((b) => ({
+      ...b,
+      stopLoss: 0,
+      takeProfit: 0,
+    }));
+
+    // 分离多空
+    const allBearish = allRawBlocks
+      .filter((b) => b.type === "bearish")
+      .sort((a, b) => b.entry - a.entry);
+    const allBullish = allRawBlocks
+      .filter((b) => b.type === "bullish")
+      .sort((a, b) => b.entry - a.entry);
+
+    // 计算止损止盈
+    for (const block of [...allBearish, ...allBullish]) {
+      // 止损 = 边界，最大 200 点
+      const boundary = block.type === "bearish" ? block.high : block.low;
+      const slDistance = Math.abs(block.entry - boundary);
+
+      if (slDistance > MAX_SL_DISTANCE) {
+        block.stopLoss =
+          block.type === "bearish"
+            ? block.entry + MAX_SL_DISTANCE
+            : block.entry - MAX_SL_DISTANCE;
+      } else {
+        block.stopLoss = boundary;
+      }
+
+      // 止盈 = 最近的对立塔块，最小 1000 点
+      let target: typeof block | undefined;
+
+      if (block.type === "bearish") {
+        const candidates = allBullish.filter((b) => b.entry < block.entry);
+        target = candidates[0];
+      } else {
+        const candidates = allBearish.filter((b) => b.entry > block.entry);
+        target = candidates[candidates.length - 1];
+      }
+
+      if (target) {
+        const tpDistance = Math.abs(target.entry - block.entry);
+        if (tpDistance >= MIN_TP_DISTANCE) {
+          block.takeProfit = target.entry;
+        } else {
+          block.takeProfit =
+            block.type === "bearish"
+              ? block.entry - MIN_TP_DISTANCE
+              : block.entry + MIN_TP_DISTANCE;
+        }
+      } else {
+        block.takeProfit =
+          block.type === "bearish"
+            ? block.entry - MIN_TP_DISTANCE
+            : block.entry + MIN_TP_DISTANCE;
+      }
+    }
+
+    // 最小距离（千分之三）
+    const minDistance = currentPrice * MIN_DISTANCE_RATIO;
+
+    // 筛选当前价格上下各 N 层的塔块（至少距离当前价格千分之三）
+    const bullishBlocks = allBullish
+      .filter((b) => b.entry < currentPrice && currentPrice - b.entry >= minDistance)
+      .sort((a, b) => b.entry - a.entry)
+      .slice(0, towerLayers);
+
+    const bearishBlocks = allBearish
+      .filter((b) => b.entry > currentPrice && b.entry - currentPrice >= minDistance)
+      .sort((a, b) => a.entry - b.entry)
+      .slice(0, towerLayers);
+
+    const selectedBlocks = [...bullishBlocks, ...bearishBlocks];
+
+    if (selectedBlocks.length === 0) {
+      alert("没有符合条件的塔块");
+      return;
+    }
+
+    const confirmed = confirm(
+      `即将下 ${selectedBlocks.length} 个塔单\n` +
+        `多塔: ${bullishBlocks.length} 个，空塔: ${bearishBlocks.length} 个\n` +
+        `每单保证金: ${baseMargin} USDT\n` +
+        `确定继续吗？`
+    );
+
+    if (!confirmed) return;
+
+    setIsAutoOrdering(true);
+    setOrderProgress({ current: 0, total: selectedBlocks.length, errors: [] });
+
+    const errors: string[] = [];
+
+    for (let i = 0; i < selectedBlocks.length; i++) {
+      const block = selectedBlocks[i];
+      const quantity = calculateQuantity(baseMargin, block.entry);
+
+      try {
+        const result = await placeOrder(
+          {
+            type: "limit",
+            side: block.type === "bullish" ? "buy" : "sell",
+            price: block.entry,
+            stopPrice: block.stopLoss,
+            takeProfit: block.takeProfit,
+            quantity,
+            clientOrderIdPrefix: "ict_tower",
+          },
+          symbol.replace("/", "")
+        );
+
+        if (!result.success) {
+          errors.push(`${block.source} ${block.timeframe}: ${result.error}`);
+        }
+      } catch (err) {
+        errors.push(
+          `${block.source} ${block.timeframe}: ${err instanceof Error ? err.message : "未知错误"}`
+        );
+      }
+
+      setOrderProgress({ current: i + 1, total: selectedBlocks.length, errors });
+
+      // 添加小延迟避免请求过快
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+
+    setIsAutoOrdering(false);
+
+    if (errors.length > 0) {
+      alert(`下单完成，但有 ${errors.length} 个错误:\n${errors.join("\n")}`);
+    } else {
+      alert(`成功下 ${selectedBlocks.length} 个塔单！`);
+    }
+
+    setOrderProgress(null);
+  }, [data, towerLayers, baseMargin, calculateQuantity, placeOrder, symbol]);
 
   // 统计塔块数量和多空比例
   const stats = useMemo(() => {
@@ -178,6 +384,80 @@ export default function TowerPage() {
             </div>
           )}
 
+          {/* Tower Settings */}
+          <div className="mb-4 p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              {/* 基础数量设置 */}
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-[var(--text-tertiary)]">
+                  基础数量:
+                </label>
+                <input
+                  type="number"
+                  value={baseMargin}
+                  onChange={(e) => handleMarginChange(Number(e.target.value))}
+                  className="w-20 px-2 py-1 text-sm bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                  min={10}
+                  max={10000}
+                  step={10}
+                />
+                <span className="text-xs text-[var(--text-tertiary)]">USDT</span>
+              </div>
+
+              {/* 守塔层数设置 */}
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-[var(--text-tertiary)]">
+                  守塔层数:
+                </label>
+                <select
+                  value={towerLayers}
+                  onChange={(e) => handleLayersChange(Number(e.target.value))}
+                  className="px-2 py-1 text-sm bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                >
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <option key={n} value={n}>
+                      {n} 层
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 一键守塔按钮 */}
+              <button
+                onClick={handleAutoTower}
+                disabled={isAutoOrdering || !data?.blocks?.length}
+                className="px-4 py-1.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white text-sm font-medium rounded transition-colors flex items-center gap-2"
+              >
+                <span>🏯</span>
+                {isAutoOrdering ? "下单中..." : "一键守塔"}
+              </button>
+            </div>
+
+            {/* 下单进度 */}
+            {orderProgress && (
+              <div className="mt-3">
+                <div className="flex items-center justify-between text-xs text-[var(--text-tertiary)] mb-1">
+                  <span>
+                    下单进度: {orderProgress.current}/{orderProgress.total}
+                  </span>
+                  {orderProgress.errors.length > 0 && (
+                    <span className="text-red-400">
+                      {orderProgress.errors.length} 个错误
+                    </span>
+                  )}
+                </div>
+                <div className="h-1.5 bg-[var(--bg-tertiary)] rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-blue-500 transition-all duration-300"
+                    style={{
+                      width: `${(orderProgress.current / orderProgress.total) * 100}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Rules Summary */}
           <details className="mb-4 group">
             <summary className="p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)] cursor-pointer list-none flex items-center justify-between hover:bg-[var(--bg-tertiary)] transition-colors">
@@ -282,7 +562,7 @@ export default function TowerPage() {
 
         {/* Order Modal */}
         {selectedBlock && (
-          <TowerOrderModal block={selectedBlock} onClose={handleCloseModal} />
+          <TowerOrderModal block={selectedBlock} onClose={handleCloseModal} defaultMargin={baseMargin} />
         )}
       </div>
     </AuthGuard>
