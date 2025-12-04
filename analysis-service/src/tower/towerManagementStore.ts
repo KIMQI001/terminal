@@ -162,10 +162,8 @@ export function upsertManagement(config: {
   const db = getDatabase();
   const now = new Date().toISOString();
 
-  // 计算下次执行时间
-  const nextRunAt = config.isActive
-    ? new Date(Date.now() + config.intervalMinutes * 60 * 1000).toISOString()
-    : null;
+  // 如果激活，立即执行第一次（设置 nextRunAt 为当前时间）
+  const nextRunAt = config.isActive ? now : null;
 
   const existing = getManagement(config.userId, config.symbol);
 
@@ -236,7 +234,8 @@ export function upsertManagement(config: {
 export function startManagement(userId: number, symbol: string, intervalMinutes: number): boolean {
   const db = getDatabase();
   const now = new Date().toISOString();
-  const nextRunAt = new Date(Date.now() + intervalMinutes * 60 * 1000).toISOString();
+  // 启动后立即执行第一次，设置 nextRunAt 为当前时间
+  const nextRunAt = now;
 
   const result = db.prepare(`
     UPDATE tower_management SET
@@ -248,7 +247,7 @@ export function startManagement(userId: number, symbol: string, intervalMinutes:
   `).run(intervalMinutes, nextRunAt, now, userId, symbol);
 
   if (result.changes > 0) {
-    console.log(`[TowerManagement] 启动托管: userId=${userId}, symbol=${symbol}, interval=${intervalMinutes}分钟`);
+    console.log(`[TowerManagement] 启动托管: userId=${userId}, symbol=${symbol}, interval=${intervalMinutes}分钟, 立即执行`);
     return true;
   }
   return false;
