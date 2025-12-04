@@ -20,6 +20,7 @@ export interface TradingLine {
 // 真实挂单数据
 export interface RealOrder {
   id: string;
+  clientOrderId: string;
   symbol: string;
   side: string;
   positionSide: string;
@@ -39,16 +40,47 @@ const getTypeOrder = (type: string): number => {
   return 3;
 };
 
-// 按数量和时间分组订单（同一笔交易的主单、止盈、止损）
+// 从 clientOrderId 提取基础 ID（去掉 _sl, _tp, _r1 等后缀）
+// 格式: prefix_timestamp 或 prefix_timestamp_sl 或 prefix_timestamp_tp
+const extractBaseClientOrderId = (clientOrderId: string): string | null => {
+  if (!clientOrderId) return null;
+  // 去掉 _sl, _tp, _r1, _r2 等后缀
+  return clientOrderId.replace(/_(sl|tp|r\d+)$/g, '');
+};
+
+// 按 clientOrderId 分组订单（同一笔交易的主单、止盈、止损）
+// 如果没有 clientOrderId，则回退到时间+数量分组
 export const groupOrders = (orders: RealOrder[]): RealOrder[][] => {
   if (orders.length === 0) return [];
 
   const groups: RealOrder[][] = [];
   const used = new Set<string>();
 
-  // 按时间排序
+  // 按时间排序（最新的在前）
   const sorted = [...orders].sort((a, b) => b.time - a.time);
 
+  // 第一步：按 clientOrderId 分组
+  const clientIdGroups = new Map<string, RealOrder[]>();
+
+  for (const order of sorted) {
+    const baseId = extractBaseClientOrderId(order.clientOrderId);
+    if (baseId) {
+      if (!clientIdGroups.has(baseId)) {
+        clientIdGroups.set(baseId, []);
+      }
+      clientIdGroups.get(baseId)!.push(order);
+      used.add(order.id);
+    }
+  }
+
+  // 添加 clientOrderId 分组
+  for (const group of clientIdGroups.values()) {
+    // 组内按类型排序：限价 → 止盈 → 止损
+    group.sort((a, b) => getTypeOrder(a.type) - getTypeOrder(b.type));
+    groups.push(group);
+  }
+
+  // 第二步：剩余没有 clientOrderId 的订单，用时间+数量分组
   for (const order of sorted) {
     if (used.has(order.id)) continue;
 
@@ -66,6 +98,9 @@ export const groupOrders = (orders: RealOrder[]): RealOrder[][] => {
 
     groups.push(group);
   }
+
+  // 按第一个订单的时间排序（最新的组在前）
+  groups.sort((a, b) => b[0].time - a[0].time);
 
   return groups;
 };

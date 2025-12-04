@@ -83,6 +83,7 @@ export async function GET(request: NextRequest) {
     // 格式化订单数据
     const formattedOrders = orders.map((order: {
       orderId: number;
+      clientOrderId: string;
       symbol: string;
       side: string;
       positionSide: string;
@@ -94,6 +95,7 @@ export async function GET(request: NextRequest) {
       time: number;
     }) => ({
       id: order.orderId.toString(),
+      clientOrderId: order.clientOrderId,
       symbol: order.symbol,
       side: order.side.toLowerCase(),
       positionSide: order.positionSide,
