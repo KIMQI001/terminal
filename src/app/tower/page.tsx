@@ -975,7 +975,7 @@ export default function TowerPage() {
                 </div>
               ) : (
                 <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                  {backendRecords.map((record) => (
+                  {backendRecords.slice(0, 20).map((record) => (
                     <div
                       key={record.id}
                       className={`flex items-center justify-between px-2 py-1.5 rounded text-xs ${
