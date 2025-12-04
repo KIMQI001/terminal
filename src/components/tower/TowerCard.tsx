@@ -9,14 +9,13 @@ interface TowerCardProps {
 
 export function TowerCard({ block, onOrder }: TowerCardProps) {
   const isBearish = block.type === "bearish";
-  const typeColor = isBearish ? "text-red-500" : "text-green-500";
   const bgColor = isBearish ? "bg-red-500/5" : "bg-green-500/5";
   const borderColor = isBearish ? "border-red-500/20" : "border-green-500/20";
 
   const formatPrice = (price: number) => {
     return price.toLocaleString("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
     });
   };
 
@@ -29,71 +28,59 @@ export function TowerCard({ block, onOrder }: TowerCardProps) {
 
   return (
     <div
-      className={`${bgColor} ${borderColor} border rounded-lg p-3 transition-all hover:scale-[1.01]`}
+      className={`${bgColor} ${borderColor} border rounded-lg px-2.5 py-1.5 flex items-center gap-2 hover:scale-[1.005] transition-transform`}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className={`text-lg ${typeColor}`}>
-            {isBearish ? "🔴" : "🟢"}
-          </span>
-          <span className="text-xs font-medium text-[var(--text-tertiary)] bg-[var(--bg-tertiary)] px-1.5 py-0.5 rounded">
-            {block.timeframe.toUpperCase()}
-          </span>
-          <span className={`text-sm font-semibold ${typeColor}`}>
-            {block.source}
-          </span>
-        </div>
-        <div className="text-xs text-[var(--text-tertiary)]">
-          {block.fillPercent.toFixed(0)}% filled
-        </div>
+      {/* 指示器 + 周期 + 类型 */}
+      <div className="flex items-center gap-1.5 min-w-[70px]">
+        <span className="text-xs">{isBearish ? "🔴" : "🟢"}</span>
+        <span className="text-[10px] font-medium text-[var(--text-tertiary)] bg-[var(--bg-tertiary)] px-1 py-0.5 rounded">
+          {block.timeframe.toUpperCase()}
+        </span>
+        <span className={`text-xs font-semibold ${isBearish ? "text-red-400" : "text-green-400"}`}>
+          {block.source}
+        </span>
       </div>
 
-      {/* Price Zone */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="text-xs text-[var(--text-tertiary)]">
-          ${formatPrice(block.low)} - ${formatPrice(block.high)}
-        </div>
-        <div className={`text-sm font-bold ${riskRewardColor}`}>
-          RR: {block.riskReward.toFixed(1)}
-        </div>
+      {/* 入场价 */}
+      <div className="flex-1 text-center">
+        <span className="text-xs text-[var(--text-tertiary)]">入场 </span>
+        <span className="text-xs font-mono font-medium text-[var(--text-primary)]">
+          {formatPrice(block.entry)}
+        </span>
       </div>
 
-      {/* Entry / SL / TP */}
-      <div className="grid grid-cols-3 gap-2 text-xs">
-        <div>
-          <div className="text-[var(--text-tertiary)]">
-            {isBearish ? "入场做空" : "入场做多"}
-          </div>
-          <div className="font-medium text-[var(--text-primary)]">
-            ${formatPrice(block.entry)}
-          </div>
-        </div>
-        <div>
-          <div className="text-[var(--text-tertiary)]">止损</div>
-          <div className="font-medium text-red-400">
-            ${formatPrice(block.stopLoss)}
-          </div>
-        </div>
-        <div>
-          <div className="text-[var(--text-tertiary)]">止盈</div>
-          <div className="font-medium text-green-400">
-            ${formatPrice(block.takeProfit)}
-          </div>
-        </div>
+      {/* 止损 */}
+      <div className="text-center min-w-[65px]">
+        <span className="text-xs text-[var(--text-tertiary)]">损 </span>
+        <span className="text-xs font-mono text-red-400">
+          {formatPrice(block.stopLoss)}
+        </span>
       </div>
 
-      {/* Order Button */}
+      {/* 止盈 */}
+      <div className="text-center min-w-[65px]">
+        <span className="text-xs text-[var(--text-tertiary)]">盈 </span>
+        <span className="text-xs font-mono text-green-400">
+          {formatPrice(block.takeProfit)}
+        </span>
+      </div>
+
+      {/* RR */}
+      <div className={`text-xs font-bold ${riskRewardColor} min-w-[40px] text-right`}>
+        {block.riskReward.toFixed(1)}
+      </div>
+
+      {/* 下单按钮 */}
       {onOrder && (
         <button
           onClick={() => onOrder(block)}
-          className={`w-full mt-3 py-2 rounded-lg text-sm font-medium transition-all ${
+          className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
             isBearish
-              ? "bg-red-500/20 hover:bg-red-500/30 text-red-400 hover:text-red-300"
-              : "bg-green-500/20 hover:bg-green-500/30 text-green-400 hover:text-green-300"
+              ? "bg-red-500/20 hover:bg-red-500/30 text-red-400"
+              : "bg-green-500/20 hover:bg-green-500/30 text-green-400"
           }`}
         >
-          {isBearish ? "做空" : "做多"}
+          {isBearish ? "空" : "多"}
         </button>
       )}
     </div>
