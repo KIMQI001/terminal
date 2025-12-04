@@ -3,7 +3,7 @@
  * 负责信号的 CRUD 操作
  */
 
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { getDatabase, SignalRecord, SignalRow, rowToRecord } from '../db';
 import { TradeSignal } from '../analysis/aiAnalyzer';
 
@@ -17,7 +17,7 @@ export function saveSignal(
   timeframe: string
 ): string {
   const db = getDatabase();
-  const id = uuidv4();
+  const id = randomUUID();
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
