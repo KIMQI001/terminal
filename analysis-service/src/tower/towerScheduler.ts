@@ -597,14 +597,13 @@ async function placeOrders(
       // 2. 下止损单（STOP_MARKET）
       await delay(100);
       const slTimestamp = Date.now();
-      const slParams: Record<string, string | number | boolean> = {
+      const slParams: Record<string, string | number> = {
         symbol,
         side: closeSide,
         positionSide: order.positionSide,
         type: 'STOP_MARKET',
         quantity: order.quantity.toFixed(3),
         stopPrice: order.stopLoss.toFixed(1),
-        reduceOnly: 'true',
         newClientOrderId: `${clientOrderId}_sl`,
         timestamp: slTimestamp,
       };
@@ -631,14 +630,13 @@ async function placeOrders(
       // 3. 下止盈单（TAKE_PROFIT_MARKET）
       await delay(100);
       const tpTimestamp = Date.now();
-      const tpParams: Record<string, string | number | boolean> = {
+      const tpParams: Record<string, string | number> = {
         symbol,
         side: closeSide,
         positionSide: order.positionSide,
         type: 'TAKE_PROFIT_MARKET',
         quantity: order.quantity.toFixed(3),
         stopPrice: order.takeProfit.toFixed(1),
-        reduceOnly: 'true',
         newClientOrderId: `${clientOrderId}_tp`,
         timestamp: tpTimestamp,
       };
