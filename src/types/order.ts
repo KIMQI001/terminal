@@ -43,6 +43,7 @@ export interface OrderFormData {
   quantity: number;
   stopLoss?: number;
   takeProfit?: number;
+  clientOrderIdPrefix?: string;  // 自定义订单 ID 前缀，如 "ict_tower"
 }
 
 // 账户余额

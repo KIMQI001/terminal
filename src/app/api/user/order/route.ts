@@ -57,6 +57,60 @@ function formatPrice(price: number, precision: number): string {
   return price.toFixed(precision);
 }
 
+// 延迟函数
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// 带重试的止盈止损单下单
+async function placeStopOrderWithRetry(
+  apiKey: string,
+  apiSecret: string,
+  isTestnet: boolean,
+  params: {
+    symbol: string;
+    side: 'BUY' | 'SELL';
+    positionSide: 'LONG' | 'SHORT';
+    type: 'STOP_MARKET' | 'TAKE_PROFIT_MARKET';
+    quantity: number;
+    stopPrice: number;
+    clientOrderId?: string;
+  },
+  maxRetries: number = 2,
+  retryDelay: number = 500
+): Promise<{ success: boolean; data?: unknown; error?: string }> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      // 重试时生成新的 clientOrderId（避免重复）
+      const currentClientOrderId = attempt === 0
+        ? params.clientOrderId
+        : params.clientOrderId ? `${params.clientOrderId}_r${attempt}` : undefined;
+
+      const data = await placeStopOrder(apiKey, apiSecret, isTestnet, {
+        ...params,
+        clientOrderId: currentClientOrderId,
+      });
+
+      return { success: true, data };
+    } catch (e) {
+      lastError = e instanceof Error ? e : new Error('未知错误');
+      console.warn(`[止盈止损] 第 ${attempt + 1} 次尝试失败:`, lastError.message);
+
+      // 如果还有重试次数，等待后重试
+      if (attempt < maxRetries) {
+        await delay(retryDelay);
+      }
+    }
+  }
+
+  return {
+    success: false,
+    error: lastError?.message || '未知错误',
+  };
+}
+
 // 下止盈止损单
 async function placeStopOrder(
   apiKey: string,
@@ -69,6 +123,7 @@ async function placeStopOrder(
     type: 'STOP_MARKET' | 'TAKE_PROFIT_MARKET';
     quantity: number;
     stopPrice: number;
+    clientOrderId?: string;
   }
 ) {
   const baseUrl = isTestnet
@@ -87,6 +142,11 @@ async function placeStopOrder(
     stopPrice: formatPrice(params.stopPrice, precision.price),
     timestamp,
   };
+
+  // 添加自定义订单 ID
+  if (params.clientOrderId) {
+    queryParams.newClientOrderId = params.clientOrderId;
+  }
 
   const queryString = Object.entries(queryParams)
     .map(([key, value]) => `${key}=${value}`)
@@ -127,6 +187,7 @@ async function placeBinanceOrder(
     price?: number;
     stopLoss?: number;
     takeProfit?: number;
+    clientOrderIdPrefix?: string;
   }
 ) {
   const baseUrl = isTestnet
@@ -135,6 +196,11 @@ async function placeBinanceOrder(
 
   const timestamp = Date.now();
   const precision = getPrecision(params.symbol);
+
+  // 生成自定义订单 ID（如果有前缀）
+  const clientOrderId = params.clientOrderIdPrefix
+    ? `${params.clientOrderIdPrefix}_${timestamp}`
+    : undefined;
 
   // 根据交易方向确定持仓方向（双向持仓模式）
   // BUY 开多 -> LONG, SELL 开空 -> SHORT
@@ -149,6 +215,11 @@ async function placeBinanceOrder(
     quantity: formatQuantity(params.quantity, precision.quantity),
     timestamp,
   };
+
+  // 添加自定义订单 ID
+  if (clientOrderId) {
+    queryParams.newClientOrderId = clientOrderId;
+  }
 
   // 限价单需要价格和 timeInForce
   if (params.type === 'LIMIT' && params.price) {
@@ -183,6 +254,7 @@ async function placeBinanceOrder(
     success: true,
     order: {
       orderId: data.orderId,
+      clientOrderId: data.clientOrderId || clientOrderId,
       symbol: data.symbol,
       side: data.side,
       type: data.type,
@@ -191,44 +263,63 @@ async function placeBinanceOrder(
       status: data.status,
       time: data.updateTime,
     },
-    stopOrders: [] as { type: string; orderId: number }[],
+    stopOrders: [] as { type: string; orderId: number; clientOrderId?: string }[],
+    warnings: [] as string[],
   };
 
-  // 下止损单
+  // 下止损单（带重试）
   if (params.stopLoss && params.stopLoss > 0) {
-    try {
-      // 止损单：多单用 SELL 平仓，空单用 BUY 平仓
-      const slSide = params.side === 'BUY' ? 'SELL' : 'BUY';
-      const slData = await placeStopOrder(apiKey, apiSecret, isTestnet, {
-        symbol: params.symbol,
-        side: slSide,
-        positionSide,
-        type: 'STOP_MARKET',
-        quantity: params.quantity,
-        stopPrice: params.stopLoss,
+    const slSide = params.side === 'BUY' ? 'SELL' : 'BUY';
+    const slClientOrderId = clientOrderId ? `${clientOrderId}_sl` : undefined;
+
+    const slResult = await placeStopOrderWithRetry(apiKey, apiSecret, isTestnet, {
+      symbol: params.symbol,
+      side: slSide,
+      positionSide,
+      type: 'STOP_MARKET',
+      quantity: params.quantity,
+      stopPrice: params.stopLoss,
+      clientOrderId: slClientOrderId,
+    });
+
+    if (slResult.success && slResult.data) {
+      const slData = slResult.data as { orderId: number; clientOrderId?: string };
+      result.stopOrders.push({
+        type: 'stopLoss',
+        orderId: slData.orderId,
+        clientOrderId: slData.clientOrderId || slClientOrderId,
       });
-      result.stopOrders.push({ type: 'stopLoss', orderId: slData.orderId });
-    } catch (e) {
-      console.error('Stop loss order failed:', e);
+    } else {
+      console.error('Stop loss order failed after retries:', slResult.error);
+      result.warnings.push(`止损单失败: ${slResult.error}`);
     }
   }
 
-  // 下止盈单
+  // 下止盈单（带重试）
   if (params.takeProfit && params.takeProfit > 0) {
-    try {
-      // 止盈单：多单用 SELL 平仓，空单用 BUY 平仓
-      const tpSide = params.side === 'BUY' ? 'SELL' : 'BUY';
-      const tpData = await placeStopOrder(apiKey, apiSecret, isTestnet, {
-        symbol: params.symbol,
-        side: tpSide,
-        positionSide,
-        type: 'TAKE_PROFIT_MARKET',
-        quantity: params.quantity,
-        stopPrice: params.takeProfit,
+    const tpSide = params.side === 'BUY' ? 'SELL' : 'BUY';
+    const tpClientOrderId = clientOrderId ? `${clientOrderId}_tp` : undefined;
+
+    const tpResult = await placeStopOrderWithRetry(apiKey, apiSecret, isTestnet, {
+      symbol: params.symbol,
+      side: tpSide,
+      positionSide,
+      type: 'TAKE_PROFIT_MARKET',
+      quantity: params.quantity,
+      stopPrice: params.takeProfit,
+      clientOrderId: tpClientOrderId,
+    });
+
+    if (tpResult.success && tpResult.data) {
+      const tpData = tpResult.data as { orderId: number; clientOrderId?: string };
+      result.stopOrders.push({
+        type: 'takeProfit',
+        orderId: tpData.orderId,
+        clientOrderId: tpData.clientOrderId || tpClientOrderId,
       });
-      result.stopOrders.push({ type: 'takeProfit', orderId: tpData.orderId });
-    } catch (e) {
-      console.error('Take profit order failed:', e);
+    } else {
+      console.error('Take profit order failed after retries:', tpResult.error);
+      result.warnings.push(`止盈单失败: ${tpResult.error}`);
     }
   }
 
@@ -317,7 +408,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { symbol, side, type, quantity, price, stopLoss, takeProfit } = await request.json();
+    const { symbol, side, type, quantity, price, stopLoss, takeProfit, clientOrderIdPrefix } = await request.json();
 
     // 参数验证
     if (!symbol) {
@@ -350,6 +441,7 @@ export async function POST(request: NextRequest) {
       price,
       stopLoss,
       takeProfit,
+      clientOrderIdPrefix,
     });
 
     return NextResponse.json(result);

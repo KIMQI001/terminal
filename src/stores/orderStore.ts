@@ -49,7 +49,7 @@ interface OrderState {
   setTradingLines: (lines: TradingLine[]) => void;
   clearTradingLines: () => void;
   addOrder: (data: OrderFormData, symbol: string) => Order;
-  placeOrder: (data: OrderFormData, symbol: string) => Promise<{ success: boolean; error?: string }>;
+  placeOrder: (data: OrderFormData, symbol: string) => Promise<{ success: boolean; error?: string; warnings?: string[] }>;
   updateOrderStatus: (id: string, status: OrderStatus, filledQuantity?: number) => void;
   cancelOrder: (id: string, symbol: string) => Promise<boolean>;
   cancelAllOrders: (symbol: string) => Promise<boolean>;
@@ -120,6 +120,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
           price: data.price,
           stopLoss: data.stopPrice,  // 止损价
           takeProfit: data.takeProfit,  // 止盈价
+          clientOrderIdPrefix: data.clientOrderIdPrefix,  // 订单 ID 前缀
         }),
       });
 
@@ -145,6 +146,12 @@ export const useOrderStore = create<OrderState>((set, get) => ({
           orders: [newOrder, ...state.orders],
           isPlacingOrder: false,
         }));
+
+        // 检查止盈止损警告
+        if (result.warnings?.length > 0) {
+          console.warn('下单警告:', result.warnings);
+          return { success: true, warnings: result.warnings };
+        }
 
         return { success: true };
       } else {

@@ -19,6 +19,7 @@ export function TowerOrderModal({ block, onClose }: TowerOrderModalProps) {
   const [marginAmount, setMarginAmount] = useState<string>("100");
   const [orderSuccess, setOrderSuccess] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [orderWarnings, setOrderWarnings] = useState<string[]>([]);
 
   // 获取当前杠杆
   useEffect(() => {
@@ -61,7 +62,7 @@ export function TowerOrderModal({ block, onClose }: TowerOrderModalProps) {
       return;
     }
 
-    // 下单
+    // 下单（使用 ict_tower 前缀标记）
     const result = await placeOrder(
       {
         type: "limit",
@@ -70,15 +71,20 @@ export function TowerOrderModal({ block, onClose }: TowerOrderModalProps) {
         stopPrice: block.stopLoss,
         takeProfit: block.takeProfit,
         quantity: quantity,
+        clientOrderIdPrefix: "ict_tower",
       },
       symbol
     );
 
     if (result.success) {
       setOrderSuccess(true);
+      // 保存警告信息（止盈止损失败等）
+      if (result.warnings?.length) {
+        setOrderWarnings(result.warnings);
+      }
       setTimeout(() => {
         onClose();
-      }, 1500);
+      }, 2000);
     } else {
       setLocalError(result.error || "下单失败");
     }
@@ -222,6 +228,13 @@ export function TowerOrderModal({ block, onClose }: TowerOrderModalProps) {
           {orderSuccess && (
             <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
               <p className="text-sm text-green-400">下单成功！</p>
+              {orderWarnings.length > 0 && (
+                <div className="mt-2 text-xs text-yellow-400">
+                  {orderWarnings.map((w, i) => (
+                    <p key={i}>⚠️ {w}</p>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
