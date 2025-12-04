@@ -523,136 +523,105 @@ export default function TowerPage() {
 
           {/* Tower Settings */}
           <div className="mb-4 p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
-            <div className="flex items-center justify-between gap-4 flex-wrap">
-              {/* 基础数量设置 */}
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-[var(--text-tertiary)]">
-                  基础:
-                </label>
+            {/* 第一行：保证金设置 */}
+            <div className="flex items-center gap-3 mb-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-[var(--text-tertiary)] w-8">基础</span>
                 <input
                   type="number"
                   value={baseMargin}
                   onChange={(e) => handleMarginChange(Number(e.target.value))}
-                  className="w-16 px-2 py-1 text-sm bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                  className="w-14 px-1.5 py-0.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
                   min={10}
                   max={10000}
                   step={10}
                 />
               </div>
-
-              {/* 递增设置 */}
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-[var(--text-tertiary)]">
-                  递增:
-                </label>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-[var(--text-tertiary)]">+</span>
                 <input
                   type="number"
                   value={marginIncrement}
                   onChange={(e) => handleIncrementChange(Number(e.target.value))}
-                  className="w-16 px-2 py-1 text-sm bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                  className="w-12 px-1.5 py-0.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
                   min={0}
                   max={1000}
                   step={5}
                 />
-                <span className="text-xs text-[var(--text-tertiary)]">USDT</span>
+                <span className="text-xs text-[var(--text-tertiary)]">U</span>
               </div>
-
-              {/* 守塔层数设置 */}
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-[var(--text-tertiary)]">
-                  层数:
-                </label>
+              <div className="h-4 w-px bg-[var(--border)]" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-[var(--text-tertiary)]">层</span>
                 <select
                   value={towerLayers}
                   onChange={(e) => handleLayersChange(Number(e.target.value))}
-                  className="px-2 py-1 text-sm bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                  className="w-10 px-1 py-0.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
                 >
                   {[1, 2, 3, 4, 5].map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
+                    <option key={n} value={n}>{n}</option>
                   ))}
                 </select>
               </div>
-
-              {/* 多塔起始层 */}
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-[var(--text-tertiary)]">
-                  多起:
-                </label>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-green-500">多</span>
                 <select
                   value={bullishStartLayer}
                   onChange={(e) => handleBullishStartChange(Number(e.target.value))}
-                  className="px-2 py-1 text-sm bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                  className="w-10 px-1 py-0.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
                 >
                   {[1, 2, 3, 4, 5].map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
+                    <option key={n} value={n}>{n}</option>
                   ))}
                 </select>
               </div>
-
-              {/* 空塔起始层 */}
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-[var(--text-tertiary)]">
-                  空起:
-                </label>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-red-500">空</span>
                 <select
                   value={bearishStartLayer}
                   onChange={(e) => handleBearishStartChange(Number(e.target.value))}
-                  className="px-2 py-1 text-sm bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                  className="w-10 px-1 py-0.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
                 >
                   {[1, 2, 3, 4, 5].map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
+                    <option key={n} value={n}>{n}</option>
                   ))}
                 </select>
               </div>
-
-              {/* 最小间距 */}
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-[var(--text-tertiary)]">
-                  间距:
-                </label>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-[var(--text-tertiary)]">距</span>
                 <select
                   value={minSpacingRatio}
                   onChange={(e) => handleSpacingChange(Number(e.target.value))}
-                  className="px-2 py-1 text-sm bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                  className="w-12 px-1 py-0.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
                 >
                   {[0, 3, 5, 8, 10, 15, 20].map((n) => (
-                    <option key={n} value={n}>
-                      {n}‱
-                    </option>
+                    <option key={n} value={n}>{n}‱</option>
                   ))}
                 </select>
               </div>
-
-              {/* 一键守塔按钮 */}
-              <button
-                onClick={handleAutoTower}
-                disabled={isAutoOrdering || !data?.blocks?.length}
-                className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white text-sm font-medium rounded transition-colors flex items-center gap-1"
-              >
-                <span>🏯</span>
-                {isAutoOrdering ? "..." : "守塔"}
-              </button>
-
-              {/* 更新守塔按钮 */}
-              <button
-                onClick={handleRefreshTower}
-                disabled={isAutoOrdering || !data?.blocks?.length}
-                className="px-2 py-1.5 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white text-sm font-medium rounded transition-colors"
-                title="取消所有订单并重新下单"
-              >
-                🔄
-              </button>
+              <div className="flex-1" />
+              {/* 按钮组 */}
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleAutoTower}
+                  disabled={isAutoOrdering || !data?.blocks?.length}
+                  className="px-2.5 py-1 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white text-xs font-medium rounded transition-colors"
+                >
+                  {isAutoOrdering ? "..." : "🏯 守塔"}
+                </button>
+                <button
+                  onClick={handleRefreshTower}
+                  disabled={isAutoOrdering || !data?.blocks?.length}
+                  className="p-1 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white text-xs rounded transition-colors"
+                  title="取消所有订单并重新下单"
+                >
+                  🔄
+                </button>
+              </div>
             </div>
-
             {/* 下单进度 */}
             {orderProgress && (
-              <div className="mt-3">
+              <div>
                 <div className="flex items-center justify-between text-xs text-[var(--text-tertiary)] mb-1">
                   <span>
                     下单进度: {orderProgress.current}/{orderProgress.total}
