@@ -35,6 +35,16 @@ const AUTO_INTERVALS = [
 // 数据新鲜度阈值（毫秒）- 5分钟
 const DATA_FRESHNESS_THRESHOLD = 5 * 60 * 1000;
 
+// 守塔战绩记录
+interface TowerRecord {
+  time: Date;
+  bullishCount: number;
+  bearishCount: number;
+  totalMargin: number;
+  success: boolean;
+  errors: string[];
+}
+
 export default function TowerPage() {
   const { symbol } = useChartStore();
   const { placeOrder, cancelAllOrders } = useOrderStore();
@@ -57,6 +67,10 @@ export default function TowerPage() {
     total: number;
     errors: string[];
   } | null>(null);
+
+  // 守塔战绩状态
+  const [towerRecords, setTowerRecords] = useState<TowerRecord[]>([]);
+  const [towerStats, setTowerStats] = useState({ success: 0, failed: 0 });
 
   // 从 localStorage 加载设置
   useEffect(() => {
@@ -415,6 +429,21 @@ export default function TowerPage() {
     }
 
     setIsAutoOrdering(false);
+
+    // 记录战绩
+    const record: TowerRecord = {
+      time: new Date(),
+      bullishCount: bullishBlocks.length,
+      bearishCount: bearishBlocks.length,
+      totalMargin,
+      success: errors.length === 0,
+      errors,
+    };
+    setTowerRecords(prev => [record, ...prev].slice(0, 20)); // 最多保留20条记录
+    setTowerStats(prev => ({
+      success: prev.success + (errors.length === 0 ? 1 : 0),
+      failed: prev.failed + (errors.length > 0 ? 1 : 0),
+    }));
 
     // 非静默模式下显示结果
     if (!silent) {
@@ -832,6 +861,76 @@ export default function TowerPage() {
               </div>
             )}
           </div>
+
+          {/* 守塔战绩面板 - 托管时显示 */}
+          {isAutoManaged && (
+            <div className="mb-4 p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-medium text-[var(--text-primary)]">
+                  🏯 守塔战绩
+                </h3>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs">
+                    <span className="text-green-400">{towerStats.success}</span>
+                    <span className="text-[var(--text-tertiary)]"> 成功</span>
+                  </span>
+                  <span className="text-xs">
+                    <span className="text-red-400">{towerStats.failed}</span>
+                    <span className="text-[var(--text-tertiary)]"> 失败</span>
+                  </span>
+                  {towerStats.success + towerStats.failed > 0 && (
+                    <span className="text-xs text-[var(--text-tertiary)]">
+                      ({Math.round((towerStats.success / (towerStats.success + towerStats.failed)) * 100)}%)
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* 记录列表 */}
+              {towerRecords.length === 0 ? (
+                <div className="text-xs text-[var(--text-tertiary)] text-center py-4">
+                  托管已启动，等待首次执行...
+                </div>
+              ) : (
+                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                  {towerRecords.map((record, index) => (
+                    <div
+                      key={index}
+                      className={`flex items-center justify-between px-2 py-1.5 rounded text-xs ${
+                        record.success
+                          ? "bg-green-500/10 border border-green-500/20"
+                          : "bg-red-500/10 border border-red-500/20"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={record.success ? "text-green-400" : "text-red-400"}>
+                          {record.success ? "✓" : "✗"}
+                        </span>
+                        <span className="text-[var(--text-tertiary)]">
+                          {record.time.toLocaleTimeString("zh-CN")}
+                        </span>
+                        <span className="text-[var(--text-secondary)]">
+                          <span className="text-green-400">{record.bullishCount}多</span>
+                          {" / "}
+                          <span className="text-red-400">{record.bearishCount}空</span>
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[var(--text-tertiary)]">
+                          {record.totalMargin}U
+                        </span>
+                        {record.errors.length > 0 && (
+                          <span className="text-red-400" title={record.errors.join("\n")}>
+                            {record.errors.length}错误
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Rules Summary */}
           <details className="mb-4 group">
