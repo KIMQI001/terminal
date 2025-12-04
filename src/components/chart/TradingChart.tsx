@@ -106,8 +106,8 @@ export function TradingChart() {
     clearMeasurement,
   } = useMeasurementStore();
 
-  const { tradingLines, realOrders } = useOrderStore();
-  const { positions } = usePositionStore();
+  const { tradingLines, realOrders, fetchOpenOrders } = useOrderStore();
+  const { positions, fetchPositions } = usePositionStore();
 
   // 监听 Shift 键
   useEffect(() => {
@@ -124,6 +124,19 @@ export function TradingChart() {
       window.removeEventListener("keyup", handleKeyUp);
     };
   }, []);
+
+  // 图表加载时自动获取订单和持仓，并定时刷新
+  useEffect(() => {
+    fetchOpenOrders(symbol);
+    fetchPositions();
+
+    const interval = setInterval(() => {
+      fetchOpenOrders(symbol);
+      fetchPositions();
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [symbol, fetchOpenOrders, fetchPositions]);
 
   // 可以开始测量的条件：Shift 按下 或 工具栏激活
   const canStartMeasure = isShiftPressed || isToolActive;
