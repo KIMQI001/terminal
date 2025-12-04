@@ -16,8 +16,9 @@ import {
   PendingEntryOrder,
 } from './pendingOrderStore';
 import {
-  placeTakeProfitOrder,
   placeStopLossOrder,
+  placeTakeProfitOrder,
+  placeTrailingStopOrder,
   BinanceApiConfig,
 } from './binanceOrderApi';
 import { sendDingtalkMarkdown } from '../notification/dingtalk';
@@ -131,9 +132,9 @@ async function handleEntryFilled(
       console.error(`[OrderMonitor] 止损单失败: ${slResult.error}`);
     }
 
-    // 下止盈平仓限价单
-    console.log(`[OrderMonitor] 下止盈单: ${pendingOrder.takeProfit}`);
-    const tpResult = await placeTakeProfitOrder(apiConfig, {
+    // 1. 下固定止盈限价单（保底）
+    console.log(`[OrderMonitor] 下固定止盈单: ${pendingOrder.takeProfit}`);
+    const fixedTpResult = await placeTakeProfitOrder(apiConfig, {
       symbol: pendingOrder.symbol,
       side: closeSide,
       positionSide: pendingOrder.positionSide,
@@ -142,12 +143,38 @@ async function handleEntryFilled(
       clientOrderId: `${clientOrderId}_tp`,
     });
 
-    if (tpResult.success) {
-      tpOrderId = tpResult.orderId?.toString() || null;
-      console.log(`[OrderMonitor] 止盈单下单成功: ${tpOrderId}`);
+    if (fixedTpResult.success) {
+      tpOrderId = fixedTpResult.orderId?.toString() || null;
+      console.log(`[OrderMonitor] 固定止盈单下单成功: ${tpOrderId}`);
     } else {
-      errors.push(`止盈单失败: ${tpResult.error}`);
-      console.error(`[OrderMonitor] 止盈单失败: ${tpResult.error}`);
+      errors.push(`固定止盈单失败: ${fixedTpResult.error}`);
+      console.error(`[OrderMonitor] 固定止盈单失败: ${fixedTpResult.error}`);
+    }
+
+    // 2. 下追踪止盈单 (TRAILING_STOP_MARKET)
+    // activationPrice: 盈利1.5%后激活追踪
+    // callbackRate: 从最高价回撤0.3%后触发止盈
+    // 两个止盈单互为保底，哪个先触发就平仓，另一个因 reduceOnly 自动失效
+    const trailingActivationPrice = pendingOrder.positionSide === 'LONG'
+      ? filledPrice * 1.015   // 多单：价格上涨1.5%后激活
+      : filledPrice * 0.985;  // 空单：价格下跌1.5%后激活
+
+    console.log(`[OrderMonitor] 下追踪止盈单: 激活价=${trailingActivationPrice.toFixed(2)}, 回撤=0.3%`);
+    const trailingTpResult = await placeTrailingStopOrder(apiConfig, {
+      symbol: pendingOrder.symbol,
+      side: closeSide,
+      positionSide: pendingOrder.positionSide,
+      quantity: pendingOrder.quantity,
+      callbackRate: 0.3,              // 0.3% 回撤触发
+      activationPrice: trailingActivationPrice,  // 盈利1.5%后激活
+      clientOrderId: `${clientOrderId}_trail`,
+    });
+
+    if (trailingTpResult.success) {
+      console.log(`[OrderMonitor] 追踪止盈单下单成功: ${trailingTpResult.orderId}`);
+    } else {
+      errors.push(`追踪止盈单失败: ${trailingTpResult.error}`);
+      console.error(`[OrderMonitor] 追踪止盈单失败: ${trailingTpResult.error}`);
     }
 
     // 更新数据库状态
@@ -206,8 +233,13 @@ async function sendEntryFilledNotification(
   const rewardDistance = Math.abs(order.takeProfit - filledPrice);
   const riskReward = riskDistance > 0 ? (rewardDistance / riskDistance).toFixed(1) : 'N/A';
 
+  // 追踪止盈激活价
+  const trailingActivationPrice = order.positionSide === 'LONG'
+    ? filledPrice * 1.015
+    : filledPrice * 0.985;
+
   let statusIcon = '✅';
-  let statusText = '止盈止损已挂单';
+  let statusText = '止损+双止盈已挂单';
 
   if (errors.length > 0) {
     statusIcon = '⚠️';
@@ -227,7 +259,8 @@ async function sendEntryFilledNotification(
     `- **成交价**: $${filledPrice.toFixed(2)}`,
     `- **数量**: ${order.quantity}`,
     `- **止损**: $${order.stopLoss.toFixed(2)}`,
-    `- **止盈**: $${order.takeProfit.toFixed(2)}`,
+    `- **固定止盈**: $${order.takeProfit.toFixed(2)} (保底)`,
+    `- **追踪止盈**: 激活价 $${trailingActivationPrice.toFixed(2)} (盈利1.5%), 回撤0.3%触发`,
     `- **盈亏比**: 1:${riskReward}`,
     '',
     `**状态**: ${statusText}`,

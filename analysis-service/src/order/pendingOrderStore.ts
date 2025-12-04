@@ -16,13 +16,17 @@ export interface PendingEntryOrder {
   entryPrice: number;
   stopLoss: number;
   takeProfit: number;
-  status: 'pending' | 'filled' | 'sl_tp_placed' | 'canceled' | 'error';
+  status: 'pending' | 'filled' | 'sl_tp_placed' | 'trailing' | 'closed' | 'canceled' | 'error';
   createdAt: string;
   filledAt: string | null;
   filledPrice: number | null;
   slOrderId: string | null;
   tpOrderId: string | null;
   errorMessage: string | null;
+  // 追踪止盈字段
+  trailingActive: boolean;
+  trailingHighPrice: number | null;  // 多单最高价 / 空单最低价
+  trailingActivatedAt: string | null;
 }
 
 // 数据库行格式
@@ -43,6 +47,10 @@ interface PendingOrderRow {
   sl_order_id: string | null;
   tp_order_id: string | null;
   error_message: string | null;
+  // 追踪止盈字段
+  trailing_active: number;
+  trailing_high_price: number | null;
+  trailing_activated_at: string | null;
 }
 
 /**
@@ -62,19 +70,33 @@ export function initPendingOrdersTable(): void {
       entry_price REAL NOT NULL,
       stop_loss REAL NOT NULL,
       take_profit REAL NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'filled', 'sl_tp_placed', 'canceled', 'error')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'filled', 'sl_tp_placed', 'trailing', 'closed', 'canceled', 'error')),
       created_at TEXT NOT NULL,
       filled_at TEXT,
       filled_price REAL,
       sl_order_id TEXT,
       tp_order_id TEXT,
-      error_message TEXT
+      error_message TEXT,
+      trailing_active INTEGER NOT NULL DEFAULT 0,
+      trailing_high_price REAL,
+      trailing_activated_at TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_pending_orders_status ON pending_entry_orders(status);
     CREATE INDEX IF NOT EXISTS idx_pending_orders_client_id ON pending_entry_orders(client_order_id);
     CREATE INDEX IF NOT EXISTS idx_pending_orders_symbol ON pending_entry_orders(symbol);
   `);
+
+  // 迁移：为旧表添加追踪止盈字段
+  try {
+    db.exec(`ALTER TABLE pending_entry_orders ADD COLUMN trailing_active INTEGER NOT NULL DEFAULT 0`);
+  } catch { /* 列已存在 */ }
+  try {
+    db.exec(`ALTER TABLE pending_entry_orders ADD COLUMN trailing_high_price REAL`);
+  } catch { /* 列已存在 */ }
+  try {
+    db.exec(`ALTER TABLE pending_entry_orders ADD COLUMN trailing_activated_at TEXT`);
+  } catch { /* 列已存在 */ }
 
   console.log('[PendingOrderStore] 表初始化完成');
 }
@@ -321,5 +343,67 @@ function rowToOrder(row: PendingOrderRow): PendingEntryOrder {
     slOrderId: row.sl_order_id,
     tpOrderId: row.tp_order_id,
     errorMessage: row.error_message,
+    trailingActive: row.trailing_active === 1,
+    trailingHighPrice: row.trailing_high_price,
+    trailingActivatedAt: row.trailing_activated_at,
   };
+}
+
+/**
+ * 获取需要追踪止盈的订单（已成交且止盈止损已下单）
+ */
+export function getOrdersForTrailing(): PendingEntryOrder[] {
+  const db = getDatabase();
+
+  const rows = db.prepare(`
+    SELECT * FROM pending_entry_orders
+    WHERE status IN ('sl_tp_placed', 'trailing')
+    ORDER BY created_at DESC
+  `).all() as PendingOrderRow[];
+
+  return rows.map(rowToOrder);
+}
+
+/**
+ * 激活追踪止盈
+ */
+export function activateTrailing(clientOrderId: string, highPrice: number): void {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    UPDATE pending_entry_orders
+    SET status = 'trailing', trailing_active = 1, trailing_high_price = ?, trailing_activated_at = ?
+    WHERE client_order_id = ?
+  `).run(highPrice, now, clientOrderId);
+
+  console.log(`[PendingOrderStore] 追踪止盈已激活: ${clientOrderId}, 最高价=${highPrice}`);
+}
+
+/**
+ * 更新追踪最高价/最低价
+ */
+export function updateTrailingHighPrice(clientOrderId: string, highPrice: number): void {
+  const db = getDatabase();
+
+  db.prepare(`
+    UPDATE pending_entry_orders
+    SET trailing_high_price = ?
+    WHERE client_order_id = ?
+  `).run(highPrice, clientOrderId);
+}
+
+/**
+ * 标记订单已平仓
+ */
+export function markOrderClosed(clientOrderId: string): void {
+  const db = getDatabase();
+
+  db.prepare(`
+    UPDATE pending_entry_orders
+    SET status = 'closed'
+    WHERE client_order_id = ?
+  `).run(clientOrderId);
+
+  console.log(`[PendingOrderStore] 订单已平仓: ${clientOrderId}`);
 }

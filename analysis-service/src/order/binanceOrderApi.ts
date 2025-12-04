@@ -45,12 +45,14 @@ export interface PlaceOrderParams {
   symbol: string;
   side: 'BUY' | 'SELL';
   positionSide: 'LONG' | 'SHORT';
-  type: 'LIMIT' | 'MARKET' | 'STOP_MARKET' | 'TAKE_PROFIT_MARKET';
+  type: 'LIMIT' | 'MARKET' | 'STOP_MARKET' | 'TAKE_PROFIT_MARKET' | 'TRAILING_STOP_MARKET';
   quantity: number;
-  price?: number;       // 限价单价格
-  stopPrice?: number;   // 触发价格 (仅 STOP/TAKE_PROFIT)
+  price?: number;           // 限价单价格
+  stopPrice?: number;       // 触发价格 (仅 STOP/TAKE_PROFIT)
+  callbackRate?: number;    // 追踪止盈回调比例 (0.1-10, 代表 0.1%-10%)
+  activationPrice?: number; // 追踪止盈激活价格
   clientOrderId?: string;
-  reduceOnly?: boolean; // 是否只减仓
+  reduceOnly?: boolean;     // 是否只减仓
 }
 
 export interface OrderResult {
@@ -94,6 +96,16 @@ export async function placeOrder(
   // 止盈止损单需要触发价格
   if ((params.type === 'STOP_MARKET' || params.type === 'TAKE_PROFIT_MARKET') && params.stopPrice) {
     queryParams.stopPrice = formatPrice(params.stopPrice, precision.price);
+  }
+
+  // 追踪止盈单参数
+  if (params.type === 'TRAILING_STOP_MARKET') {
+    if (params.callbackRate) {
+      queryParams.callbackRate = params.callbackRate;
+    }
+    if (params.activationPrice) {
+      queryParams.activationPrice = formatPrice(params.activationPrice, precision.price);
+    }
   }
 
   // 自定义订单 ID
@@ -272,4 +284,107 @@ export async function getCurrentPrice(
   } catch {
     return null;
   }
+}
+
+/**
+ * 市价平仓
+ * 用于追踪止盈触发时快速平仓
+ */
+export async function closePositionMarket(
+  config: BinanceApiConfig,
+  params: {
+    symbol: string;
+    side: 'BUY' | 'SELL';       // 平仓方向 (多单平仓用SELL，空单平仓用BUY)
+    positionSide: 'LONG' | 'SHORT';
+    quantity: number;
+    clientOrderId?: string;
+  }
+): Promise<OrderResult> {
+  return placeOrder(config, {
+    symbol: params.symbol,
+    side: params.side,
+    positionSide: params.positionSide,
+    type: 'MARKET',
+    quantity: params.quantity,
+    clientOrderId: params.clientOrderId,
+    reduceOnly: true,
+  });
+}
+
+/**
+ * 根据 clientOrderId 取消订单
+ */
+export async function cancelOrderByClientId(
+  config: BinanceApiConfig,
+  symbol: string,
+  clientOrderId: string
+): Promise<{ success: boolean; error?: string }> {
+  const baseUrl = config.isTestnet
+    ? 'https://testnet.binancefuture.com'
+    : 'https://fapi.binance.com';
+
+  const timestamp = Date.now();
+  const queryString = `symbol=${symbol}&origClientOrderId=${clientOrderId}&timestamp=${timestamp}`;
+  const signature = generateSignature(queryString, config.apiSecret);
+
+  try {
+    const response = await fetch(`${baseUrl}/fapi/v1/order?${queryString}&signature=${signature}`, {
+      method: 'DELETE',
+      headers: {
+        'X-MBX-APIKEY': config.apiKey,
+      },
+    });
+
+    const data = await response.json() as { msg?: string };
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: data.msg || `HTTP ${response.status}`,
+      };
+    }
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '网络请求失败',
+    };
+  }
+}
+
+/**
+ * 下追踪止盈单 (TRAILING_STOP_MARKET)
+ *
+ * 原理：
+ * - 设置 activationPrice 作为激活价格（达到此价后开始追踪）
+ * - 设置 callbackRate 作为回撤比例（从最高/低价回撤此比例后触发）
+ *
+ * 例如做多：
+ * - activationPrice = 入场价 * 1.015 (盈利1.5%后激活)
+ * - callbackRate = 0.3 (从最高价回撤0.3%后触发卖出)
+ */
+export async function placeTrailingStopOrder(
+  config: BinanceApiConfig,
+  params: {
+    symbol: string;
+    side: 'BUY' | 'SELL';         // 平仓方向 (多单平仓用SELL，空单平仓用BUY)
+    positionSide: 'LONG' | 'SHORT';
+    quantity: number;
+    callbackRate: number;          // 回撤比例 0.1-10 (代表 0.1%-10%)
+    activationPrice?: number;      // 激活价格（可选，不设则立即激活）
+    clientOrderId?: string;
+  }
+): Promise<OrderResult> {
+  return placeOrder(config, {
+    symbol: params.symbol,
+    side: params.side,
+    positionSide: params.positionSide,
+    type: 'TRAILING_STOP_MARKET',
+    quantity: params.quantity,
+    callbackRate: params.callbackRate,
+    activationPrice: params.activationPrice,
+    clientOrderId: params.clientOrderId,
+    reduceOnly: true,
+  });
 }
