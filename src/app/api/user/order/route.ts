@@ -357,13 +357,13 @@ async function placeBinanceOrder(
     pendingOrder: false, // 是否为待处理订单（成交后再下止盈止损）
   };
 
-  // 守塔订单特殊处理：只下入场单，止盈止损成交后再下
-  // 这样可以避免 "Order would immediately trigger" 错误
+  // 守塔订单也立即下止盈止损单（STOP_MARKET / TAKE_PROFIT_MARKET）
+  // 同时保存到待处理队列，成交后再下追踪止盈单
   const isTowerOrder = params.clientOrderIdPrefix?.startsWith('ict_tower');
 
   if (isTowerOrder && params.stopLoss && params.takeProfit && clientOrderId) {
-    // 保存待处理订单到 analysis-service
-    const saved = await savePendingOrder({
+    // 保存待处理订单到 analysis-service（成交后下追踪止盈）
+    await savePendingOrder({
       clientOrderId,
       symbol: params.symbol,
       side: params.side,
@@ -373,20 +373,11 @@ async function placeBinanceOrder(
       stopLoss: params.stopLoss,
       takeProfit: params.takeProfit,
     });
-
-    if (saved) {
-      result.pendingOrder = true;
-      result.warnings.push('守塔订单: 止盈止损将在成交后自动下单');
-      console.log(`[Tower] 守塔订单已下入场单，止盈止损待成交后处理: ${clientOrderId}`);
-    } else {
-      result.warnings.push('守塔订单: 待处理订单保存失败，请手动设置止盈止损');
-    }
-
-    // 守塔订单不在这里下止盈止损，直接返回
-    return result;
+    result.pendingOrder = true;
+    console.log(`[Tower] 守塔订单已保存待处理: ${clientOrderId}`);
   }
 
-  // 非守塔订单：正常下止盈止损单
+  // 所有订单都下止盈止损单
 
   // 获取当前价格用于验证止盈止损
   const currentPrice = await getCurrentPrice(params.symbol, isTestnet);
