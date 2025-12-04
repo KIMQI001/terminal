@@ -65,8 +65,13 @@ export function TowerCard({ block, onOrder }: TowerCardProps) {
         </span>
       </div>
 
+      {/* Fill Percent */}
+      <div className="text-xs text-[var(--text-tertiary)] min-w-[35px] text-right">
+        F:{block.fillPercent.toFixed(0)}
+      </div>
+
       {/* RR */}
-      <div className={`text-xs font-bold ${riskRewardColor} min-w-[40px] text-right`}>
+      <div className={`text-xs font-bold ${riskRewardColor} min-w-[30px] text-right`}>
         {block.riskReward.toFixed(1)}
       </div>
 
