@@ -18,6 +18,7 @@ const STORAGE_KEYS = {
   MARGIN_INCREMENT: "tower_margin_increment",
   BULLISH_START_LAYER: "tower_bullish_start",
   BEARISH_START_LAYER: "tower_bearish_start",
+  MIN_SPACING_RATIO: "tower_min_spacing",
 };
 
 export default function TowerPage() {
@@ -33,6 +34,7 @@ export default function TowerPage() {
   const [towerLayers, setTowerLayers] = useState(3);
   const [bullishStartLayer, setBullishStartLayer] = useState(1);
   const [bearishStartLayer, setBearishStartLayer] = useState(1);
+  const [minSpacingRatio, setMinSpacingRatio] = useState(5); // 万分之几，默认5（万分之五）
   const [isAutoOrdering, setIsAutoOrdering] = useState(false);
   const [orderProgress, setOrderProgress] = useState<{
     current: number;
@@ -53,6 +55,8 @@ export default function TowerPage() {
     if (savedLayers) setTowerLayers(Number(savedLayers));
     if (savedBullishStart) setBullishStartLayer(Number(savedBullishStart));
     if (savedBearishStart) setBearishStartLayer(Number(savedBearishStart));
+    const savedSpacing = localStorage.getItem(STORAGE_KEYS.MIN_SPACING_RATIO);
+    if (savedSpacing) setMinSpacingRatio(Number(savedSpacing));
   }, []);
 
   // 保存设置到 localStorage
@@ -79,6 +83,11 @@ export default function TowerPage() {
   const handleBearishStartChange = (value: number) => {
     setBearishStartLayer(value);
     localStorage.setItem(STORAGE_KEYS.BEARISH_START_LAYER, String(value));
+  };
+
+  const handleSpacingChange = (value: number) => {
+    setMinSpacingRatio(value);
+    localStorage.setItem(STORAGE_KEYS.MIN_SPACING_RATIO, String(value));
   };
 
   // Fetch tower blocks from backend
@@ -196,18 +205,56 @@ export default function TowerPage() {
 
     // 最小距离（千分之三）
     const minDistance = currentPrice * MIN_DISTANCE_RATIO;
+    // 最小间距（万分之 N）
+    const minSpacing = currentPrice * (minSpacingRatio / 10000);
+
+    // 筛选函数：保证相邻塔块间距 >= minSpacing
+    const filterWithSpacing = (
+      blocks: typeof allBullish,
+      startLayer: number,
+      count: number
+    ) => {
+      const result: typeof blocks = [];
+      let skipped = 0;
+      let lastEntry: number | null = null;
+
+      for (const block of blocks) {
+        // 检查与上一个选中塔块的间距
+        if (lastEntry !== null) {
+          const spacing = Math.abs(block.entry - lastEntry);
+          if (spacing < minSpacing) {
+            continue; // 间距不足，跳过
+          }
+        }
+
+        // 处理起始层跳过
+        if (skipped < startLayer - 1) {
+          skipped++;
+          continue;
+        }
+
+        result.push(block);
+        lastEntry = block.entry;
+
+        if (result.length >= count) break;
+      }
+
+      return result;
+    };
 
     // 筛选当前价格上下各 N 层的塔块（至少距离当前价格千分之三）
     // 起始层：跳过前 N-1 层，从第 N 层开始
-    const bullishBlocks = allBullish
+    // 间距过滤：相邻塔块间距 >= minSpacing
+    const bullishCandidates = allBullish
       .filter((b) => b.entry < currentPrice && currentPrice - b.entry >= minDistance)
-      .sort((a, b) => b.entry - a.entry)
-      .slice(bullishStartLayer - 1, bullishStartLayer - 1 + towerLayers);
+      .sort((a, b) => b.entry - a.entry); // 从高到低（离当前价格近的在前）
 
-    const bearishBlocks = allBearish
+    const bearishCandidates = allBearish
       .filter((b) => b.entry > currentPrice && b.entry - currentPrice >= minDistance)
-      .sort((a, b) => a.entry - b.entry)
-      .slice(bearishStartLayer - 1, bearishStartLayer - 1 + towerLayers);
+      .sort((a, b) => a.entry - b.entry); // 从低到高（离当前价格近的在前）
+
+    const bullishBlocks = filterWithSpacing(bullishCandidates, bullishStartLayer, towerLayers);
+    const bearishBlocks = filterWithSpacing(bearishCandidates, bearishStartLayer, towerLayers);
 
     const selectedBlocks = [...bullishBlocks, ...bearishBlocks];
 
@@ -305,7 +352,7 @@ export default function TowerPage() {
     }
 
     setOrderProgress(null);
-  }, [data, towerLayers, bullishStartLayer, bearishStartLayer, baseMargin, marginIncrement, calculateQuantity, placeOrder, symbol]);
+  }, [data, towerLayers, bullishStartLayer, bearishStartLayer, minSpacingRatio, baseMargin, marginIncrement, calculateQuantity, placeOrder, symbol]);
 
   // 统计塔块数量和多空比例
   const stats = useMemo(() => {
@@ -530,6 +577,24 @@ export default function TowerPage() {
                   {[1, 2, 3, 4, 5].map((n) => (
                     <option key={n} value={n}>
                       {n}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 最小间距 */}
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-[var(--text-tertiary)]">
+                  间距:
+                </label>
+                <select
+                  value={minSpacingRatio}
+                  onChange={(e) => handleSpacingChange(Number(e.target.value))}
+                  className="px-2 py-1 text-sm bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                >
+                  {[0, 3, 5, 8, 10, 15, 20].map((n) => (
+                    <option key={n} value={n}>
+                      {n}‱
                     </option>
                   ))}
                 </select>
