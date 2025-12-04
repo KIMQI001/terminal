@@ -183,24 +183,46 @@ export default function TowerPage() {
     },
   });
 
-  // 从 localStorage 加载设置
+  // 从后端加载托管配置（优先），如果没有则用 localStorage
   useEffect(() => {
-    const savedMargin = localStorage.getItem(STORAGE_KEYS.BASE_MARGIN);
-    const savedIncrement = localStorage.getItem(STORAGE_KEYS.MARGIN_INCREMENT);
-    const savedLayers = localStorage.getItem(STORAGE_KEYS.TOWER_LAYERS);
-    const savedBullishStart = localStorage.getItem(STORAGE_KEYS.BULLISH_START_LAYER);
-    const savedBearishStart = localStorage.getItem(STORAGE_KEYS.BEARISH_START_LAYER);
+    if (managementData?.management) {
+      // 后端有配置，使用后端的参数
+      const config = managementData.management;
+      setBaseMargin(config.baseMargin);
+      setMarginIncrement(config.marginIncrement);
+      setTowerLayers(config.towerLayers);
+      setBullishStartLayer(config.bullishStartLayer);
+      setBearishStartLayer(config.bearishStartLayer);
+      setMinSpacingRatio(config.minSpacingRatio);
+      setAutoInterval(config.intervalMinutes);
+      // 同步到 localStorage
+      localStorage.setItem(STORAGE_KEYS.BASE_MARGIN, String(config.baseMargin));
+      localStorage.setItem(STORAGE_KEYS.MARGIN_INCREMENT, String(config.marginIncrement));
+      localStorage.setItem(STORAGE_KEYS.TOWER_LAYERS, String(config.towerLayers));
+      localStorage.setItem(STORAGE_KEYS.BULLISH_START_LAYER, String(config.bullishStartLayer));
+      localStorage.setItem(STORAGE_KEYS.BEARISH_START_LAYER, String(config.bearishStartLayer));
+      localStorage.setItem(STORAGE_KEYS.MIN_SPACING_RATIO, String(config.minSpacingRatio));
+      localStorage.setItem(STORAGE_KEYS.AUTO_INTERVAL, String(config.intervalMinutes));
+    } else if (managementData === undefined) {
+      // 还在加载中，先从 localStorage 加载
+      const savedMargin = localStorage.getItem(STORAGE_KEYS.BASE_MARGIN);
+      const savedIncrement = localStorage.getItem(STORAGE_KEYS.MARGIN_INCREMENT);
+      const savedLayers = localStorage.getItem(STORAGE_KEYS.TOWER_LAYERS);
+      const savedBullishStart = localStorage.getItem(STORAGE_KEYS.BULLISH_START_LAYER);
+      const savedBearishStart = localStorage.getItem(STORAGE_KEYS.BEARISH_START_LAYER);
+      const savedSpacing = localStorage.getItem(STORAGE_KEYS.MIN_SPACING_RATIO);
+      const savedAutoInterval = localStorage.getItem(STORAGE_KEYS.AUTO_INTERVAL);
 
-    if (savedMargin) setBaseMargin(Number(savedMargin));
-    if (savedIncrement) setMarginIncrement(Number(savedIncrement));
-    if (savedLayers) setTowerLayers(Number(savedLayers));
-    if (savedBullishStart) setBullishStartLayer(Number(savedBullishStart));
-    if (savedBearishStart) setBearishStartLayer(Number(savedBearishStart));
-    const savedSpacing = localStorage.getItem(STORAGE_KEYS.MIN_SPACING_RATIO);
-    if (savedSpacing) setMinSpacingRatio(Number(savedSpacing));
-    const savedAutoInterval = localStorage.getItem(STORAGE_KEYS.AUTO_INTERVAL);
-    if (savedAutoInterval) setAutoInterval(Number(savedAutoInterval));
-  }, []);
+      if (savedMargin) setBaseMargin(Number(savedMargin));
+      if (savedIncrement) setMarginIncrement(Number(savedIncrement));
+      if (savedLayers) setTowerLayers(Number(savedLayers));
+      if (savedBullishStart) setBullishStartLayer(Number(savedBullishStart));
+      if (savedBearishStart) setBearishStartLayer(Number(savedBearishStart));
+      if (savedSpacing) setMinSpacingRatio(Number(savedSpacing));
+      if (savedAutoInterval) setAutoInterval(Number(savedAutoInterval));
+    }
+    // 如果 managementData.management === null，说明后端没有配置，保持默认值
+  }, [managementData]);
 
   // 保存设置到 localStorage
   const handleMarginChange = (value: number) => {
