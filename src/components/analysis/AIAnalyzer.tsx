@@ -236,7 +236,7 @@ export function AIAnalyzer() {
               <div className="p-3 bg-[var(--bg-tertiary)] rounded-lg">
                 <div className="text-xs text-[var(--text-tertiary)]">灵石价</div>
                 <div className="text-lg font-semibold text-[var(--text-primary)]">
-                  ${currentResult.currentPrice.toFixed(2)}
+                  ${(currentResult.currentPrice ?? 0).toFixed(2)}
                 </div>
               </div>
               <div className="p-3 bg-[var(--bg-tertiary)] rounded-lg">
@@ -265,30 +265,30 @@ export function AIAnalyzer() {
                   <div>
                     <span className="text-[var(--text-tertiary)]">入道: </span>
                     <span className="font-medium text-[var(--text-primary)]">
-                      ${currentResult.signal.entry.price.toFixed(2)}
+                      ${(currentResult.signal.entry?.price ?? 0).toFixed(2)}
                     </span>
                   </div>
                   <div>
                     <span className="text-[var(--text-tertiary)]">渡劫线: </span>
                     <span className="font-medium text-red-500">
-                      ${currentResult.signal.stopLoss.price.toFixed(2)}
+                      ${(currentResult.signal.stopLoss?.price ?? 0).toFixed(2)}
                     </span>
                   </div>
                   <div>
                     <span className="text-[var(--text-tertiary)]">因果比: </span>
                     <span className="font-medium text-[var(--text-primary)]">
-                      1:{currentResult.signal.riskReward.toFixed(1)}
+                      1:{(currentResult.signal.riskReward ?? 0).toFixed(1)}
                     </span>
                   </div>
                 </div>
-                {currentResult.signal.takeProfit.length > 0 && (
+                {currentResult.signal.takeProfit && currentResult.signal.takeProfit.length > 0 && (
                   <div>
                     <span className="text-[var(--text-tertiary)] text-sm">
                       飞升境界:{" "}
                     </span>
                     {currentResult.signal.takeProfit.map((tp, i) => (
                       <span key={i} className="text-sm text-green-500 mr-2">
-                        {i + 1}重天 ${tp.price.toFixed(2)}
+                        {i + 1}重天 ${(tp?.price ?? 0).toFixed(2)}
                       </span>
                     ))}
                   </div>
@@ -305,7 +305,7 @@ export function AIAnalyzer() {
             </div>
 
             {/* 风险警示 */}
-            {currentResult.signal.warnings.length > 0 && (
+            {currentResult.signal.warnings && currentResult.signal.warnings.length > 0 && (
               <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
                 <h4 className="font-semibold text-yellow-500 mb-2">劫难预警</h4>
                 <ul className="text-sm text-yellow-500 space-y-1">
@@ -337,7 +337,7 @@ export function AIAnalyzer() {
               <div className="p-3 bg-[var(--bg-tertiary)] rounded-lg">
                 <div className="text-xs text-[var(--text-tertiary)]">灵石价</div>
                 <div className="text-lg font-semibold text-[var(--text-primary)]">
-                  ${reversalResult.currentPrice.toFixed(2)}
+                  ${(reversalResult.currentPrice ?? 0).toFixed(2)}
                 </div>
               </div>
               <div className="p-3 bg-[var(--bg-tertiary)] rounded-lg">
@@ -346,8 +346,8 @@ export function AIAnalyzer() {
                 </div>
                 <div className={`text-lg font-semibold ${reversalResult.mode === 'top' ? 'text-red-400' : 'text-green-400'}`}>
                   ${reversalResult.mode === 'top'
-                    ? reversalResult.recentExtreme.high.toFixed(2)
-                    : reversalResult.recentExtreme.low.toFixed(2)}
+                    ? (reversalResult.recentExtreme?.high ?? 0).toFixed(2)
+                    : (reversalResult.recentExtreme?.low ?? 0).toFixed(2)}
                 </div>
               </div>
               <div className="p-3 bg-[var(--bg-tertiary)] rounded-lg">
@@ -374,28 +374,28 @@ export function AIAnalyzer() {
                   <div>
                     <span className="text-[var(--text-tertiary)]">入道: </span>
                     <span className="font-medium text-[var(--text-primary)]">
-                      ${reversalResult.signal.entry.price.toFixed(2)}
+                      ${(reversalResult.signal.entry?.price ?? 0).toFixed(2)}
                     </span>
                   </div>
                   <div>
                     <span className="text-[var(--text-tertiary)]">渡劫线: </span>
                     <span className="font-medium text-red-500">
-                      ${reversalResult.signal.stopLoss.price.toFixed(2)}
+                      ${(reversalResult.signal.stopLoss?.price ?? 0).toFixed(2)}
                     </span>
                   </div>
                   <div>
                     <span className="text-[var(--text-tertiary)]">因果比: </span>
                     <span className="font-medium text-[var(--text-primary)]">
-                      1:{reversalResult.signal.riskReward.toFixed(1)}
+                      1:{(reversalResult.signal.riskReward ?? 0).toFixed(1)}
                     </span>
                   </div>
                 </div>
-                {reversalResult.signal.takeProfit.length > 0 && (
+                {reversalResult.signal.takeProfit && reversalResult.signal.takeProfit.length > 0 && (
                   <div>
                     <span className="text-[var(--text-tertiary)] text-sm">飞升境界: </span>
                     {reversalResult.signal.takeProfit.map((tp, i) => (
                       <span key={i} className="text-sm text-green-500 mr-2">
-                        {i + 1}重天 ${tp.price.toFixed(2)}
+                        {i + 1}重天 ${(tp?.price ?? 0).toFixed(2)}
                       </span>
                     ))}
                   </div>
@@ -419,20 +419,20 @@ export function AIAnalyzer() {
                   <div>
                     <span className="text-[var(--text-tertiary)]">建议入场: </span>
                     <span className="font-medium text-[var(--text-primary)]">
-                      ${reversalResult.entry.suggestedEntry.toFixed(2)}
+                      ${(reversalResult.entry.suggestedEntry ?? 0).toFixed(2)}
                     </span>
                   </div>
                   <div>
                     <span className="text-[var(--text-tertiary)]">止损: </span>
                     <span className="font-medium text-red-500">
-                      ${reversalResult.entry.stopLoss.toFixed(2)}
+                      ${(reversalResult.entry.stopLoss ?? 0).toFixed(2)}
                     </span>
                   </div>
                 </div>
                 <div className="text-sm">
                   <span className="text-[var(--text-tertiary)]">入场区间: </span>
                   <span className="text-[var(--text-primary)]">
-                    ${reversalResult.entry.entryZone.low.toFixed(2)} - ${reversalResult.entry.entryZone.high.toFixed(2)}
+                    ${(reversalResult.entry.entryZone?.low ?? 0).toFixed(2)} - ${(reversalResult.entry.entryZone?.high ?? 0).toFixed(2)}
                   </span>
                 </div>
               </div>
@@ -444,8 +444,8 @@ export function AIAnalyzer() {
                 <p className="text-yellow-500 text-sm">
                   当前未发现符合条件的{reversalResult.mode === 'top' ? '做空' : '做多'}入场点。
                   {reversalResult.mode === 'top'
-                    ? `价格需回撤至高点 $${reversalResult.recentExtreme.high.toFixed(2)} 上方的 OB/FVG 区域。`
-                    : `价格需回撤至低点 $${reversalResult.recentExtreme.low.toFixed(2)} 下方的 OB/FVG 区域。`
+                    ? `价格需回撤至高点 $${(reversalResult.recentExtreme?.high ?? 0).toFixed(2)} 上方的 OB/FVG 区域。`
+                    : `价格需回撤至低点 $${(reversalResult.recentExtreme?.low ?? 0).toFixed(2)} 下方的 OB/FVG 区域。`
                   }
                 </p>
               </div>
@@ -462,7 +462,7 @@ export function AIAnalyzer() {
             )}
 
             {/* 风险警示 */}
-            {reversalResult.signal && reversalResult.signal.warnings.length > 0 && (
+            {reversalResult.signal && reversalResult.signal.warnings && reversalResult.signal.warnings.length > 0 && (
               <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
                 <h4 className="font-semibold text-yellow-500 mb-2">劫难预警</h4>
                 <ul className="text-sm text-yellow-500 space-y-1">
