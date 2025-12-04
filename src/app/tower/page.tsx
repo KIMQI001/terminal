@@ -23,7 +23,7 @@ const STORAGE_KEYS = {
 
 export default function TowerPage() {
   const { symbol } = useChartStore();
-  const { placeOrder } = useOrderStore();
+  const { placeOrder, cancelAllOrders } = useOrderStore();
   const { currentLeverage, fetchLeverage } = usePositionStore();
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [selectedBlock, setSelectedBlock] = useState<TowerBlock | null>(null);
@@ -354,6 +354,35 @@ export default function TowerPage() {
     setOrderProgress(null);
   }, [data, towerLayers, bullishStartLayer, bearishStartLayer, minSpacingRatio, baseMargin, marginIncrement, calculateQuantity, placeOrder, symbol]);
 
+  // 更新守塔：取消所有订单后重新下单
+  const handleRefreshTower = useCallback(async () => {
+    const confirmed = confirm(
+      `将取消 ${symbol.replace("/", "")} 的所有挂单，然后重新下守塔单\n确定继续吗？`
+    );
+    if (!confirmed) return;
+
+    setIsAutoOrdering(true);
+    setOrderProgress({ current: 0, total: 1, errors: [] });
+
+    // 1. 取消所有订单
+    const cancelSuccess = await cancelAllOrders(symbol.replace("/", ""));
+    if (!cancelSuccess) {
+      alert("取消订单失败");
+      setIsAutoOrdering(false);
+      setOrderProgress(null);
+      return;
+    }
+
+    // 等待一下确保订单取消完成
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    setIsAutoOrdering(false);
+    setOrderProgress(null);
+
+    // 2. 重新下单
+    handleAutoTower();
+  }, [symbol, cancelAllOrders, handleAutoTower]);
+
   // 统计塔块数量和多空比例
   const stats = useMemo(() => {
     if (!data?.blocks) return { total: 0, bullish: 0, bearish: 0, ratio: "0:0" };
@@ -604,10 +633,20 @@ export default function TowerPage() {
               <button
                 onClick={handleAutoTower}
                 disabled={isAutoOrdering || !data?.blocks?.length}
-                className="px-4 py-1.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white text-sm font-medium rounded transition-colors flex items-center gap-2"
+                className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white text-sm font-medium rounded transition-colors flex items-center gap-1"
               >
                 <span>🏯</span>
-                {isAutoOrdering ? "下单中..." : "一键守塔"}
+                {isAutoOrdering ? "..." : "守塔"}
+              </button>
+
+              {/* 更新守塔按钮 */}
+              <button
+                onClick={handleRefreshTower}
+                disabled={isAutoOrdering || !data?.blocks?.length}
+                className="px-2 py-1.5 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white text-sm font-medium rounded transition-colors"
+                title="取消所有订单并重新下单"
+              >
+                🔄
               </button>
             </div>
 
