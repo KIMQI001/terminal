@@ -107,11 +107,11 @@ export function OrderCancelOverlay({
       {buttonPositions.map(({ groupIndex, y, group, isLong }) => (
         <button
           key={groupIndex}
-          className="absolute pointer-events-auto px-1 flex items-center justify-center text-white/80 hover:text-white transition-colors text-xs"
+          className="absolute pointer-events-auto px-1 flex items-center justify-center text-white/80 hover:text-white transition-colors text-xs rounded"
           style={{
-            left: 148,
-            top: y - 9,
-            height: 18,
+            left: 158,
+            top: y - 7,
+            height: 14,
             backgroundColor: isLong ? "#3b82f6" : "#a855f7", // 蓝色(做多) / 紫色(做空)
           }}
           onClick={() => handleCancelGroup(group, groupIndex)}
