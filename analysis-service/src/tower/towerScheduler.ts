@@ -65,6 +65,10 @@ export function stopTowerScheduler(): void {
   }
 }
 
+// 仓位监控计数器
+let positionMonitorCounter = 0;
+const POSITION_MONITOR_INTERVAL = 2; // 每 2 次调度循环监控一次（即每 60 秒）
+
 /**
  * 检查并执行到期的托管任务
  */
@@ -72,6 +76,7 @@ async function checkAndExecute(): Promise<void> {
   const now = Date.now();
   const activeManagements = getActiveManagements();
 
+  // 执行到期的托管任务
   for (const management of activeManagements) {
     if (!management.nextRunAt) continue;
 
@@ -80,6 +85,14 @@ async function checkAndExecute(): Promise<void> {
       console.log(`[TowerScheduler] 执行托管: userId=${management.userId}, symbol=${management.symbol}`);
       await executeTowerManagement(management);
     }
+  }
+
+  // 定期执行仓位监控（每 60 秒）
+  positionMonitorCounter++;
+  if (positionMonitorCounter >= POSITION_MONITOR_INTERVAL) {
+    positionMonitorCounter = 0;
+    console.log('[TowerScheduler] 执行仓位监控...');
+    await monitorAndRepairPositions();
   }
 }
 
@@ -107,7 +120,28 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
       return;
     }
 
-    // 1. 检查当前订单数量
+    // 1. 检查是否有持仓（有持仓时跳过，避免取消止盈止损单）
+    const { getPositions } = await import('../order/binanceOrderApi');
+    const positionsResult = await getPositions(apiConfig, management.symbol);
+    if (positionsResult.success && positionsResult.positions && positionsResult.positions.length > 0) {
+      const positions = positionsResult.positions.filter(p => Math.abs(p.positionAmt) >= 0.001);
+      if (positions.length > 0) {
+        console.log(`[TowerScheduler] 有持仓，跳过更新: ${positions.map(p => `${p.positionSide} ${p.positionAmt}`).join(', ')}`);
+        addRecord({
+          managementId: management.id,
+          bullishCount: 0,
+          bearishCount: 0,
+          totalMargin: 0,
+          success: true,
+          skipped: true,
+          errorMessage: undefined,
+        });
+        updateRunTime(management.id);
+        return;
+      }
+    }
+
+    // 2. 检查当前订单数量
     const orderCheck = await checkOrdersCount(apiConfig, management.symbol, management.towerLayers);
     if (orderCheck.sufficient) {
       console.log(`[TowerScheduler] 订单充足，跳过: 多${orderCheck.bullish}空${orderCheck.bearish}`);
@@ -124,7 +158,7 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
       return;
     }
 
-    // 2. 获取塔块数据
+    // 3. 获取塔块数据
     const towerData = await fetchTowerBlocks(management.symbol);
     if (!towerData || !towerData.blocks.length) {
       console.error(`[TowerScheduler] 获取塔块数据失败: ${management.symbol}`);
@@ -141,7 +175,7 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
       return;
     }
 
-    // 3. 取消现有订单
+    // 4. 取消现有订单
     const cancelResult = await cancelAllTowerOrders(apiConfig, management.symbol);
     if (!cancelResult.success) {
       console.error(`[TowerScheduler] 取消订单失败: ${cancelResult.error}`);
@@ -161,10 +195,10 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     // 等待订单取消完成
     await delay(500);
 
-    // 4. 获取杠杆
+    // 5. 获取杠杆
     const leverage = await getLeverage(apiConfig, management.symbol);
 
-    // 5. 计算要下的订单
+    // 6. 计算要下的订单
     const orders = calculateOrders(towerData, management, leverage);
     if (orders.length === 0) {
       console.log('[TowerScheduler] 没有符合条件的塔块');
@@ -181,10 +215,10 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
       return;
     }
 
-    // 5. 下单
+    // 7. 下单
     const result = await placeOrders(apiConfig, management.symbol, orders);
 
-    // 6. 记录结果
+    // 8. 记录结果
     const bullishCount = orders.filter(o => o.side === 'BUY').length;
     const bearishCount = orders.filter(o => o.side === 'SELL').length;
     const totalMargin = orders.reduce((sum, o) => sum + o.margin, 0);
@@ -722,4 +756,190 @@ function delay(ms: number): Promise<void> {
  */
 export function isSchedulerRunning(): boolean {
   return schedulerInterval !== null;
+}
+
+/**
+ * 监控并修复仓位的止盈止损
+ * 检查当前持仓是否有对应的止盈止损单，如果没有则补上
+ */
+export async function monitorAndRepairPositions(): Promise<void> {
+  const activeManagements = getActiveManagements();
+
+  for (const management of activeManagements) {
+    try {
+      const apiConfig = getBinanceApiConfig(management.userId);
+      if (!apiConfig) continue;
+
+      await repairPositionOrders(apiConfig, management.symbol);
+    } catch (error) {
+      console.error(`[TowerScheduler] 监控仓位失败 ${management.symbol}:`, error);
+    }
+  }
+}
+
+/**
+ * 修复单个交易对的仓位止盈止损
+ */
+async function repairPositionOrders(
+  apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
+  symbol: string
+): Promise<void> {
+  const { getPositions, getOpenOrders } = await import('../order/binanceOrderApi');
+
+  // 获取当前持仓
+  const positionsResult = await getPositions(apiConfig, symbol);
+  if (!positionsResult.success || !positionsResult.positions?.length) {
+    return; // 没有持仓，不需要修复
+  }
+
+  // 获取当前挂单
+  const ordersResult = await getOpenOrders(apiConfig, symbol);
+  if (!ordersResult.success) {
+    console.error(`[TowerScheduler] 获取挂单失败: ${ordersResult.error}`);
+    return;
+  }
+
+  const openOrders = ordersResult.orders || [];
+
+  for (const position of positionsResult.positions) {
+    // 跳过数量太小的仓位
+    if (Math.abs(position.positionAmt) < 0.001) continue;
+
+    const positionSide = position.positionSide as 'LONG' | 'SHORT';
+    const quantity = Math.abs(position.positionAmt);
+    const entryPrice = position.entryPrice;
+
+    // 检查是否有止损单
+    const hasStopLoss = openOrders.some(o =>
+      o.positionSide === positionSide &&
+      o.type === 'STOP_MARKET'
+    );
+
+    // 检查是否有止盈单
+    const hasTakeProfit = openOrders.some(o =>
+      o.positionSide === positionSide &&
+      (o.type === 'TAKE_PROFIT_MARKET' || o.type === 'TRAILING_STOP_MARKET')
+    );
+
+    // 检查是否有限价平仓单（也算止盈止损）
+    const closeSide = positionSide === 'LONG' ? 'SELL' : 'BUY';
+    const hasLimitClose = openOrders.some(o =>
+      o.positionSide === positionSide &&
+      o.side === closeSide &&
+      o.type === 'LIMIT'
+    );
+
+    // 如果有限价平仓单，认为用户手动设置了，不修复
+    if (hasLimitClose) continue;
+
+    if (!hasStopLoss || !hasTakeProfit) {
+      console.log(`[TowerScheduler] 发现仓位缺少止盈止损: ${symbol} ${positionSide}, 数量=${quantity}, 入场价=${entryPrice}`);
+      console.log(`[TowerScheduler] 当前状态: 止损=${hasStopLoss}, 止盈=${hasTakeProfit}`);
+
+      // 计算止损止盈价格
+      const { stopLoss, takeProfit } = calculateSlTpForPosition(entryPrice, positionSide);
+
+      // 补下止损单
+      if (!hasStopLoss) {
+        await placeRepairOrder(apiConfig, {
+          symbol,
+          positionSide,
+          quantity,
+          type: 'STOP_MARKET',
+          stopPrice: stopLoss,
+        });
+      }
+
+      // 补下止盈单
+      if (!hasTakeProfit) {
+        await placeRepairOrder(apiConfig, {
+          symbol,
+          positionSide,
+          quantity,
+          type: 'TAKE_PROFIT_MARKET',
+          stopPrice: takeProfit,
+        });
+      }
+    }
+  }
+}
+
+/**
+ * 根据入场价和方向计算止损止盈
+ */
+function calculateSlTpForPosition(
+  entryPrice: number,
+  positionSide: 'LONG' | 'SHORT'
+): { stopLoss: number; takeProfit: number } {
+  if (positionSide === 'LONG') {
+    // 多单：止损在下方，止盈在上方
+    return {
+      stopLoss: entryPrice - MAX_SL_DISTANCE,
+      takeProfit: entryPrice + MIN_TP_DISTANCE,
+    };
+  } else {
+    // 空单：止损在上方，止盈在下方
+    return {
+      stopLoss: entryPrice + MAX_SL_DISTANCE,
+      takeProfit: entryPrice - MIN_TP_DISTANCE,
+    };
+  }
+}
+
+/**
+ * 下修复订单
+ */
+async function placeRepairOrder(
+  apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
+  params: {
+    symbol: string;
+    positionSide: 'LONG' | 'SHORT';
+    quantity: number;
+    type: 'STOP_MARKET' | 'TAKE_PROFIT_MARKET';
+    stopPrice: number;
+  }
+): Promise<void> {
+  const baseUrl = apiConfig.isTestnet
+    ? 'https://testnet.binancefuture.com'
+    : 'https://fapi.binance.com';
+
+  const closeSide = params.positionSide === 'LONG' ? 'SELL' : 'BUY';
+  const timestamp = Date.now();
+  const clientOrderId = `ict_repair_${timestamp}_${Math.random().toString(36).substring(2, 8)}`;
+
+  const orderParams: Record<string, string | number> = {
+    symbol: params.symbol,
+    side: closeSide,
+    positionSide: params.positionSide,
+    type: params.type,
+    quantity: params.quantity.toFixed(3),
+    stopPrice: params.stopPrice.toFixed(1),
+    newClientOrderId: clientOrderId,
+    timestamp,
+  };
+
+  const queryString = Object.entries(orderParams)
+    .map(([k, v]) => `${k}=${v}`)
+    .join('&');
+  const signature = generateSignature(queryString, apiConfig.apiSecret);
+
+  try {
+    const response = await fetch(`${baseUrl}/fapi/v1/order`, {
+      method: 'POST',
+      headers: {
+        'X-MBX-APIKEY': apiConfig.apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: `${queryString}&signature=${signature}`,
+    });
+
+    if (!response.ok) {
+      const data = await response.json() as { msg?: string };
+      console.error(`[TowerScheduler] 修复订单失败 ${params.type}: ${data.msg || response.status}`);
+    } else {
+      console.log(`[TowerScheduler] 修复订单成功: ${params.type} @ ${params.stopPrice}`);
+    }
+  } catch (error) {
+    console.error(`[TowerScheduler] 修复订单异常:`, error);
+  }
 }

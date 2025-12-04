@@ -113,8 +113,8 @@ export async function placeOrder(
     queryParams.newClientOrderId = params.clientOrderId;
   }
 
-  // 只减仓标志
-  if (params.reduceOnly) {
+  // 只减仓标志（双向持仓模式下使用 positionSide 时不能用 reduceOnly）
+  if (params.reduceOnly && !params.positionSide) {
     queryParams.reduceOnly = 'true';
   }
 
@@ -387,4 +387,209 @@ export async function placeTrailingStopOrder(
     clientOrderId: params.clientOrderId,
     reduceOnly: true,
   });
+}
+
+/**
+ * 仓位信息接口
+ */
+export interface PositionInfo {
+  symbol: string;
+  positionSide: 'LONG' | 'SHORT' | 'BOTH';
+  positionAmt: number;       // 持仓数量 (正数做多，负数做空)
+  entryPrice: number;        // 入场均价
+  markPrice: number;         // 标记价格
+  unRealizedProfit: number;  // 未实现盈亏
+  liquidationPrice: number;  // 强平价格
+  leverage: number;          // 杠杆倍数
+  marginType: string;        // 保证金类型
+  isolatedMargin: number;    // 逐仓保证金
+}
+
+/**
+ * 获取所有持仓
+ */
+export async function getPositions(
+  config: BinanceApiConfig,
+  symbol?: string
+): Promise<{ success: boolean; positions?: PositionInfo[]; error?: string }> {
+  const baseUrl = config.isTestnet
+    ? 'https://testnet.binancefuture.com'
+    : 'https://fapi.binance.com';
+
+  const timestamp = Date.now();
+  let queryString = `timestamp=${timestamp}`;
+  if (symbol) {
+    queryString = `symbol=${symbol}&${queryString}`;
+  }
+  const signature = generateSignature(queryString, config.apiSecret);
+
+  try {
+    const response = await fetch(`${baseUrl}/fapi/v2/positionRisk?${queryString}&signature=${signature}`, {
+      method: 'GET',
+      headers: {
+        'X-MBX-APIKEY': config.apiKey,
+      },
+    });
+
+    const data = await response.json() as Array<{
+      symbol: string;
+      positionSide: string;
+      positionAmt: string;
+      entryPrice: string;
+      markPrice: string;
+      unRealizedProfit: string;
+      liquidationPrice: string;
+      leverage: string;
+      marginType: string;
+      isolatedMargin: string;
+    }> | { msg?: string };
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: (data as { msg?: string }).msg || `HTTP ${response.status}`,
+      };
+    }
+
+    // 过滤出有实际持仓的仓位
+    const positions = (data as Array<{
+      symbol: string;
+      positionSide: string;
+      positionAmt: string;
+      entryPrice: string;
+      markPrice: string;
+      unRealizedProfit: string;
+      liquidationPrice: string;
+      leverage: string;
+      marginType: string;
+      isolatedMargin: string;
+    }>)
+      .filter(p => parseFloat(p.positionAmt) !== 0)
+      .map(p => ({
+        symbol: p.symbol,
+        positionSide: p.positionSide as 'LONG' | 'SHORT' | 'BOTH',
+        positionAmt: parseFloat(p.positionAmt),
+        entryPrice: parseFloat(p.entryPrice),
+        markPrice: parseFloat(p.markPrice),
+        unRealizedProfit: parseFloat(p.unRealizedProfit),
+        liquidationPrice: parseFloat(p.liquidationPrice),
+        leverage: parseInt(p.leverage),
+        marginType: p.marginType,
+        isolatedMargin: parseFloat(p.isolatedMargin),
+      }));
+
+    return { success: true, positions };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '网络请求失败',
+    };
+  }
+}
+
+/**
+ * 挂单信息接口
+ */
+export interface OpenOrderInfo {
+  orderId: number;
+  symbol: string;
+  clientOrderId: string;
+  price: number;
+  origQty: number;
+  executedQty: number;
+  status: string;
+  type: string;            // LIMIT, STOP_MARKET, TAKE_PROFIT_MARKET, TRAILING_STOP_MARKET
+  side: 'BUY' | 'SELL';
+  positionSide: 'LONG' | 'SHORT' | 'BOTH';
+  stopPrice: number;       // 触发价 (止盈止损单)
+  workingType: string;     // 触发类型
+  time: number;
+}
+
+/**
+ * 获取当前挂单
+ */
+export async function getOpenOrders(
+  config: BinanceApiConfig,
+  symbol?: string
+): Promise<{ success: boolean; orders?: OpenOrderInfo[]; error?: string }> {
+  const baseUrl = config.isTestnet
+    ? 'https://testnet.binancefuture.com'
+    : 'https://fapi.binance.com';
+
+  const timestamp = Date.now();
+  let queryString = `timestamp=${timestamp}`;
+  if (symbol) {
+    queryString = `symbol=${symbol}&${queryString}`;
+  }
+  const signature = generateSignature(queryString, config.apiSecret);
+
+  try {
+    const response = await fetch(`${baseUrl}/fapi/v1/openOrders?${queryString}&signature=${signature}`, {
+      method: 'GET',
+      headers: {
+        'X-MBX-APIKEY': config.apiKey,
+      },
+    });
+
+    const data = await response.json() as Array<{
+      orderId: number;
+      symbol: string;
+      clientOrderId: string;
+      price: string;
+      origQty: string;
+      executedQty: string;
+      status: string;
+      type: string;
+      side: string;
+      positionSide: string;
+      stopPrice: string;
+      workingType: string;
+      time: number;
+    }> | { msg?: string };
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: (data as { msg?: string }).msg || `HTTP ${response.status}`,
+      };
+    }
+
+    const orders = (data as Array<{
+      orderId: number;
+      symbol: string;
+      clientOrderId: string;
+      price: string;
+      origQty: string;
+      executedQty: string;
+      status: string;
+      type: string;
+      side: string;
+      positionSide: string;
+      stopPrice: string;
+      workingType: string;
+      time: number;
+    }>).map(o => ({
+      orderId: o.orderId,
+      symbol: o.symbol,
+      clientOrderId: o.clientOrderId,
+      price: parseFloat(o.price),
+      origQty: parseFloat(o.origQty),
+      executedQty: parseFloat(o.executedQty),
+      status: o.status,
+      type: o.type,
+      side: o.side as 'BUY' | 'SELL',
+      positionSide: o.positionSide as 'LONG' | 'SHORT' | 'BOTH',
+      stopPrice: parseFloat(o.stopPrice),
+      workingType: o.workingType,
+      time: o.time,
+    }));
+
+    return { success: true, orders };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '网络请求失败',
+    };
+  }
 }
