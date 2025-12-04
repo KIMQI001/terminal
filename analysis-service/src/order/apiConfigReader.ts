@@ -79,8 +79,20 @@ let db: Database.Database | null = null;
 function getTerminalDatabase(): Database.Database {
   if (db) return db;
 
-  // terminal.db 位于项目根目录的 data 文件夹
-  const dbPath = path.join(__dirname, '../../../../data/terminal.db');
+  // 支持环境变量配置数据库路径
+  let dbPath = process.env.TERMINAL_DB_PATH;
+
+  if (!dbPath) {
+    // 默认路径：从 analysis-service 目录向上到 terminal 根目录
+    // 开发环境: analysis-service/src/order -> ../../data
+    // 生产环境: analysis-service/dist/order -> ../../data
+    dbPath = path.join(__dirname, '../../data/terminal.db');
+
+    // 如果上面路径不存在，尝试从 analysis-service 向上一级
+    if (!fs.existsSync(dbPath)) {
+      dbPath = path.join(__dirname, '../../../data/terminal.db');
+    }
+  }
 
   if (!fs.existsSync(dbPath)) {
     throw new Error(`terminal.db 不存在: ${dbPath}`);
