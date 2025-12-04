@@ -13,10 +13,11 @@ export function AIAnalyzer() {
 
   // 反转分析状态
   const [reversalMode, setReversalMode] = useState<"top" | "bottom" | null>(null);
-  const [reversalResult, setReversalResult] = useState<ReversalAnalyzeResult | null>(null);
+  const [reversalCache, setReversalCache] = useState<Record<string, ReversalAnalyzeResult>>({});
 
   // 当前显示的结果
   const currentResult = activeTimeframe ? resultsCache[activeTimeframe] : null;
+  const reversalResult = reversalMode ? reversalCache[reversalMode] : null;
 
   const handleAnalyze = async (timeframe: string, forceRefresh: boolean = false) => {
     // 如果有缓存且不是强制刷新，直接切换显示
@@ -42,23 +43,30 @@ export function AIAnalyzer() {
 
   const handleRefresh = () => {
     if (reversalMode) {
-      handleReversalAnalyze(reversalMode);
+      handleReversalAnalyze(reversalMode, true);
     } else if (activeTimeframe) {
       handleAnalyze(activeTimeframe, true);
     }
   };
 
   // 反转分析处理
-  const handleReversalAnalyze = async (mode: "top" | "bottom") => {
+  const handleReversalAnalyze = async (mode: "top" | "bottom", forceRefresh: boolean = false) => {
+    // 如果有缓存且不是强制刷新，直接切换显示
+    if (!forceRefresh && reversalCache[mode]) {
+      setActiveTimeframe(null);
+      setReversalMode(mode);
+      setError(null);
+      return;
+    }
+
     setLoading(mode === "top" ? "reversal-top" : "reversal-bottom");
     setActiveTimeframe(null);
     setReversalMode(mode);
-    setReversalResult(null);
     setError(null);
 
     try {
       const data = await triggerReversalAnalyze("BTCUSDC", mode);
-      setReversalResult(data);
+      setReversalCache(prev => ({ ...prev, [mode]: data }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "反转分析失败");
     } finally {
@@ -149,7 +157,6 @@ export function AIAnalyzer() {
                 disabled={loading !== null}
                 onClick={() => {
                   setReversalMode(null);
-                  setReversalResult(null);
                   handleAnalyze(tf);
                 }}
                 className={`px-3 py-1.5 rounded text-sm transition-colors relative ${
@@ -178,30 +185,40 @@ export function AIAnalyzer() {
           <button
             disabled={loading !== null}
             onClick={() => handleReversalAnalyze("top")}
-            className={`px-3 py-1.5 rounded text-sm transition-colors ${
+            className={`px-3 py-1.5 rounded text-sm transition-colors relative ${
               loading === "reversal-top"
                 ? "bg-red-500 text-white"
                 : reversalMode === "top"
                 ? "bg-red-500/20 text-red-400 border border-red-500/50"
+                : reversalCache["top"]
+                ? "bg-green-500/10 text-green-500 border border-green-500/30 hover:bg-green-500/20"
                 : "bg-red-500/10 text-red-500 border border-red-500/30 hover:bg-red-500/20"
             } disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             {loading === "reversal-top" ? "推演中..." : "🔴 猜顶"}
+            {reversalCache["top"] && reversalMode !== "top" && loading !== "reversal-top" && (
+              <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full" />
+            )}
           </button>
 
           {/* 猜底按钮 */}
           <button
             disabled={loading !== null}
             onClick={() => handleReversalAnalyze("bottom")}
-            className={`px-3 py-1.5 rounded text-sm transition-colors ${
+            className={`px-3 py-1.5 rounded text-sm transition-colors relative ${
               loading === "reversal-bottom"
                 ? "bg-green-500 text-white"
                 : reversalMode === "bottom"
                 ? "bg-green-500/20 text-green-400 border border-green-500/50"
+                : reversalCache["bottom"]
+                ? "bg-green-500/10 text-green-500 border border-green-500/30 hover:bg-green-500/20"
                 : "bg-green-500/10 text-green-500 border border-green-500/30 hover:bg-green-500/20"
             } disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             {loading === "reversal-bottom" ? "推演中..." : "🟢 猜底"}
+            {reversalCache["bottom"] && reversalMode !== "bottom" && loading !== "reversal-bottom" && (
+              <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full" />
+            )}
           </button>
         </div>
 
