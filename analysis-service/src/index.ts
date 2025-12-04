@@ -20,6 +20,8 @@ import { initDatabase, closeDatabase } from './db';
 import { startSignalTracker } from './signals/signalTracker';
 import { startReviewScheduler } from './review/reviewScheduler';
 import { startApiServer } from './api';
+import { startOrderMonitor, stopOrderMonitor } from './order/orderMonitor';
+import { getFirstBinanceApiConfig, closeApiConfigReader } from './order/apiConfigReader';
 
 async function main(): Promise<void> {
   console.log('═══════════════════════════════════════');
@@ -49,17 +51,34 @@ async function main(): Promise<void> {
 
   // 启动主调度器
   startScheduler();
+
+  // 启动订单监控器（守塔订单成交后自动下止盈止损）
+  const apiConfig = getFirstBinanceApiConfig();
+  if (apiConfig) {
+    console.log(`[OrderMonitor] 找到用户 ${apiConfig.userId} 的 Binance 配置`);
+    await startOrderMonitor({
+      apiKey: apiConfig.config.apiKey,
+      apiSecret: apiConfig.config.apiSecret,
+      isTestnet: apiConfig.config.isTestnet,
+    });
+  } else {
+    console.warn('[OrderMonitor] 未找到 Binance API 配置，订单监控未启动');
+  }
 }
 
 // 优雅退出
 process.on('SIGINT', () => {
   console.log('\n📴 收到 SIGINT 信号，正在退出...');
+  stopOrderMonitor();
+  closeApiConfigReader();
   closeDatabase();
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
   console.log('\n📴 收到 SIGTERM 信号，正在退出...');
+  stopOrderMonitor();
+  closeApiConfigReader();
   closeDatabase();
   process.exit(0);
 });

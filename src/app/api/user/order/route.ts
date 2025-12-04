@@ -62,6 +62,41 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// analysis-service 地址
+const ANALYSIS_SERVICE_URL = process.env.ANALYSIS_SERVICE_URL || 'http://127.0.0.1:3002';
+
+// 保存待处理订单到 analysis-service（守塔订单成交后下止盈止损）
+async function savePendingOrder(params: {
+  clientOrderId: string;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  positionSide: 'LONG' | 'SHORT';
+  quantity: number;
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+}): Promise<boolean> {
+  try {
+    const response = await fetch(`${ANALYSIS_SERVICE_URL}/api/pending-orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+
+    const data = await response.json();
+    if (data.success) {
+      console.log(`[PendingOrder] 已保存待处理订单: ${params.clientOrderId}`);
+      return true;
+    } else {
+      console.error(`[PendingOrder] 保存失败: ${data.error}`);
+      return false;
+    }
+  } catch (error) {
+    console.error('[PendingOrder] 保存待处理订单失败:', error);
+    return false;
+  }
+}
+
 // 获取当前市场价格
 async function getCurrentPrice(symbol: string, isTestnet: boolean): Promise<number | null> {
   try {
@@ -319,7 +354,39 @@ async function placeBinanceOrder(
     },
     stopOrders: [] as { type: string; orderId: number; clientOrderId?: string }[],
     warnings: [] as string[],
+    pendingOrder: false, // 是否为待处理订单（成交后再下止盈止损）
   };
+
+  // 守塔订单特殊处理：只下入场单，止盈止损成交后再下
+  // 这样可以避免 "Order would immediately trigger" 错误
+  const isTowerOrder = params.clientOrderIdPrefix?.startsWith('ict_tower');
+
+  if (isTowerOrder && params.stopLoss && params.takeProfit && clientOrderId) {
+    // 保存待处理订单到 analysis-service
+    const saved = await savePendingOrder({
+      clientOrderId,
+      symbol: params.symbol,
+      side: params.side,
+      positionSide,
+      quantity: params.quantity,
+      entryPrice: params.price || 0,
+      stopLoss: params.stopLoss,
+      takeProfit: params.takeProfit,
+    });
+
+    if (saved) {
+      result.pendingOrder = true;
+      result.warnings.push('守塔订单: 止盈止损将在成交后自动下单');
+      console.log(`[Tower] 守塔订单已下入场单，止盈止损待成交后处理: ${clientOrderId}`);
+    } else {
+      result.warnings.push('守塔订单: 待处理订单保存失败，请手动设置止盈止损');
+    }
+
+    // 守塔订单不在这里下止盈止损，直接返回
+    return result;
+  }
+
+  // 非守塔订单：正常下止盈止损单
 
   // 获取当前价格用于验证止盈止损
   const currentPrice = await getCurrentPrice(params.symbol, isTestnet);

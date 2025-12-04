@@ -8,6 +8,7 @@ import cors from 'cors';
 import { signalRoutes } from './routes/signals';
 import { performanceRoutes } from './routes/performance';
 import { analyzeRoutes } from './routes/analyze';
+import { pendingOrdersRoutes } from './routes/pendingOrders';
 
 /**
  * 启动 HTTP API 服务器
@@ -32,6 +33,7 @@ export function startApiServer(port: number = 3002): void {
   app.use('/api/signals', signalRoutes);
   app.use('/api/performance', performanceRoutes);
   app.use('/api/analyze', analyzeRoutes);
+  app.use('/api/pending-orders', pendingOrdersRoutes);
 
   // 404 处理
   app.use((_req, res) => {
@@ -65,5 +67,8 @@ export function startApiServer(port: number = 3002): void {
     console.log('  - GET /api/performance/overview');
     console.log('  - POST /api/analyze (手动触发分析)');
     console.log('  - GET /api/analyze/status (AI调用状态)');
+    console.log('  - POST /api/pending-orders (添加待处理订单)');
+    console.log('  - GET /api/pending-orders (获取待处理订单)');
+    console.log('  - DELETE /api/pending-orders?clientOrderId=xxx (删除待处理订单)');
   });
 }

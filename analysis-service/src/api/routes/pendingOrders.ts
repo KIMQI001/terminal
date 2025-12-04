@@ -1,0 +1,131 @@
+/**
+ * 待处理订单 API 路由
+ * 用于存储守塔订单的止盈止损信息
+ */
+
+import { Router, Request, Response } from 'express';
+import {
+  addPendingOrder,
+  getPendingOrderByClientId,
+  getAllPendingOrders,
+  deletePendingOrder,
+} from '../../order/pendingOrderStore';
+
+export const pendingOrdersRoutes = Router();
+
+// POST: 添加待处理订单
+pendingOrdersRoutes.post('/', (req: Request, res: Response) => {
+  try {
+    const {
+      clientOrderId,
+      symbol,
+      side,
+      positionSide,
+      quantity,
+      entryPrice,
+      stopLoss,
+      takeProfit,
+    } = req.body;
+
+    // 验证必填字段
+    if (!clientOrderId || !symbol || !side || !positionSide || !quantity || !stopLoss || !takeProfit) {
+      res.status(400).json({
+        success: false,
+        error: '缺少必填字段',
+      });
+      return;
+    }
+
+    // 保存到数据库
+    addPendingOrder({
+      clientOrderId,
+      symbol,
+      side,
+      positionSide,
+      quantity: parseFloat(quantity),
+      entryPrice: entryPrice ? parseFloat(entryPrice) : 0,
+      stopLoss: parseFloat(stopLoss),
+      takeProfit: parseFloat(takeProfit),
+    });
+
+    console.log(`[PendingOrders] 保存待处理订单: ${clientOrderId}`);
+
+    res.json({
+      success: true,
+      message: '待处理订单已保存',
+      clientOrderId,
+    });
+  } catch (error) {
+    console.error('[PendingOrders] POST error:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : '服务器错误',
+    });
+  }
+});
+
+// GET: 获取待处理订单
+pendingOrdersRoutes.get('/', (req: Request, res: Response) => {
+  try {
+    const { clientOrderId } = req.query;
+
+    if (clientOrderId) {
+      // 获取单个订单
+      const order = getPendingOrderByClientId(clientOrderId as string);
+      if (order) {
+        res.json({ success: true, order });
+      } else {
+        res.status(404).json({
+          success: false,
+          error: '订单不存在',
+        });
+      }
+    } else {
+      // 获取所有待处理订单
+      const orders = getAllPendingOrders();
+      res.json({ success: true, orders });
+    }
+  } catch (error) {
+    console.error('[PendingOrders] GET error:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : '服务器错误',
+    });
+  }
+});
+
+// DELETE: 删除待处理订单
+pendingOrdersRoutes.delete('/', (req: Request, res: Response) => {
+  try {
+    const { clientOrderId } = req.query;
+
+    if (!clientOrderId) {
+      res.status(400).json({
+        success: false,
+        error: '缺少 clientOrderId',
+      });
+      return;
+    }
+
+    const deleted = deletePendingOrder(clientOrderId as string);
+
+    if (deleted) {
+      console.log(`[PendingOrders] 删除待处理订单: ${clientOrderId}`);
+      res.json({
+        success: true,
+        message: '待处理订单已删除',
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        error: '订单不存在',
+      });
+    }
+  } catch (error) {
+    console.error('[PendingOrders] DELETE error:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : '服务器错误',
+    });
+  }
+});
