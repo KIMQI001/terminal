@@ -41,21 +41,13 @@ towerManagementRoutes.get('/', (req: Request, res: Response) => {
       // 返回默认配置
       res.json({
         success: true,
-        data: {
-          userId,
-          symbol,
-          isActive: false,
-          intervalMinutes: 5,
-          baseMargin: 100,
-          marginIncrement: 0,
-          towerLayers: 3,
-          bullishStartLayer: 1,
-          bearishStartLayer: 1,
-          minSpacingRatio: 5,
-          lastRunAt: null,
-          nextRunAt: null,
-          records: [],
-          stats: { success: 0, failed: 0, skipped: 0 },
+        management: null,
+        records: [],
+        stats: {
+          totalExecutions: 0,
+          successCount: 0,
+          failedCount: 0,
+          skippedCount: 0,
         },
       });
       return;
@@ -67,11 +59,9 @@ towerManagementRoutes.get('/', (req: Request, res: Response) => {
 
     res.json({
       success: true,
-      data: {
-        ...config,
-        records,
-        stats,
-      },
+      management: config,
+      records,
+      stats,
     });
   } catch (error) {
     console.error('[TowerManagement API] GET error:', error);
@@ -127,7 +117,7 @@ towerManagementRoutes.post('/', (req: Request, res: Response) => {
 
     res.json({
       success: true,
-      data: config,
+      management: config,
     });
   } catch (error) {
     console.error('[TowerManagement API] POST error:', error);
@@ -181,7 +171,7 @@ towerManagementRoutes.post('/start', (req: Request, res: Response) => {
 
     res.json({
       success: true,
-      data: config,
+      management: config,
       message: '托管已启动',
     });
   } catch (error) {

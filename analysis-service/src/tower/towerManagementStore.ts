@@ -364,22 +364,29 @@ export function getRecentRecords(managementId: number, limit = 20): TowerManagem
 /**
  * 获取统计信息
  */
-export function getManagementStats(managementId: number): { success: number; failed: number; skipped: number } {
+export function getManagementStats(managementId: number): {
+  totalExecutions: number;
+  successCount: number;
+  failedCount: number;
+  skippedCount: number;
+} {
   const db = getDatabase();
 
   const row = db.prepare(`
     SELECT
+      COUNT(*) as total,
       SUM(CASE WHEN success = 1 AND skipped = 0 THEN 1 ELSE 0 END) as success,
       SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failed,
       SUM(CASE WHEN skipped = 1 THEN 1 ELSE 0 END) as skipped
     FROM tower_management_records
     WHERE management_id = ?
-  `).get(managementId) as { success: number | null; failed: number | null; skipped: number | null } | undefined;
+  `).get(managementId) as { total: number | null; success: number | null; failed: number | null; skipped: number | null } | undefined;
 
   return {
-    success: row?.success || 0,
-    failed: row?.failed || 0,
-    skipped: row?.skipped || 0,
+    totalExecutions: row?.total || 0,
+    successCount: row?.success || 0,
+    failedCount: row?.failed || 0,
+    skippedCount: row?.skipped || 0,
   };
 }
 
