@@ -35,30 +35,46 @@ let cleanupInterval: NodeJS.Timeout | null = null;
 
 /**
  * 处理订单成交事件
+ * 只处理数据库中存在的待处理订单（通过 clientOrderId 匹配）
  */
 async function handleOrderFilled(event: OrderTradeUpdateEvent): Promise<void> {
   const { order } = event;
   const clientOrderId = order.clientOrderId;
+  const symbol = order.symbol;
 
-  // 只处理 ict_tower 前缀的入场单
+  // 快速过滤：只处理 ict_tower 前缀的订单
   if (!clientOrderId.startsWith('ict_tower')) {
     return;
   }
 
   // 跳过止盈止损单 (后缀 _sl, _tp)
   if (clientOrderId.includes('_sl') || clientOrderId.includes('_tp')) {
-    // 止盈止损单成交时可以发通知
     if (order.orderStatus === 'FILLED') {
       const isTp = clientOrderId.includes('_tp');
-      console.log(`[OrderMonitor] ${isTp ? '止盈' : '止损'}单成交: ${clientOrderId} @ ${order.averagePrice}`);
+      console.log(`[OrderMonitor] ${symbol} ${isTp ? '止盈' : '止损'}单成交: ${clientOrderId} @ ${order.averagePrice}`);
     }
+    return;
+  }
+
+  // 核心验证：只处理数据库中存在的待处理订单
+  const pendingOrder = getPendingOrderByClientId(clientOrderId);
+  if (!pendingOrder) {
+    // 不在我们的待处理订单列表中，忽略
+    return;
+  }
+
+  // 验证交易对是否匹配
+  if (pendingOrder.symbol !== symbol) {
+    console.warn(`[OrderMonitor] 交易对不匹配: 期望 ${pendingOrder.symbol}, 实际 ${symbol}`);
     return;
   }
 
   // 处理入场单状态变化
   if (order.orderStatus === 'FILLED') {
-    await handleEntryFilled(clientOrderId, order);
+    console.log(`[OrderMonitor] ${symbol} 入场单成交: ${clientOrderId} @ ${order.averagePrice}`);
+    await handleEntryFilled(clientOrderId, order, pendingOrder);
   } else if (order.orderStatus === 'CANCELED') {
+    console.log(`[OrderMonitor] ${symbol} 入场单取消: ${clientOrderId}`);
     await handleEntryCanceled(clientOrderId);
   }
 }
@@ -68,18 +84,9 @@ async function handleOrderFilled(event: OrderTradeUpdateEvent): Promise<void> {
  */
 async function handleEntryFilled(
   clientOrderId: string,
-  order: OrderTradeUpdateEvent['order']
+  order: OrderTradeUpdateEvent['order'],
+  pendingOrder: PendingEntryOrder
 ): Promise<void> {
-  console.log(`[OrderMonitor] 入场单成交: ${clientOrderId} @ ${order.averagePrice}`);
-
-  // 从数据库获取待处理订单信息
-  const pendingOrder = getPendingOrderByClientId(clientOrderId);
-
-  if (!pendingOrder) {
-    console.warn(`[OrderMonitor] 未找到待处理订单: ${clientOrderId}`);
-    return;
-  }
-
   const filledPrice = parseFloat(order.averagePrice);
 
   // 更新状态为已成交
