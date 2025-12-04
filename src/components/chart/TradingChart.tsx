@@ -21,6 +21,7 @@ import { OTEPanel } from "./OTEPanel";
 import { FVGPanel } from "./FVGPanel";
 import { LiquidationPanel } from "./LiquidationPanel";
 import { OBPanel } from "./OBPanel";
+import { OrderCancelOverlay } from "./OrderCancelOverlay";
 import { fetchKlines } from "@/lib/binance/api";
 import { BinanceWebSocket } from "@/lib/binance/websocket";
 import { detectSwingPoints } from "@/lib/chart/indicators/swingPoints";
@@ -857,6 +858,11 @@ export function TradingChart() {
       onMouseMove={handleMouseMove}
     >
       <ICTOverlay
+        chartRef={chartRef}
+        seriesRef={candleSeriesRef}
+        containerRef={chartContainerRef}
+      />
+      <OrderCancelOverlay
         chartRef={chartRef}
         seriesRef={candleSeriesRef}
         containerRef={chartContainerRef}

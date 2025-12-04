@@ -31,6 +31,45 @@ export interface RealOrder {
   time: number;
 }
 
+// 获取订单类型优先级（限价 < 止盈 < 止损）
+const getTypeOrder = (type: string): number => {
+  if (type.includes('limit') && !type.includes('stop')) return 0;
+  if (type.includes('profit')) return 1;
+  if (type.includes('stop')) return 2;
+  return 3;
+};
+
+// 按数量和时间分组订单（同一笔交易的主单、止盈、止损）
+export const groupOrders = (orders: RealOrder[]): RealOrder[][] => {
+  if (orders.length === 0) return [];
+
+  const groups: RealOrder[][] = [];
+  const used = new Set<string>();
+
+  // 按时间排序
+  const sorted = [...orders].sort((a, b) => b.time - a.time);
+
+  for (const order of sorted) {
+    if (used.has(order.id)) continue;
+
+    // 找同数量且同时间（2秒内）的订单
+    const group = sorted.filter(o =>
+      !used.has(o.id) &&
+      o.quantity === order.quantity &&
+      Math.abs(o.time - order.time) < 2000
+    );
+
+    group.forEach(o => used.add(o.id));
+
+    // 组内按类型排序：限价 → 止盈 → 止损
+    group.sort((a, b) => getTypeOrder(a.type) - getTypeOrder(b.type));
+
+    groups.push(group);
+  }
+
+  return groups;
+};
+
 interface OrderState {
   orders: Order[];
   realOrders: RealOrder[];
