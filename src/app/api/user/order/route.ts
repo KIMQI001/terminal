@@ -62,6 +62,60 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// 获取当前市场价格
+async function getCurrentPrice(symbol: string, isTestnet: boolean): Promise<number | null> {
+  try {
+    const baseUrl = isTestnet
+      ? 'https://testnet.binancefuture.com'
+      : 'https://fapi.binance.com';
+
+    const response = await fetch(`${baseUrl}/fapi/v1/ticker/price?symbol=${symbol}`);
+    const data = await response.json();
+
+    if (response.ok && data.price) {
+      return parseFloat(data.price);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// 验证止盈止损价格是否有效（不会立即触发）
+function validateStopPrice(
+  currentPrice: number,
+  stopPrice: number,
+  side: 'BUY' | 'SELL',
+  type: 'STOP_MARKET' | 'TAKE_PROFIT_MARKET'
+): boolean {
+  // 止损单：
+  // - 做多(BUY)的止损 -> 平多(SELL) -> 止损价 < 当前价
+  // - 做空(SELL)的止损 -> 平空(BUY) -> 止损价 > 当前价
+  // 止盈单：
+  // - 做多(BUY)的止盈 -> 平多(SELL) -> 止盈价 > 当前价
+  // - 做空(SELL)的止盈 -> 平空(BUY) -> 止盈价 < 当前价
+
+  if (type === 'STOP_MARKET') {
+    // 止损单的 side 是平仓方向
+    if (side === 'SELL') {
+      // 平多止损，价格需 < 当前价
+      return stopPrice < currentPrice;
+    } else {
+      // 平空止损，价格需 > 当前价
+      return stopPrice > currentPrice;
+    }
+  } else {
+    // 止盈单
+    if (side === 'SELL') {
+      // 平多止盈，价格需 > 当前价
+      return stopPrice > currentPrice;
+    } else {
+      // 平空止盈，价格需 < 当前价
+      return stopPrice < currentPrice;
+    }
+  }
+}
+
 // 带重试的止盈止损单下单
 async function placeStopOrderWithRetry(
   apiKey: string,
@@ -267,31 +321,40 @@ async function placeBinanceOrder(
     warnings: [] as string[],
   };
 
+  // 获取当前价格用于验证止盈止损
+  const currentPrice = await getCurrentPrice(params.symbol, isTestnet);
+
   // 下止损单（带重试）
   if (params.stopLoss && params.stopLoss > 0) {
     const slSide = params.side === 'BUY' ? 'SELL' : 'BUY';
     const slClientOrderId = clientOrderId ? `${clientOrderId}_sl` : undefined;
 
-    const slResult = await placeStopOrderWithRetry(apiKey, apiSecret, isTestnet, {
-      symbol: params.symbol,
-      side: slSide,
-      positionSide,
-      type: 'STOP_MARKET',
-      quantity: params.quantity,
-      stopPrice: params.stopLoss,
-      clientOrderId: slClientOrderId,
-    });
-
-    if (slResult.success && slResult.data) {
-      const slData = slResult.data as { orderId: number; clientOrderId?: string };
-      result.stopOrders.push({
-        type: 'stopLoss',
-        orderId: slData.orderId,
-        clientOrderId: slData.clientOrderId || slClientOrderId,
-      });
+    // 验证止损价格是否有效
+    if (currentPrice && !validateStopPrice(currentPrice, params.stopLoss, slSide, 'STOP_MARKET')) {
+      console.warn(`[止损] 价格无效，跳过: 当前价=${currentPrice}, 止损价=${params.stopLoss}, 方向=${slSide}`);
+      result.warnings.push(`止损单跳过: 价格会立即触发 (当前${currentPrice.toFixed(1)}, 止损${params.stopLoss.toFixed(1)})`);
     } else {
-      console.error('Stop loss order failed after retries:', slResult.error);
-      result.warnings.push(`止损单失败: ${slResult.error}`);
+      const slResult = await placeStopOrderWithRetry(apiKey, apiSecret, isTestnet, {
+        symbol: params.symbol,
+        side: slSide,
+        positionSide,
+        type: 'STOP_MARKET',
+        quantity: params.quantity,
+        stopPrice: params.stopLoss,
+        clientOrderId: slClientOrderId,
+      });
+
+      if (slResult.success && slResult.data) {
+        const slData = slResult.data as { orderId: number; clientOrderId?: string };
+        result.stopOrders.push({
+          type: 'stopLoss',
+          orderId: slData.orderId,
+          clientOrderId: slData.clientOrderId || slClientOrderId,
+        });
+      } else {
+        console.error('Stop loss order failed after retries:', slResult.error);
+        result.warnings.push(`止损单失败: ${slResult.error}`);
+      }
     }
   }
 
@@ -300,26 +363,32 @@ async function placeBinanceOrder(
     const tpSide = params.side === 'BUY' ? 'SELL' : 'BUY';
     const tpClientOrderId = clientOrderId ? `${clientOrderId}_tp` : undefined;
 
-    const tpResult = await placeStopOrderWithRetry(apiKey, apiSecret, isTestnet, {
-      symbol: params.symbol,
-      side: tpSide,
-      positionSide,
-      type: 'TAKE_PROFIT_MARKET',
-      quantity: params.quantity,
-      stopPrice: params.takeProfit,
-      clientOrderId: tpClientOrderId,
-    });
-
-    if (tpResult.success && tpResult.data) {
-      const tpData = tpResult.data as { orderId: number; clientOrderId?: string };
-      result.stopOrders.push({
-        type: 'takeProfit',
-        orderId: tpData.orderId,
-        clientOrderId: tpData.clientOrderId || tpClientOrderId,
-      });
+    // 验证止盈价格是否有效
+    if (currentPrice && !validateStopPrice(currentPrice, params.takeProfit, tpSide, 'TAKE_PROFIT_MARKET')) {
+      console.warn(`[止盈] 价格无效，跳过: 当前价=${currentPrice}, 止盈价=${params.takeProfit}, 方向=${tpSide}`);
+      result.warnings.push(`止盈单跳过: 价格会立即触发 (当前${currentPrice.toFixed(1)}, 止盈${params.takeProfit.toFixed(1)})`);
     } else {
-      console.error('Take profit order failed after retries:', tpResult.error);
-      result.warnings.push(`止盈单失败: ${tpResult.error}`);
+      const tpResult = await placeStopOrderWithRetry(apiKey, apiSecret, isTestnet, {
+        symbol: params.symbol,
+        side: tpSide,
+        positionSide,
+        type: 'TAKE_PROFIT_MARKET',
+        quantity: params.quantity,
+        stopPrice: params.takeProfit,
+        clientOrderId: tpClientOrderId,
+      });
+
+      if (tpResult.success && tpResult.data) {
+        const tpData = tpResult.data as { orderId: number; clientOrderId?: string };
+        result.stopOrders.push({
+          type: 'takeProfit',
+          orderId: tpData.orderId,
+          clientOrderId: tpData.clientOrderId || tpClientOrderId,
+        });
+      } else {
+        console.error('Take profit order failed after retries:', tpResult.error);
+        result.warnings.push(`止盈单失败: ${tpResult.error}`);
+      }
     }
   }
 
