@@ -118,7 +118,7 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
         totalMargin: 0,
         success: true,
         skipped: true,
-        errorMessage: '订单充足',
+        errorMessage: undefined, // 跳过不是错误，不设置 errorMessage
       });
       updateRunTime(management.id);
       return;
