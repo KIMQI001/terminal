@@ -1141,43 +1141,45 @@ export default function TowerPage() {
                   暂无守卫中的订单
                 </div>
               ) : (
-                <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                <div className="space-y-1 max-h-40 overflow-y-auto">
                   {activeOrders?.data?.map((order) => {
                     const ictInfo = parseIctInfo(order.clientOrderId);
+                    const isLong = order.side === "BUY";
+                    const isFilled = order.status === "filled";
                     return (
                       <div
                         key={order.id}
-                        className={`flex items-center justify-between px-2 py-1.5 rounded text-xs ${
-                          order.status === "filled"
-                            ? "bg-blue-500/10 border border-blue-500/20"
-                            : "bg-[var(--bg-tertiary)] border border-[var(--border)]"
+                        className={`flex items-center justify-between px-2 py-1 rounded text-xs ${
+                          isFilled
+                            ? "bg-blue-500/10"
+                            : isLong
+                            ? "bg-green-500/5"
+                            : "bg-red-500/5"
                         }`}
                       >
-                        <div className="flex items-center gap-2">
-                          <span className={order.status === "filled" ? "text-blue-400" : "text-[var(--text-tertiary)]"}>
-                            {order.status === "filled" ? "⚔️" : "⏳"}
+                        <div className="flex items-center gap-1.5">
+                          <span className={`font-medium ${isLong ? "text-green-400" : "text-red-400"}`}>
+                            {isLong ? "▲" : "▼"}
                           </span>
-                          <span className={order.side === "BUY" ? "text-green-400" : "text-red-400"}>
-                            {order.side === "BUY" ? "多" : "空"}
-                          </span>
-                          <span className="text-[var(--text-secondary)]">
+                          <span className="text-[var(--text-primary)] font-medium">
                             {(order.filledPrice ?? order.entryPrice)?.toFixed(0)}
                           </span>
                           {ictInfo && (
-                            <span className="text-[var(--text-tertiary)] text-[10px]">
+                            <span className="text-[var(--text-tertiary)]">
                               {ictInfo.timeframe} {ictInfo.source}
                             </span>
                           )}
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-red-400 text-[10px]">SL:{order.stopLoss?.toFixed(0)}</span>
-                          <span className="text-green-400 text-[10px]">TP:{order.takeProfit?.toFixed(0)}</span>
-                          <span className={`px-1 rounded text-[10px] ${
-                            order.status === "filled"
+                        <div className="flex items-center gap-1.5 text-[10px]">
+                          <span className="text-red-400/70">{order.stopLoss?.toFixed(0)}</span>
+                          <span className="text-[var(--text-tertiary)]">/</span>
+                          <span className="text-green-400/70">{order.takeProfit?.toFixed(0)}</span>
+                          <span className={`ml-1 px-1.5 py-0.5 rounded ${
+                            isFilled
                               ? "bg-blue-500/20 text-blue-400"
-                              : "bg-yellow-500/20 text-yellow-400"
+                              : "bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]"
                           }`}>
-                            {order.status === "filled" ? "持仓中" : "挂单中"}
+                            {isFilled ? "持仓" : "挂单"}
                           </span>
                         </div>
                       </div>
