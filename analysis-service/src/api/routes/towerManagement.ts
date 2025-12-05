@@ -169,7 +169,7 @@ towerManagementRoutes.post('/start', (req: Request, res: Response) => {
       minSpacingRatio,
     });
 
-    console.log(`[TowerManagement API] 启动托管: userId=${userId}, symbol=${symbol}, baseMargin=${baseMargin}, layers=${towerLayers}`);
+    console.log(`[TowerManagement API] 启动托管: userId=${userId}, symbol=${symbol}, baseMargin=${baseMargin}, layers=${towerLayers}, 多起=${bullishStartLayer}, 空起=${bearishStartLayer}, 间距=${minSpacingRatio}`);
 
     res.json({
       success: true,
