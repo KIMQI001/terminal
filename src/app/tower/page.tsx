@@ -852,7 +852,7 @@ export default function TowerPage() {
                   onChange={(e) => handleSpacingChange(Number(e.target.value))}
                   className="w-14 px-1 py-1 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
                 >
-                  {[0, 3, 5, 8, 10, 15, 20].map((n) => (
+                  {[0, 10, 20, 30, 50, 100].map((n) => (
                     <option key={n} value={n}>{n}‱</option>
                   ))}
                 </select>
