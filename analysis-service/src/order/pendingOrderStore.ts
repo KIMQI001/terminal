@@ -8,7 +8,7 @@ import { getDatabase } from '../db';
 // 待处理入场订单
 export interface PendingEntryOrder {
   id: number;
-  clientOrderId: string;      // ict_tower_1234567890
+  clientOrderId: string;      // ict_tower_4h_OB_95000
   symbol: string;             // BTCUSDC
   side: 'BUY' | 'SELL';
   positionSide: 'LONG' | 'SHORT';
@@ -27,6 +27,13 @@ export interface PendingEntryOrder {
   trailingActive: boolean;
   trailingHighPrice: number | null;  // 多单最高价 / 空单最低价
   trailingActivatedAt: string | null;
+  // 平仓相关字段（战绩统计用）
+  closedAt: string | null;
+  closePrice: number | null;
+  closeReason: 'sl' | 'tp' | 'trailing' | 'manual' | null;
+  pnlAmount: number | null;      // 盈亏金额 (USDT)
+  pnlPercent: number | null;     // 盈亏百分比
+  actualRR: number | null;       // 实际盈亏比
 }
 
 // 数据库行格式
@@ -51,6 +58,13 @@ interface PendingOrderRow {
   trailing_active: number;
   trailing_high_price: number | null;
   trailing_activated_at: string | null;
+  // 平仓相关字段
+  closed_at: string | null;
+  close_price: number | null;
+  close_reason: string | null;
+  pnl_amount: number | null;
+  pnl_percent: number | null;
+  actual_rr: number | null;
 }
 
 /**
@@ -96,6 +110,26 @@ export function initPendingOrdersTable(): void {
   } catch { /* 列已存在 */ }
   try {
     db.exec(`ALTER TABLE pending_entry_orders ADD COLUMN trailing_activated_at TEXT`);
+  } catch { /* 列已存在 */ }
+
+  // 迁移：为旧表添加平仓相关字段（战绩统计用）
+  try {
+    db.exec(`ALTER TABLE pending_entry_orders ADD COLUMN closed_at TEXT`);
+  } catch { /* 列已存在 */ }
+  try {
+    db.exec(`ALTER TABLE pending_entry_orders ADD COLUMN close_price REAL`);
+  } catch { /* 列已存在 */ }
+  try {
+    db.exec(`ALTER TABLE pending_entry_orders ADD COLUMN close_reason TEXT`);
+  } catch { /* 列已存在 */ }
+  try {
+    db.exec(`ALTER TABLE pending_entry_orders ADD COLUMN pnl_amount REAL`);
+  } catch { /* 列已存在 */ }
+  try {
+    db.exec(`ALTER TABLE pending_entry_orders ADD COLUMN pnl_percent REAL`);
+  } catch { /* 列已存在 */ }
+  try {
+    db.exec(`ALTER TABLE pending_entry_orders ADD COLUMN actual_rr REAL`);
   } catch { /* 列已存在 */ }
 
   console.log('[PendingOrderStore] 表初始化完成');
@@ -346,6 +380,13 @@ function rowToOrder(row: PendingOrderRow): PendingEntryOrder {
     trailingActive: row.trailing_active === 1,
     trailingHighPrice: row.trailing_high_price,
     trailingActivatedAt: row.trailing_activated_at,
+    // 平仓相关字段
+    closedAt: row.closed_at,
+    closePrice: row.close_price,
+    closeReason: row.close_reason as PendingEntryOrder['closeReason'],
+    pnlAmount: row.pnl_amount,
+    pnlPercent: row.pnl_percent,
+    actualRR: row.actual_rr,
   };
 }
 
@@ -394,7 +435,7 @@ export function updateTrailingHighPrice(clientOrderId: string, highPrice: number
 }
 
 /**
- * 标记订单已平仓
+ * 标记订单已平仓（简单版，不含盈亏数据）
  */
 export function markOrderClosed(clientOrderId: string): void {
   const db = getDatabase();
@@ -406,4 +447,138 @@ export function markOrderClosed(clientOrderId: string): void {
   `).run(clientOrderId);
 
   console.log(`[PendingOrderStore] 订单已平仓: ${clientOrderId}`);
+}
+
+/**
+ * 标记订单已平仓并记录盈亏数据（战绩统计用）
+ */
+export function markOrderClosedWithPnL(
+  clientOrderId: string,
+  data: {
+    closePrice: number;
+    closeReason: 'sl' | 'tp' | 'trailing' | 'manual';
+    pnlAmount: number;
+    pnlPercent: number;
+    actualRR: number;
+  }
+): void {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    UPDATE pending_entry_orders
+    SET status = 'closed',
+        closed_at = ?,
+        close_price = ?,
+        close_reason = ?,
+        pnl_amount = ?,
+        pnl_percent = ?,
+        actual_rr = ?
+    WHERE client_order_id = ?
+  `).run(
+    now,
+    data.closePrice,
+    data.closeReason,
+    data.pnlAmount,
+    data.pnlPercent,
+    data.actualRR,
+    clientOrderId
+  );
+
+  const emoji = data.pnlAmount >= 0 ? '✅' : '❌';
+  console.log(`[PendingOrderStore] ${emoji} 订单平仓: ${clientOrderId}, ${data.closeReason.toUpperCase()}, 盈亏: ${data.pnlAmount >= 0 ? '+' : ''}${data.pnlAmount.toFixed(2)} USDT (${data.pnlPercent.toFixed(2)}%)`);
+}
+
+/**
+ * 获取已平仓的订单（用于战绩统计）
+ */
+export function getClosedOrders(options?: {
+  symbol?: string;
+  limit?: number;
+  days?: number;
+}): PendingEntryOrder[] {
+  const db = getDatabase();
+
+  let query = `SELECT * FROM pending_entry_orders WHERE status = 'closed' AND close_price IS NOT NULL`;
+  const params: (string | number)[] = [];
+
+  if (options?.symbol) {
+    query += ` AND symbol = ?`;
+    params.push(options.symbol);
+  }
+
+  if (options?.days && options.days > 0) {
+    query += ` AND datetime(closed_at) >= datetime('now', ?)`;
+    params.push(`-${options.days} days`);
+  }
+
+  query += ` ORDER BY closed_at DESC`;
+
+  if (options?.limit) {
+    query += ` LIMIT ?`;
+    params.push(options.limit);
+  }
+
+  const rows = db.prepare(query).all(...params) as PendingOrderRow[];
+  return rows.map(rowToOrder);
+}
+
+/**
+ * 获取战绩统计
+ */
+export function getPerformanceStats(options?: {
+  symbol?: string;
+  days?: number;
+}): {
+  totalOrders: number;
+  winCount: number;
+  lossCount: number;
+  winRate: number;
+  totalPnl: number;
+  avgWinAmount: number;
+  avgLossAmount: number;
+  largestWin: number;
+  largestLoss: number;
+  avgRR: number;
+  profitFactor: number;
+  byCloseReason: { sl: number; tp: number; trailing: number; manual: number };
+} {
+  const orders = getClosedOrders(options);
+
+  const wins = orders.filter(o => (o.pnlAmount ?? 0) > 0);
+  const losses = orders.filter(o => (o.pnlAmount ?? 0) < 0);
+
+  const winAmounts = wins.map(o => o.pnlAmount ?? 0);
+  const lossAmounts = losses.map(o => Math.abs(o.pnlAmount ?? 0));
+
+  const totalWin = winAmounts.reduce((a, b) => a + b, 0);
+  const totalLoss = lossAmounts.reduce((a, b) => a + b, 0);
+
+  const winRate = orders.length > 0 ? wins.length / orders.length : 0;
+  const avgWin = wins.length > 0 ? totalWin / wins.length : 0;
+  const avgLoss = losses.length > 0 ? totalLoss / losses.length : 0;
+
+  // 计算平均盈亏比
+  const rrValues = orders.filter(o => o.actualRR !== null).map(o => o.actualRR!);
+  const avgRR = rrValues.length > 0 ? rrValues.reduce((a, b) => a + b, 0) / rrValues.length : 0;
+
+  return {
+    totalOrders: orders.length,
+    winCount: wins.length,
+    lossCount: losses.length,
+    winRate,
+    totalPnl: totalWin - totalLoss,
+    avgWinAmount: avgWin,
+    avgLossAmount: avgLoss,
+    largestWin: Math.max(...winAmounts, 0),
+    largestLoss: Math.max(...lossAmounts, 0),
+    avgRR,
+    profitFactor: totalLoss > 0 ? totalWin / totalLoss : (totalWin > 0 ? Infinity : 0),
+    byCloseReason: {
+      sl: orders.filter(o => o.closeReason === 'sl').length,
+      tp: orders.filter(o => o.closeReason === 'tp').length,
+      trailing: orders.filter(o => o.closeReason === 'trailing').length,
+      manual: orders.filter(o => o.closeReason === 'manual').length,
+    },
+  };
 }

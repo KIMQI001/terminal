@@ -10,6 +10,7 @@ import {
   markSlTpPlaced,
   markOrderCanceled,
   markOrderError,
+  markOrderClosedWithPnL,
   initPendingOrdersTable,
   cleanupOldPendingOrders,
   getOrderStats,
@@ -20,6 +21,7 @@ import {
   placeTakeProfitOrder,
   placeTrailingStopOrder,
   getOpenOrders,
+  cancelOrder,
   BinanceApiConfig,
 } from './binanceOrderApi';
 import { sendDingtalkMarkdown } from '../notification/dingtalk';
@@ -49,13 +51,23 @@ async function handleOrderFilled(event: OrderTradeUpdateEvent): Promise<void> {
     return;
   }
 
-  // 跳过止盈止损单 (后缀 _sl, _tp)
-  if (clientOrderId.includes('_sl') || clientOrderId.includes('_tp')) {
-    if (order.orderStatus === 'FILLED') {
-      const isTp = clientOrderId.includes('_tp');
-      console.log(`[OrderMonitor] ${symbol} ${isTp ? '止盈' : '止损'}单成交: ${clientOrderId} @ ${order.averagePrice}`);
+  // 处理止盈止损单成交（记录战绩）
+  if (order.orderStatus === 'FILLED') {
+    if (clientOrderId.includes('_sl_') || clientOrderId.includes('_sl')) {
+      console.log(`[OrderMonitor] ${symbol} 止损单成交: ${clientOrderId} @ ${order.averagePrice}`);
+      await handleSlTpFilled(clientOrderId, order, 'sl');
+      return;
     }
-    return;
+    if (clientOrderId.includes('_tp_') || clientOrderId.includes('_tp')) {
+      console.log(`[OrderMonitor] ${symbol} 止盈单成交: ${clientOrderId} @ ${order.averagePrice}`);
+      await handleSlTpFilled(clientOrderId, order, 'tp');
+      return;
+    }
+    if (clientOrderId.includes('_trail_') || clientOrderId.includes('_trail')) {
+      console.log(`[OrderMonitor] ${symbol} 追踪止盈单成交: ${clientOrderId} @ ${order.averagePrice}`);
+      await handleSlTpFilled(clientOrderId, order, 'trailing');
+      return;
+    }
   }
 
   // 核心验证：只处理数据库中存在的待处理订单
@@ -255,6 +267,180 @@ async function handleEntryFilled(
 async function handleEntryCanceled(clientOrderId: string): Promise<void> {
   console.log(`[OrderMonitor] 入场单已取消: ${clientOrderId}`);
   markOrderCanceled(clientOrderId);
+}
+
+/**
+ * 处理止盈止损单成交（记录战绩）
+ */
+async function handleSlTpFilled(
+  clientOrderId: string,
+  order: OrderTradeUpdateEvent['order'],
+  closeReason: 'sl' | 'tp' | 'trailing'
+): Promise<void> {
+  const closePrice = parseFloat(order.averagePrice);
+  const symbol = order.symbol;
+
+  // 解析原始入场单的 clientOrderId
+  // 格式: ict_tower_4h_OB_95000_sl_1733400000 -> ict_tower_4h_OB_95000
+  const originalId = extractOriginalOrderId(clientOrderId);
+  if (!originalId) {
+    console.warn(`[OrderMonitor] 无法解析原订单ID: ${clientOrderId}`);
+    return;
+  }
+
+  // 查询原始入场订单
+  const originalOrder = getPendingOrderByClientId(originalId);
+  if (!originalOrder) {
+    console.warn(`[OrderMonitor] 找不到原订单: ${originalId}`);
+    return;
+  }
+
+  // 检查是否已经平仓过了
+  if (originalOrder.status === 'closed') {
+    console.log(`[OrderMonitor] 订单已平仓，跳过: ${originalId}`);
+    return;
+  }
+
+  // 确保有成交价
+  const entryPrice = originalOrder.filledPrice || originalOrder.entryPrice;
+  if (!entryPrice) {
+    console.warn(`[OrderMonitor] 订单没有成交价: ${originalId}`);
+    return;
+  }
+
+  // 计算盈亏
+  const pnlData = calculatePnL(originalOrder, entryPrice, closePrice, closeReason);
+
+  // 更新数据库
+  markOrderClosedWithPnL(originalId, {
+    closePrice,
+    closeReason,
+    ...pnlData,
+  });
+
+  // 取消剩余的止盈止损单
+  if (config) {
+    await cancelRemainingOrders(originalOrder, {
+      apiKey: config.apiKey,
+      apiSecret: config.apiSecret,
+      isTestnet: config.isTestnet,
+    });
+  }
+
+  // 发送钉钉通知
+  await sendCloseNotification(originalOrder, entryPrice, closePrice, closeReason, pnlData);
+}
+
+/**
+ * 从止盈止损单的 clientOrderId 解析原始入场单 ID
+ * 例: ict_tower_4h_OB_95000_sl_1733400000 -> ict_tower_4h_OB_95000
+ */
+function extractOriginalOrderId(clientOrderId: string): string | null {
+  // 匹配 _sl_, _tp_, _trail_ 及其后缀
+  const suffixes = ['_sl_', '_tp_', '_trail_', '_sl', '_tp', '_trail'];
+
+  for (const suffix of suffixes) {
+    const index = clientOrderId.indexOf(suffix);
+    if (index !== -1) {
+      return clientOrderId.substring(0, index);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 计算盈亏
+ */
+function calculatePnL(
+  order: PendingEntryOrder,
+  entryPrice: number,
+  closePrice: number,
+  closeReason: 'sl' | 'tp' | 'trailing'
+): { pnlAmount: number; pnlPercent: number; actualRR: number } {
+  const quantity = order.quantity;
+  const isLong = order.positionSide === 'LONG';
+
+  // 盈亏金额 = (平仓价 - 入场价) * 数量 * 方向
+  const pnlAmount = (closePrice - entryPrice) * quantity * (isLong ? 1 : -1);
+
+  // 盈亏百分比 = 盈亏金额 / 入场成本
+  const entryCost = entryPrice * quantity;
+  const pnlPercent = entryCost > 0 ? (pnlAmount / entryCost) * 100 : 0;
+
+  // 实际盈亏比 = 盈亏点数 / 风险点数
+  const riskDistance = Math.abs(entryPrice - order.stopLoss);
+  const pnlDistance = Math.abs(closePrice - entryPrice);
+
+  let actualRR = 0;
+  if (riskDistance > 0) {
+    actualRR = pnlAmount >= 0
+      ? pnlDistance / riskDistance
+      : -pnlDistance / riskDistance;
+  }
+
+  return { pnlAmount, pnlPercent, actualRR };
+}
+
+/**
+ * 取消剩余的止盈止损单
+ */
+async function cancelRemainingOrders(
+  order: PendingEntryOrder,
+  apiConfig: BinanceApiConfig
+): Promise<void> {
+  try {
+    const openOrdersResult = await getOpenOrders(apiConfig, order.symbol);
+    if (!openOrdersResult.success || !openOrdersResult.orders) return;
+
+    const ordersToCancel = openOrdersResult.orders.filter(o =>
+      o.positionSide === order.positionSide &&
+      (o.type === 'STOP_MARKET' || o.type === 'TAKE_PROFIT_MARKET' || o.type === 'TRAILING_STOP_MARKET')
+    );
+
+    for (const orderToCancel of ordersToCancel) {
+      console.log(`[OrderMonitor] 取消剩余订单: ${orderToCancel.orderId} (${orderToCancel.type})`);
+      await cancelOrder(apiConfig, order.symbol, orderToCancel.orderId);
+    }
+  } catch (error) {
+    console.error('[OrderMonitor] 取消剩余订单失败:', error);
+  }
+}
+
+/**
+ * 发送平仓通知
+ */
+async function sendCloseNotification(
+  order: PendingEntryOrder,
+  entryPrice: number,
+  closePrice: number,
+  closeReason: 'sl' | 'tp' | 'trailing',
+  pnlData: { pnlAmount: number; pnlPercent: number; actualRR: number }
+): Promise<void> {
+  const direction = order.side === 'BUY' ? '多' : '空';
+  const symbol = order.symbol.replace('USDC', '').replace('USDT', '');
+
+  const reasonText = {
+    sl: '止损',
+    tp: '止盈',
+    trailing: '追踪止盈',
+  }[closeReason];
+
+  const emoji = pnlData.pnlAmount >= 0 ? '✅' : '❌';
+  const pnlSign = pnlData.pnlAmount >= 0 ? '+' : '';
+
+  const content = [
+    `### ${emoji} ${symbol} ${direction}单平仓`,
+    '',
+    `- **平仓原因**: ${reasonText}`,
+    `- **入场价**: $${entryPrice.toFixed(2)}`,
+    `- **平仓价**: $${closePrice.toFixed(2)}`,
+    `- **数量**: ${order.quantity}`,
+    `- **盈亏**: ${pnlSign}${pnlData.pnlAmount.toFixed(2)} USDT (${pnlSign}${pnlData.pnlPercent.toFixed(2)}%)`,
+    `- **盈亏比**: ${pnlData.actualRR.toFixed(2)}R`,
+  ].join('\n');
+
+  await sendDingtalkMarkdown(`${symbol} ${direction}单${reasonText}`, content);
 }
 
 /**
