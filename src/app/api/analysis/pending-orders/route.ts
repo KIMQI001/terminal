@@ -35,11 +35,12 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const clientOrderId = searchParams.get('clientOrderId');
 
+    // 转发所有查询参数到 analysis-service
+    const queryString = searchParams.toString();
     let url = `${ANALYSIS_SERVICE_URL}/api/pending-orders`;
-    if (clientOrderId) {
-      url += `?clientOrderId=${clientOrderId}`;
+    if (queryString) {
+      url += `?${queryString}`;
     }
 
     const response = await fetch(url);
