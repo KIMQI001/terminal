@@ -83,10 +83,12 @@ pendingOrdersRoutes.get('/', (req: Request, res: Response) => {
       }
     } else if (status === 'active') {
       // 获取活跃订单（pending 或 filled 未平仓）
+      console.log(`[PendingOrders] 查询活跃订单: symbol=${symbol}`);
       const orders = getActiveOrders({
         symbol: symbol as string | undefined,
         limit: 50,
       });
+      console.log(`[PendingOrders] 找到 ${orders.length} 个活跃订单`);
       // 格式化输出
       const data = orders.map(order => ({
         id: order.id,
