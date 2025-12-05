@@ -25,12 +25,11 @@ const STORAGE_KEYS = {
 
 // 托管间隔选项（分钟）
 const AUTO_INTERVALS = [
-  { value: 0, label: "关闭" },
-  { value: 5, label: "5分钟" },
-  { value: 10, label: "10分钟" },
   { value: 15, label: "15分钟" },
   { value: 30, label: "30分钟" },
   { value: 60, label: "1小时" },
+  { value: 120, label: "2小时" },
+  { value: 180, label: "3小时" },
 ];
 
 // 数据新鲜度阈值（毫秒）- 5分钟
@@ -169,7 +168,7 @@ export default function TowerPage() {
   const [bullishStartLayer, setBullishStartLayer] = useState(1);
   const [bearishStartLayer, setBearishStartLayer] = useState(1);
   const [minSpacingRatio, setMinSpacingRatio] = useState(5); // 万分之几，默认5（万分之五）
-  const [autoInterval, setAutoInterval] = useState(5); // 托管间隔（分钟），默认5分钟
+  const [autoInterval, setAutoInterval] = useState(15); // 托管间隔（分钟），默认15分钟
   const [isAutoOrdering, setIsAutoOrdering] = useState(false);
   const [orderProgress, setOrderProgress] = useState<{
     current: number;
