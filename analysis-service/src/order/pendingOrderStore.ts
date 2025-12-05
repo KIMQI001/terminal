@@ -150,8 +150,9 @@ export function addPendingOrder(order: {
 }): number {
   const db = getDatabase();
 
+  // 使用 INSERT OR REPLACE 覆盖同一 clientOrderId 的旧记录
   const stmt = db.prepare(`
-    INSERT INTO pending_entry_orders
+    INSERT OR REPLACE INTO pending_entry_orders
     (client_order_id, symbol, side, position_side, quantity, entry_price, stop_loss, take_profit, status, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
   `);
