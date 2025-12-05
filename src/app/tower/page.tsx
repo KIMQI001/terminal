@@ -1142,7 +1142,14 @@ export default function TowerPage() {
                 </div>
               ) : (
                 <div className="space-y-1 max-h-40 overflow-y-auto">
-                  {activeOrders?.data?.map((order) => {
+                  {activeOrders?.data
+                    ?.slice()
+                    .sort((a, b) => {
+                      const priceA = a.filledPrice ?? a.entryPrice ?? 0;
+                      const priceB = b.filledPrice ?? b.entryPrice ?? 0;
+                      return priceB - priceA; // 从高到低
+                    })
+                    .map((order) => {
                     const ictInfo = parseIctInfo(order.clientOrderId);
                     const isLong = order.side === "BUY";
                     const isFilled = order.status === "filled";
