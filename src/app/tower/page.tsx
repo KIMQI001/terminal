@@ -143,6 +143,17 @@ interface TowerActiveOrder {
   filledAt: string | null;
 }
 
+// 从 clientOrderId 解析 ICT 信息
+// 格式: ict_tower_{timeframe}_{source}_{price}
+// 例如: ict_tower_4h_OB_93653
+function parseIctInfo(clientOrderId: string): { timeframe: string; source: string; price: string } | null {
+  const match = clientOrderId.match(/^ict_tower_(\w+)_(\w+)_(\d+)$/);
+  if (match) {
+    return { timeframe: match[1], source: match[2], price: match[3] };
+  }
+  return null;
+}
+
 export default function TowerPage() {
   const { symbol } = useChartStore();
   const { placeOrder, cancelAllOrders } = useOrderStore();
@@ -1131,39 +1142,47 @@ export default function TowerPage() {
                 </div>
               ) : (
                 <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                  {activeOrders?.data?.map((order) => (
-                    <div
-                      key={order.id}
-                      className={`flex items-center justify-between px-2 py-1.5 rounded text-xs ${
-                        order.status === "filled"
-                          ? "bg-blue-500/10 border border-blue-500/20"
-                          : "bg-[var(--bg-tertiary)] border border-[var(--border)]"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={order.status === "filled" ? "text-blue-400" : "text-[var(--text-tertiary)]"}>
-                          {order.status === "filled" ? "⚔️" : "⏳"}
-                        </span>
-                        <span className={order.side === "BUY" ? "text-green-400" : "text-red-400"}>
-                          {order.side === "BUY" ? "多" : "空"}
-                        </span>
-                        <span className="text-[var(--text-secondary)]">
-                          {(order.filledPrice ?? order.entryPrice)?.toFixed(0)}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-red-400 text-[10px]">SL:{order.stopLoss?.toFixed(0)}</span>
-                        <span className="text-green-400 text-[10px]">TP:{order.takeProfit?.toFixed(0)}</span>
-                        <span className={`px-1 rounded text-[10px] ${
+                  {activeOrders?.data?.map((order) => {
+                    const ictInfo = parseIctInfo(order.clientOrderId);
+                    return (
+                      <div
+                        key={order.id}
+                        className={`flex items-center justify-between px-2 py-1.5 rounded text-xs ${
                           order.status === "filled"
-                            ? "bg-blue-500/20 text-blue-400"
-                            : "bg-yellow-500/20 text-yellow-400"
-                        }`}>
-                          {order.status === "filled" ? "持仓中" : "挂单中"}
-                        </span>
+                            ? "bg-blue-500/10 border border-blue-500/20"
+                            : "bg-[var(--bg-tertiary)] border border-[var(--border)]"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={order.status === "filled" ? "text-blue-400" : "text-[var(--text-tertiary)]"}>
+                            {order.status === "filled" ? "⚔️" : "⏳"}
+                          </span>
+                          <span className={order.side === "BUY" ? "text-green-400" : "text-red-400"}>
+                            {order.side === "BUY" ? "多" : "空"}
+                          </span>
+                          <span className="text-[var(--text-secondary)]">
+                            {(order.filledPrice ?? order.entryPrice)?.toFixed(0)}
+                          </span>
+                          {ictInfo && (
+                            <span className="text-[var(--text-tertiary)] text-[10px]">
+                              {ictInfo.timeframe} {ictInfo.source}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-400 text-[10px]">SL:{order.stopLoss?.toFixed(0)}</span>
+                          <span className="text-green-400 text-[10px]">TP:{order.takeProfit?.toFixed(0)}</span>
+                          <span className={`px-1 rounded text-[10px] ${
+                            order.status === "filled"
+                              ? "bg-blue-500/20 text-blue-400"
+                              : "bg-yellow-500/20 text-yellow-400"
+                          }`}>
+                            {order.status === "filled" ? "持仓中" : "挂单中"}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
