@@ -1149,7 +1149,7 @@ export default function TowerPage() {
                     return (
                       <div
                         key={order.id}
-                        className={`flex items-center justify-between px-2 py-1 rounded text-xs ${
+                        className={`grid grid-cols-[auto_1fr_auto] items-center gap-2 px-2 py-1 rounded text-xs ${
                           isFilled
                             ? "bg-blue-500/10"
                             : isLong
@@ -1164,12 +1164,12 @@ export default function TowerPage() {
                           <span className="text-[var(--text-primary)] font-medium">
                             {(order.filledPrice ?? order.entryPrice)?.toFixed(0)}
                           </span>
-                          {ictInfo && (
-                            <span className="text-[var(--text-tertiary)]">
-                              {ictInfo.timeframe} {ictInfo.source}
-                            </span>
-                          )}
                         </div>
+                        {ictInfo && (
+                          <span className="text-[var(--text-tertiary)] text-center">
+                            {ictInfo.timeframe} {ictInfo.source}
+                          </span>
+                        )}
                         <div className="flex items-center gap-1.5 text-[10px]">
                           <span className="text-red-400/70">{order.stopLoss?.toFixed(0)}</span>
                           <span className="text-[var(--text-tertiary)]">/</span>
