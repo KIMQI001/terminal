@@ -8,6 +8,7 @@ import {
   addPendingOrder,
   getPendingOrderByClientId,
   getAllPendingOrders,
+  getActiveOrders,
   deletePendingOrder,
 } from '../../order/pendingOrderStore';
 
@@ -67,7 +68,7 @@ pendingOrdersRoutes.post('/', (req: Request, res: Response) => {
 // GET: 获取待处理订单
 pendingOrdersRoutes.get('/', (req: Request, res: Response) => {
   try {
-    const { clientOrderId } = req.query;
+    const { clientOrderId, status, symbol } = req.query;
 
     if (clientOrderId) {
       // 获取单个订单
@@ -80,6 +81,29 @@ pendingOrdersRoutes.get('/', (req: Request, res: Response) => {
           error: '订单不存在',
         });
       }
+    } else if (status === 'active') {
+      // 获取活跃订单（pending 或 filled 未平仓）
+      const orders = getActiveOrders({
+        symbol: symbol as string | undefined,
+        limit: 50,
+      });
+      // 格式化输出
+      const data = orders.map(order => ({
+        id: order.id,
+        clientOrderId: order.clientOrderId,
+        symbol: order.symbol,
+        side: order.side,
+        positionSide: order.positionSide,
+        quantity: order.quantity,
+        entryPrice: order.entryPrice,
+        filledPrice: order.filledPrice,
+        stopLoss: order.stopLoss,
+        takeProfit: order.takeProfit,
+        status: order.status,
+        createdAt: order.createdAt,
+        filledAt: order.filledAt,
+      }));
+      res.json({ success: true, data });
     } else {
       // 获取所有待处理订单
       const orders = getAllPendingOrders();

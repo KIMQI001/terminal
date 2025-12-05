@@ -214,6 +214,33 @@ export function getOrdersByStatus(status: PendingEntryOrder['status']): PendingE
 }
 
 /**
+ * 获取活跃订单（pending 或 filled 但未平仓）
+ */
+export function getActiveOrders(options?: { symbol?: string; limit?: number }): PendingEntryOrder[] {
+  const db = getDatabase();
+  const { symbol, limit = 50 } = options ?? {};
+
+  let sql = `
+    SELECT * FROM pending_entry_orders
+    WHERE status IN ('pending', 'filled')
+    AND closed_at IS NULL
+  `;
+  const params: (string | number)[] = [];
+
+  if (symbol) {
+    sql += ' AND symbol = ?';
+    params.push(symbol);
+  }
+
+  sql += ' ORDER BY created_at DESC LIMIT ?';
+  params.push(limit);
+
+  const rows = db.prepare(sql).all(...params) as PendingOrderRow[];
+
+  return rows.map(rowToOrder);
+}
+
+/**
  * 更新订单状态为已成交
  */
 export function markOrderFilled(clientOrderId: string, filledPrice: number): void {

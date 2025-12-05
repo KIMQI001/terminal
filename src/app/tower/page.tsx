@@ -126,6 +126,23 @@ interface TowerPerformanceResponse {
   data: TowerPerformanceStats | TowerPerformanceOrder[];
 }
 
+// 当前守卫订单（未平仓）
+interface TowerActiveOrder {
+  id: number;
+  clientOrderId: string;
+  symbol: string;
+  side: string;
+  positionSide: string;
+  quantity: number;
+  entryPrice: number;
+  filledPrice: number | null;
+  stopLoss: number;
+  takeProfit: number;
+  status: 'pending' | 'filled';
+  createdAt: string;
+  filledAt: string | null;
+}
+
 export default function TowerPage() {
   const { symbol } = useChartStore();
   const { placeOrder, cancelAllOrders } = useOrderStore();
@@ -186,6 +203,17 @@ export default function TowerPage() {
       return response.json();
     },
     refetchInterval: 60000, // 每分钟刷新
+  });
+
+  // 从后端获取当前守卫（未平仓订单）
+  const { data: activeOrders } = useQuery<{ success: boolean; data: TowerActiveOrder[] }>({
+    queryKey: ["tower-active-orders", symbol],
+    queryFn: async () => {
+      const symbolFormatted = symbol.replace("/", "");
+      const response = await fetch(`/api/analysis/pending-orders?symbol=${symbolFormatted}&status=active`);
+      return response.json();
+    },
+    refetchInterval: 30000, // 每30秒刷新
   });
 
   // 后端托管状态
@@ -1000,78 +1028,250 @@ export default function TowerPage() {
             )}
           </div>
 
-          {/* 托管执行记录 - 托管时显示 */}
+          {/* 托管执行记录 - 可折叠 */}
           {isAutoManaged && (
-            <div className="mb-4 p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-medium text-[var(--text-primary)]">
-                  ⚙️ 执行记录 <span className="text-xs font-normal text-green-400">(托管中)</span>
-                </h3>
+            <details className="mb-4 group/exec">
+              <summary className="p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)] cursor-pointer list-none flex items-center justify-between hover:bg-[var(--bg-tertiary)] transition-colors">
+                <div className="flex items-center gap-2">
+                  <svg
+                    className="w-3 h-3 text-[var(--text-tertiary)] transition-transform group-open/exec:rotate-90"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                  <span className="text-sm font-medium text-[var(--text-primary)]">
+                    ⚙️ 执行记录
+                  </span>
+                  <span className="text-xs text-green-400">(托管中)</span>
+                </div>
                 <div className="flex items-center gap-3">
                   <span className="text-xs">
                     <span className="text-green-400">{backendStats.successCount}</span>
-                    <span className="text-[var(--text-tertiary)]"> 成功</span>
-                  </span>
-                  <span className="text-xs">
+                    <span className="text-[var(--text-tertiary)]">/</span>
                     <span className="text-red-400">{backendStats.failedCount}</span>
-                    <span className="text-[var(--text-tertiary)]"> 失败</span>
-                  </span>
-                  <span className="text-xs">
+                    <span className="text-[var(--text-tertiary)]">/</span>
                     <span className="text-yellow-400">{backendStats.skippedCount}</span>
-                    <span className="text-[var(--text-tertiary)]"> 跳过</span>
                   </span>
-                  {backendStats.totalExecutions > 0 && (
-                    <span className="text-xs text-[var(--text-tertiary)]">
-                      ({Math.round((backendStats.successCount / backendStats.totalExecutions) * 100)}%)
-                    </span>
-                  )}
+                </div>
+              </summary>
+              <div className="mt-2 p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
+                {backendRecords.length === 0 ? (
+                  <div className="text-xs text-[var(--text-tertiary)] text-center py-4">
+                    托管已启动，等待首次执行...
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {backendRecords.slice(0, 20).map((record) => (
+                      <div
+                        key={record.id}
+                        className={`flex items-center justify-between px-2 py-1.5 rounded text-xs ${
+                          record.status === "success"
+                            ? "bg-green-500/10 border border-green-500/20"
+                            : record.status === "skipped"
+                            ? "bg-yellow-500/10 border border-yellow-500/20"
+                            : "bg-red-500/10 border border-red-500/20"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={
+                            record.status === "success"
+                              ? "text-green-400"
+                              : record.status === "skipped"
+                              ? "text-yellow-400"
+                              : "text-red-400"
+                          }>
+                            {record.status === "success" ? "✓" : record.status === "skipped" ? "⏭" : "✗"}
+                          </span>
+                          <span className="text-[var(--text-tertiary)]">
+                            {new Date(record.executedAt).toLocaleTimeString("zh-CN")}
+                          </span>
+                          <span className="text-[var(--text-secondary)]">
+                            <span className="text-green-400">{record.bullishCount}多</span>
+                            {" / "}
+                            <span className="text-red-400">{record.bearishCount}空</span>
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[var(--text-tertiary)]">
+                            {record.totalMargin}U
+                          </span>
+                          {record.errorMessage && (
+                            <span className="text-red-400" title={record.errorMessage}>
+                              有错误
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </details>
+          )}
+
+          {/* 守塔战绩面板 - 常显示 */}
+          <div className="mb-4 p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
+            <h3 className="text-sm font-medium text-[var(--text-primary)] mb-3">
+              🏯 守塔战绩
+            </h3>
+
+            {/* 1. 当前守卫 */}
+            <div className="mb-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-[var(--text-tertiary)]">当前守卫</span>
+                <span className="text-xs text-[var(--text-tertiary)]">
+                  {activeOrders?.data?.length ?? 0} 单
+                </span>
+              </div>
+              {(activeOrders?.data?.length ?? 0) === 0 ? (
+                <div className="text-xs text-[var(--text-tertiary)] text-center py-3 bg-[var(--bg-tertiary)] rounded">
+                  暂无守卫中的订单
+                </div>
+              ) : (
+                <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                  {activeOrders?.data?.map((order) => (
+                    <div
+                      key={order.id}
+                      className={`flex items-center justify-between px-2 py-1.5 rounded text-xs ${
+                        order.status === "filled"
+                          ? "bg-blue-500/10 border border-blue-500/20"
+                          : "bg-[var(--bg-tertiary)] border border-[var(--border)]"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={order.status === "filled" ? "text-blue-400" : "text-[var(--text-tertiary)]"}>
+                          {order.status === "filled" ? "⚔️" : "⏳"}
+                        </span>
+                        <span className={order.side === "BUY" ? "text-green-400" : "text-red-400"}>
+                          {order.side === "BUY" ? "多" : "空"}
+                        </span>
+                        <span className="text-[var(--text-secondary)]">
+                          {(order.filledPrice ?? order.entryPrice)?.toFixed(0)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-red-400 text-[10px]">SL:{order.stopLoss?.toFixed(0)}</span>
+                        <span className="text-green-400 text-[10px]">TP:{order.takeProfit?.toFixed(0)}</span>
+                        <span className={`px-1 rounded text-[10px] ${
+                          order.status === "filled"
+                            ? "bg-blue-500/20 text-blue-400"
+                            : "bg-yellow-500/20 text-yellow-400"
+                        }`}>
+                          {order.status === "filled" ? "持仓中" : "挂单中"}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 分隔线 */}
+            <div className="border-t border-[var(--border)] my-3" />
+
+            {/* 2. 战绩统计 */}
+            <div className="mb-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-[var(--text-tertiary)]">战绩统计 (近30天)</span>
+                <div className={`text-sm font-bold ${
+                  (performanceStats?.data?.totalPnL ?? 0) >= 0 ? "text-green-400" : "text-red-400"
+                }`}>
+                  {(performanceStats?.data?.totalPnL ?? 0) >= 0 ? "+" : ""}
+                  {(performanceStats?.data?.totalPnL ?? 0).toFixed(2)} U
                 </div>
               </div>
+              <div className="grid grid-cols-4 gap-2">
+                <div className="bg-[var(--bg-tertiary)] rounded p-2 text-center">
+                  <div className="text-[10px] text-[var(--text-tertiary)]">交易</div>
+                  <div className="text-xs font-medium text-[var(--text-primary)]">
+                    {performanceStats?.data?.totalTrades ?? 0}
+                  </div>
+                </div>
+                <div className="bg-[var(--bg-tertiary)] rounded p-2 text-center">
+                  <div className="text-[10px] text-[var(--text-tertiary)]">胜率</div>
+                  <div className={`text-xs font-medium ${
+                    (performanceStats?.data?.winRate ?? 0) >= 50 ? "text-green-400" : "text-red-400"
+                  }`}>
+                    {(performanceStats?.data?.winRate ?? 0).toFixed(0)}%
+                  </div>
+                </div>
+                <div className="bg-[var(--bg-tertiary)] rounded p-2 text-center">
+                  <div className="text-[10px] text-[var(--text-tertiary)]">盈亏比</div>
+                  <div className={`text-xs font-medium ${
+                    (performanceStats?.data?.profitFactor ?? 0) >= 1 ? "text-green-400" : "text-red-400"
+                  }`}>
+                    {(performanceStats?.data?.profitFactor ?? 0).toFixed(2)}
+                  </div>
+                </div>
+                <div className="bg-[var(--bg-tertiary)] rounded p-2 text-center">
+                  <div className="text-[10px] text-[var(--text-tertiary)]">胜/负</div>
+                  <div className="text-xs font-medium">
+                    <span className="text-green-400">{performanceStats?.data?.winCount ?? 0}</span>
+                    <span className="text-[var(--text-tertiary)]">/</span>
+                    <span className="text-red-400">{performanceStats?.data?.lossCount ?? 0}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-              {/* 记录列表 */}
-              {backendRecords.length === 0 ? (
-                <div className="text-xs text-[var(--text-tertiary)] text-center py-4">
-                  托管已启动，等待首次执行...
+            {/* 分隔线 */}
+            <div className="border-t border-[var(--border)] my-3" />
+
+            {/* 3. 战绩清单 */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-[var(--text-tertiary)]">战绩清单</span>
+                <span className="text-xs text-[var(--text-tertiary)]">
+                  {performanceOrders?.data?.length ?? 0} 笔
+                </span>
+              </div>
+              {(performanceOrders?.data?.length ?? 0) === 0 ? (
+                <div className="text-xs text-[var(--text-tertiary)] text-center py-3 bg-[var(--bg-tertiary)] rounded">
+                  暂无已平仓订单
                 </div>
               ) : (
                 <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                  {backendRecords.slice(0, 20).map((record) => (
+                  {performanceOrders?.data?.map((order) => (
                     <div
-                      key={record.id}
+                      key={order.id}
                       className={`flex items-center justify-between px-2 py-1.5 rounded text-xs ${
-                        record.status === "success"
+                        (order.pnlAmount ?? 0) >= 0
                           ? "bg-green-500/10 border border-green-500/20"
-                          : record.status === "skipped"
-                          ? "bg-yellow-500/10 border border-yellow-500/20"
                           : "bg-red-500/10 border border-red-500/20"
                       }`}
                     >
                       <div className="flex items-center gap-2">
-                        <span className={
-                          record.status === "success"
-                            ? "text-green-400"
-                            : record.status === "skipped"
-                            ? "text-yellow-400"
-                            : "text-red-400"
-                        }>
-                          {record.status === "success" ? "✓" : record.status === "skipped" ? "⏭" : "✗"}
+                        <span className={(order.pnlAmount ?? 0) >= 0 ? "text-green-400" : "text-red-400"}>
+                          {(order.pnlAmount ?? 0) >= 0 ? "✓" : "✗"}
                         </span>
                         <span className="text-[var(--text-tertiary)]">
-                          {new Date(record.executedAt).toLocaleTimeString("zh-CN")}
+                          {order.closedAt ? new Date(order.closedAt).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" }) : "-"}
+                        </span>
+                        <span className={order.side === "BUY" ? "text-green-400" : "text-red-400"}>
+                          {order.side === "BUY" ? "多" : "空"}
                         </span>
                         <span className="text-[var(--text-secondary)]">
-                          <span className="text-green-400">{record.bullishCount}多</span>
-                          {" / "}
-                          <span className="text-red-400">{record.bearishCount}空</span>
+                          {order.entryPrice?.toFixed(0) ?? "-"} → {order.closePrice?.toFixed(0) ?? "-"}
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="text-[var(--text-tertiary)]">
-                          {record.totalMargin}U
+                        <span className={`px-1 rounded text-[10px] ${
+                          order.closeReason === "tp"
+                            ? "bg-green-500/20 text-green-400"
+                            : order.closeReason === "sl"
+                            ? "bg-red-500/20 text-red-400"
+                            : "bg-blue-500/20 text-blue-400"
+                        }`}>
+                          {order.closeReason === "tp" ? "止盈" : order.closeReason === "sl" ? "止损" : order.closeReason === "trailing" ? "追踪" : "手动"}
                         </span>
-                        {record.errorMessage && (
-                          <span className="text-red-400" title={record.errorMessage}>
-                            有错误
+                        <span className={(order.pnlAmount ?? 0) >= 0 ? "text-green-400 font-medium" : "text-red-400 font-medium"}>
+                          {(order.pnlAmount ?? 0) >= 0 ? "+" : ""}{(order.pnlAmount ?? 0).toFixed(2)}U
+                        </span>
+                        {order.actualRR !== null && order.actualRR !== undefined && (
+                          <span className="text-[var(--text-tertiary)]">
+                            ({order.actualRR >= 0 ? "+" : ""}{order.actualRR.toFixed(1)}R)
                           </span>
                         )}
                       </div>
@@ -1080,121 +1280,7 @@ export default function TowerPage() {
                 </div>
               )}
             </div>
-          )}
-
-          {/* 守塔战绩面板 - 有数据时显示 */}
-          {(performanceStats?.data?.totalTrades ?? 0) > 0 && (
-            <div className="mb-4 p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-medium text-[var(--text-primary)]">
-                  🏯 守塔战绩 <span className="text-xs font-normal text-[var(--text-tertiary)]">(近30天)</span>
-                </h3>
-                <div className={`text-lg font-bold ${
-                  (performanceStats?.data?.totalPnL ?? 0) >= 0 ? "text-green-400" : "text-red-400"
-                }`}>
-                  {(performanceStats?.data?.totalPnL ?? 0) >= 0 ? "+" : ""}
-                  {(performanceStats?.data?.totalPnL ?? 0).toFixed(2)} U
-                </div>
-              </div>
-
-              {/* 统计卡片 */}
-              <div className="grid grid-cols-4 gap-2 mb-3">
-                <div className="bg-[var(--bg-tertiary)] rounded p-2 text-center">
-                  <div className="text-xs text-[var(--text-tertiary)]">交易次数</div>
-                  <div className="text-sm font-medium text-[var(--text-primary)]">
-                    {performanceStats?.data?.totalTrades ?? 0}
-                  </div>
-                </div>
-                <div className="bg-[var(--bg-tertiary)] rounded p-2 text-center">
-                  <div className="text-xs text-[var(--text-tertiary)]">胜率</div>
-                  <div className={`text-sm font-medium ${
-                    (performanceStats?.data?.winRate ?? 0) >= 50 ? "text-green-400" : "text-red-400"
-                  }`}>
-                    {(performanceStats?.data?.winRate ?? 0).toFixed(1)}%
-                  </div>
-                </div>
-                <div className="bg-[var(--bg-tertiary)] rounded p-2 text-center">
-                  <div className="text-xs text-[var(--text-tertiary)]">盈亏比</div>
-                  <div className={`text-sm font-medium ${
-                    (performanceStats?.data?.profitFactor ?? 0) >= 1 ? "text-green-400" : "text-red-400"
-                  }`}>
-                    {(performanceStats?.data?.profitFactor ?? 0).toFixed(2)}
-                  </div>
-                </div>
-                <div className="bg-[var(--bg-tertiary)] rounded p-2 text-center">
-                  <div className="text-xs text-[var(--text-tertiary)]">胜/负</div>
-                  <div className="text-sm font-medium">
-                    <span className="text-green-400">{performanceStats?.data?.winCount ?? 0}</span>
-                    <span className="text-[var(--text-tertiary)]">/</span>
-                    <span className="text-red-400">{performanceStats?.data?.lossCount ?? 0}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* 订单列表 */}
-              {(performanceOrders?.data?.length ?? 0) > 0 && (
-                <details className="group/orders">
-                  <summary className="cursor-pointer text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] flex items-center gap-1">
-                    <svg
-                      className="w-3 h-3 transition-transform group-open/orders:rotate-90"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                    查看详细订单 ({performanceOrders?.data?.length ?? 0})
-                  </summary>
-                  <div className="mt-2 space-y-1.5 max-h-64 overflow-y-auto">
-                    {performanceOrders?.data?.map((order) => (
-                      <div
-                        key={order.id}
-                        className={`flex items-center justify-between px-2 py-1.5 rounded text-xs ${
-                          (order.pnlAmount ?? 0) >= 0
-                            ? "bg-green-500/10 border border-green-500/20"
-                            : "bg-red-500/10 border border-red-500/20"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className={(order.pnlAmount ?? 0) >= 0 ? "text-green-400" : "text-red-400"}>
-                            {(order.pnlAmount ?? 0) >= 0 ? "✓" : "✗"}
-                          </span>
-                          <span className="text-[var(--text-tertiary)]">
-                            {order.closedAt ? new Date(order.closedAt).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" }) : "-"}
-                          </span>
-                          <span className={order.side === "BUY" ? "text-green-400" : "text-red-400"}>
-                            {order.side === "BUY" ? "多" : "空"}
-                          </span>
-                          <span className="text-[var(--text-secondary)]">
-                            {order.entryPrice?.toFixed(0) ?? "-"} → {order.closePrice?.toFixed(0) ?? "-"}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className={`px-1 rounded text-[10px] ${
-                            order.closeReason === "tp"
-                              ? "bg-green-500/20 text-green-400"
-                              : order.closeReason === "sl"
-                              ? "bg-red-500/20 text-red-400"
-                              : "bg-blue-500/20 text-blue-400"
-                          }`}>
-                            {order.closeReason === "tp" ? "止盈" : order.closeReason === "sl" ? "止损" : order.closeReason === "trailing" ? "追踪" : "手动"}
-                          </span>
-                          <span className={(order.pnlAmount ?? 0) >= 0 ? "text-green-400 font-medium" : "text-red-400 font-medium"}>
-                            {(order.pnlAmount ?? 0) >= 0 ? "+" : ""}{(order.pnlAmount ?? 0).toFixed(2)}U
-                          </span>
-                          {order.actualRR !== null && order.actualRR !== undefined && (
-                            <span className="text-[var(--text-tertiary)]">
-                              ({order.actualRR >= 0 ? "+" : ""}{order.actualRR.toFixed(1)}R)
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              )}
-            </div>
-          )}
+          </div>
 
           {/* Rules Summary */}
           <details className="mb-4 group">
