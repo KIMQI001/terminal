@@ -1000,12 +1000,12 @@ export default function TowerPage() {
             )}
           </div>
 
-          {/* 守塔战绩面板 - 托管时显示 */}
+          {/* 托管执行记录 - 托管时显示 */}
           {isAutoManaged && (
             <div className="mb-4 p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-medium text-[var(--text-primary)]">
-                  🏯 守塔战绩 <span className="text-xs font-normal text-green-400">(后台运行中)</span>
+                  ⚙️ 执行记录 <span className="text-xs font-normal text-green-400">(托管中)</span>
                 </h3>
                 <div className="flex items-center gap-3">
                   <span className="text-xs">
@@ -1082,12 +1082,12 @@ export default function TowerPage() {
             </div>
           )}
 
-          {/* 交易盈亏战绩面板 - 有数据时显示 */}
+          {/* 守塔战绩面板 - 有数据时显示 */}
           {(performanceStats?.data?.totalTrades ?? 0) > 0 && (
             <div className="mb-4 p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-medium text-[var(--text-primary)]">
-                  📊 交易战绩 <span className="text-xs font-normal text-[var(--text-tertiary)]">(近30天)</span>
+                  🏯 守塔战绩 <span className="text-xs font-normal text-[var(--text-tertiary)]">(近30天)</span>
                 </h3>
                 <div className={`text-lg font-bold ${
                   (performanceStats?.data?.totalPnL ?? 0) >= 0 ? "text-green-400" : "text-red-400"
