@@ -411,6 +411,9 @@ interface TowerOrder {
   stopLoss: number;
   takeProfit: number;
   margin: number;
+  // 用于生成 clientOrderId
+  timeframe: string;  // 级别: 15m, 1h, 4h
+  source: string;     // ICT 种类: OB, FVG, BB 等
 }
 
 function calculateOrders(
@@ -547,6 +550,8 @@ function calculateOrders(
       stopLoss: block.stopLoss,
       takeProfit: block.takeProfit,
       margin,
+      timeframe: block.timeframe,
+      source: block.source,
     });
   }
 
@@ -564,6 +569,8 @@ function calculateOrders(
       stopLoss: block.stopLoss,
       takeProfit: block.takeProfit,
       margin,
+      timeframe: block.timeframe,
+      source: block.source,
     });
   }
 
@@ -588,7 +595,10 @@ async function placeOrders(
   for (const order of orders) {
     try {
       const timestamp = Date.now();
-      const clientOrderId = `ict_tower_${timestamp}_${Math.random().toString(36).substring(2, 8)}`;
+      // 格式: ict_tower_{级别}_{ICT种类}_{点位}_{时间戳}
+      // 例如: ict_tower_15m_OB_95000_1733400000
+      const priceStr = Math.round(order.price).toString();
+      const clientOrderId = `ict_tower_${order.timeframe}_${order.source}_${priceStr}_${timestamp}`;
 
       // 1. 下入场单（限价单）
       const entryParams: Record<string, string | number> = {
@@ -905,7 +915,11 @@ async function placeRepairOrder(
 
   const closeSide = params.positionSide === 'LONG' ? 'SELL' : 'BUY';
   const timestamp = Date.now();
-  const clientOrderId = `ict_repair_${timestamp}_${Math.random().toString(36).substring(2, 8)}`;
+  // 格式: ict_repair_{方向}_{类型}_{点位}_{时间戳}
+  // 例如: ict_repair_LONG_SL_94800_1733400000
+  const typeShort = params.type === 'STOP_MARKET' ? 'SL' : 'TP';
+  const priceStr = Math.round(params.stopPrice).toString();
+  const clientOrderId = `ict_repair_${params.positionSide}_${typeShort}_${priceStr}_${timestamp}`;
 
   const orderParams: Record<string, string | number> = {
     symbol: params.symbol,
