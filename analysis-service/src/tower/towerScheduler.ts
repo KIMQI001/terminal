@@ -595,10 +595,10 @@ async function placeOrders(
   for (const order of orders) {
     try {
       const timestamp = Date.now();
-      // 格式: ict_tower_{级别}_{ICT种类}_{点位}_{时间戳}
-      // 例如: ict_tower_15m_OB_95000_1733400000
+      // 格式: ict_tower_{级别}_{ICT种类}_{点位}
+      // 例如: ict_tower_4h_OB_95000 (21字符,Binance限制<36)
       const priceStr = Math.round(order.price).toString();
-      const clientOrderId = `ict_tower_${order.timeframe}_${order.source}_${priceStr}_${timestamp}`;
+      const clientOrderId = `ict_tower_${order.timeframe}_${order.source}_${priceStr}`;
 
       // 1. 下入场单（限价单）
       const entryParams: Record<string, string | number> = {
@@ -915,11 +915,12 @@ async function placeRepairOrder(
 
   const closeSide = params.positionSide === 'LONG' ? 'SELL' : 'BUY';
   const timestamp = Date.now();
-  // 格式: ict_repair_{方向}_{类型}_{点位}_{时间戳}
-  // 例如: ict_repair_LONG_SL_94800_1733400000
+  // 格式: ict_repair_{方向}_{类型}_{点位}
+  // 例如: ict_repair_L_SL_94800 (22字符)
+  const sideShort = params.positionSide === 'LONG' ? 'L' : 'S';
   const typeShort = params.type === 'STOP_MARKET' ? 'SL' : 'TP';
   const priceStr = Math.round(params.stopPrice).toString();
-  const clientOrderId = `ict_repair_${params.positionSide}_${typeShort}_${priceStr}_${timestamp}`;
+  const clientOrderId = `ict_repair_${sideShort}_${typeShort}_${priceStr}`;
 
   const orderParams: Record<string, string | number> = {
     symbol: params.symbol,
