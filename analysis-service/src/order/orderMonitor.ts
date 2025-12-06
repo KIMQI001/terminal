@@ -63,7 +63,7 @@ async function handleOrderFilled(event: OrderTradeUpdateEvent): Promise<void> {
       await handleSlTpFilled(clientOrderId, order, 'tp');
       return;
     }
-    if (clientOrderId.includes('_trail_') || clientOrderId.includes('_trail')) {
+    if (clientOrderId.includes('_trail') || clientOrderId.includes('_tr')) {
       console.log(`[OrderMonitor] ${symbol} 追踪止盈单成交: ${clientOrderId} @ ${order.averagePrice}`);
       await handleSlTpFilled(clientOrderId, order, 'trailing');
       return;
@@ -152,8 +152,9 @@ async function handleEntryFilled(
 
     // 只下缺失的单
     if (!hasStopLoss) {
-      // 下止损单，使用新的 clientOrderId 避免重复
-      const slClientId = `${clientOrderId}_sl_${Date.now()}`;
+      // 下止损单，使用短后缀避免超过36字符限制
+      const shortSuffix = Math.random().toString(36).slice(-4);
+      const slClientId = `${clientOrderId}_sl${shortSuffix}`;
       console.log(`[OrderMonitor] 下止损单: ${pendingOrder.stopLoss}`);
       const slResult = await placeStopLossOrder(apiConfig, {
         symbol: pendingOrder.symbol,
@@ -177,8 +178,9 @@ async function handleEntryFilled(
     }
 
     if (!hasTakeProfit) {
-      // 下固定止盈单，使用新的 clientOrderId 避免重复
-      const tpClientId = `${clientOrderId}_tp_${Date.now()}`;
+      // 下固定止盈单，使用短后缀避免超过36字符限制
+      const tpSuffix = Math.random().toString(36).slice(-4);
+      const tpClientId = `${clientOrderId}_tp${tpSuffix}`;
       console.log(`[OrderMonitor] 下固定止盈单: ${pendingOrder.takeProfit}`);
       const fixedTpResult = await placeTakeProfitOrder(apiConfig, {
         symbol: pendingOrder.symbol,
@@ -209,7 +211,8 @@ async function handleEntryFilled(
         ? filledPrice * 1.015   // 多单：价格上涨1.5%后激活
         : filledPrice * 0.985;  // 空单：价格下跌1.5%后激活
 
-      const trailClientId = `${clientOrderId}_trail_${Date.now()}`;
+      const trailSuffix = Math.random().toString(36).slice(-4);
+      const trailClientId = `${clientOrderId}_tr${trailSuffix}`;
       console.log(`[OrderMonitor] 下追踪止盈单: 激活价=${trailingActivationPrice.toFixed(2)}, 回撤=0.3%`);
       const trailingTpResult = await placeTrailingStopOrder(apiConfig, {
         symbol: pendingOrder.symbol,
@@ -333,19 +336,14 @@ async function handleSlTpFilled(
 
 /**
  * 从止盈止损单的 clientOrderId 解析原始入场单 ID
- * 例: ict_tower_4h_OB_95000_sl_1733400000 -> ict_tower_4h_OB_95000
+ * 例: ict_tower_4h_OB_95000_slxxxx -> ict_tower_4h_OB_95000
  */
 function extractOriginalOrderId(clientOrderId: string): string | null {
-  // 匹配 _sl_, _tp_, _trail_ 及其后缀
-  const suffixes = ['_sl_', '_tp_', '_trail_', '_sl', '_tp', '_trail'];
-
-  for (const suffix of suffixes) {
-    const index = clientOrderId.indexOf(suffix);
-    if (index !== -1) {
-      return clientOrderId.substring(0, index);
-    }
+  // 匹配 _sl, _tp, _tr 后缀（新格式4字符后缀，旧格式时间戳后缀）
+  const match = clientOrderId.match(/^(.+?)_(sl|tp|tr|trail)[\w]*$/);
+  if (match) {
+    return match[1];
   }
-
   return null;
 }
 

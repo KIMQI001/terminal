@@ -132,7 +132,87 @@ export function initPendingOrdersTable(): void {
     db.exec(`ALTER TABLE pending_entry_orders ADD COLUMN actual_rr REAL`);
   } catch { /* 列已存在 */ }
 
+  // 迁移：重建表以更新 status CHECK 约束（添加 trailing, closed 状态）
+  migrateStatusConstraint(db);
+
   console.log('[PendingOrderStore] 表初始化完成');
+}
+
+/**
+ * 迁移：重建表以更新 status CHECK 约束
+ * 旧约束缺少 'trailing' 和 'closed' 状态
+ */
+function migrateStatusConstraint(db: ReturnType<typeof getDatabase>): void {
+  try {
+    // 检查是否需要迁移：尝试插入然后回滚
+    const testStmt = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='pending_entry_orders'`);
+    const result = testStmt.get() as { sql: string } | undefined;
+
+    if (!result?.sql) return;
+
+    // 如果 CHECK 约束已包含 'trailing' 和 'closed'，则不需要迁移
+    if (result.sql.includes("'trailing'") && result.sql.includes("'closed'")) {
+      return;
+    }
+
+    console.log('[PendingOrderStore] 检测到旧的 status 约束，开始迁移...');
+
+    // SQLite 不支持修改 CHECK 约束，需要重建表
+    db.exec(`
+      -- 1. 重命名旧表
+      ALTER TABLE pending_entry_orders RENAME TO pending_entry_orders_old;
+
+      -- 2. 创建新表（包含新的 CHECK 约束）
+      CREATE TABLE pending_entry_orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_order_id TEXT UNIQUE NOT NULL,
+        symbol TEXT NOT NULL,
+        side TEXT NOT NULL CHECK(side IN ('BUY', 'SELL')),
+        position_side TEXT NOT NULL CHECK(position_side IN ('LONG', 'SHORT')),
+        quantity REAL NOT NULL,
+        entry_price REAL NOT NULL,
+        stop_loss REAL NOT NULL,
+        take_profit REAL NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'filled', 'sl_tp_placed', 'trailing', 'closed', 'canceled', 'error')),
+        created_at TEXT NOT NULL,
+        filled_at TEXT,
+        filled_price REAL,
+        sl_order_id TEXT,
+        tp_order_id TEXT,
+        error_message TEXT,
+        trailing_active INTEGER NOT NULL DEFAULT 0,
+        trailing_high_price REAL,
+        trailing_activated_at TEXT,
+        closed_at TEXT,
+        close_price REAL,
+        close_reason TEXT,
+        pnl_amount REAL,
+        pnl_percent REAL,
+        actual_rr REAL
+      );
+
+      -- 3. 复制数据
+      INSERT INTO pending_entry_orders
+      SELECT id, client_order_id, symbol, side, position_side, quantity, entry_price, stop_loss, take_profit,
+             status, created_at, filled_at, filled_price, sl_order_id, tp_order_id, error_message,
+             trailing_active, trailing_high_price, trailing_activated_at,
+             closed_at, close_price, close_reason, pnl_amount, pnl_percent, actual_rr
+      FROM pending_entry_orders_old;
+
+      -- 4. 删除旧表
+      DROP TABLE pending_entry_orders_old;
+
+      -- 5. 重建索引
+      CREATE INDEX IF NOT EXISTS idx_pending_orders_status ON pending_entry_orders(status);
+      CREATE INDEX IF NOT EXISTS idx_pending_orders_client_id ON pending_entry_orders(client_order_id);
+      CREATE INDEX IF NOT EXISTS idx_pending_orders_symbol ON pending_entry_orders(symbol);
+    `);
+
+    console.log('[PendingOrderStore] status 约束迁移完成');
+  } catch (error) {
+    console.error('[PendingOrderStore] status 约束迁移失败:', error);
+    // 迁移失败不阻止启动，但记录错误
+  }
 }
 
 /**
