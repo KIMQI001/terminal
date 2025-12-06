@@ -23,6 +23,12 @@ const MAX_SL_DISTANCE = 200;
 const MIN_TP_DISTANCE = 1000;
 const MIN_DISTANCE_RATIO = 0.003; // 千分之三
 
+// OTE 优先选择参数
+const OTE_PRIORITY_DISTANCE = 1000; // 1000点内的OTE优先
+const TIMEFRAME_PRIORITY: Record<string, number> = {
+  '1d': 5, '4h': 4, '1h': 3, '15m': 2, '5m': 1
+};
+
 /**
  * 启动托管调度器
  */
@@ -521,17 +527,61 @@ function calculateOrders(
     return result;
   };
 
-  // 筛选塔块
-  const bullishCandidates = allBullish
-    .filter(b => b.entry < currentPrice && currentPrice - b.entry >= minDistance)
-    .sort((a, b) => b.entry - a.entry);
+  // OTE优先排序函数：1000点内OTE优先，大级别优先，然后按距离
+  const sortByOtePriority = (
+    blocks: typeof allBullish,
+    currentPrice: number
+  ) => {
+    return blocks.sort((a, b) => {
+      const distanceA = Math.abs(a.entry - currentPrice);
+      const distanceB = Math.abs(b.entry - currentPrice);
 
-  const bearishCandidates = allBearish
-    .filter(b => b.entry > currentPrice && b.entry - currentPrice >= minDistance)
-    .sort((a, b) => a.entry - b.entry);
+      const isOteA = a.source === 'OTE' && distanceA <= OTE_PRIORITY_DISTANCE;
+      const isOteB = b.source === 'OTE' && distanceB <= OTE_PRIORITY_DISTANCE;
+
+      // 1. 1000点内OTE优先
+      if (isOteA && !isOteB) return -1;
+      if (!isOteA && isOteB) return 1;
+
+      // 2. 同为OTE（1000点内）：大级别优先，同级别近的优先
+      if (isOteA && isOteB) {
+        const tfA = TIMEFRAME_PRIORITY[a.timeframe] || 0;
+        const tfB = TIMEFRAME_PRIORITY[b.timeframe] || 0;
+        if (tfB !== tfA) return tfB - tfA; // 大级别优先
+        return distanceA - distanceB; // 近的优先
+      }
+
+      // 3. 都不是OTE（或OTE超过1000点）：按距离，同距离大级别优先
+      if (distanceA !== distanceB) {
+        return distanceA - distanceB; // 近的优先
+      }
+      const tfA = TIMEFRAME_PRIORITY[a.timeframe] || 0;
+      const tfB = TIMEFRAME_PRIORITY[b.timeframe] || 0;
+      return tfB - tfA; // 大级别优先
+    });
+  };
+
+  // 筛选塔块
+  const bullishCandidates = sortByOtePriority(
+    allBullish.filter(b => b.entry < currentPrice && currentPrice - b.entry >= minDistance),
+    currentPrice
+  );
+
+  const bearishCandidates = sortByOtePriority(
+    allBearish.filter(b => b.entry > currentPrice && b.entry - currentPrice >= minDistance),
+    currentPrice
+  );
 
   const selectedBullish = filterWithSpacing(bullishCandidates, bullishStartLayer, towerLayers);
   const selectedBearish = filterWithSpacing(bearishCandidates, bearishStartLayer, towerLayers);
+
+  // 日志：显示选中的塔块（OTE优先排序后）
+  if (selectedBullish.length > 0) {
+    console.log(`[TowerScheduler] 多单塔块: ${selectedBullish.map(b => `${b.entry.toFixed(0)} ${b.source} ${b.timeframe}`).join(' | ')}`);
+  }
+  if (selectedBearish.length > 0) {
+    console.log(`[TowerScheduler] 空单塔块: ${selectedBearish.map(b => `${b.entry.toFixed(0)} ${b.source} ${b.timeframe}`).join(' | ')}`);
+  }
 
   // 转换为订单
   const orders: TowerOrder[] = [];
