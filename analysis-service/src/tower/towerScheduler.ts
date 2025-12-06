@@ -721,38 +721,7 @@ async function placeOrders(
         console.warn(`[TowerScheduler] 止损单失败: ${data.msg || slResponse.status}`);
       }
 
-      // 3. 下止盈单（TAKE_PROFIT_MARKET）
-      await delay(100);
-      const tpTimestamp = Date.now();
-      const tpParams: Record<string, string | number> = {
-        symbol,
-        side: closeSide,
-        positionSide: order.positionSide,
-        type: 'TAKE_PROFIT_MARKET',
-        quantity: order.quantity.toFixed(3),
-        stopPrice: order.takeProfit.toFixed(1),
-        newClientOrderId: `${clientOrderId}_tp`,
-        timestamp: tpTimestamp,
-      };
-
-      const tpQueryString = Object.entries(tpParams)
-        .map(([k, v]) => `${k}=${v}`)
-        .join('&');
-      const tpSignature = generateSignature(tpQueryString, apiConfig.apiSecret);
-
-      const tpResponse = await fetch(`${baseUrl}/fapi/v1/order`, {
-        method: 'POST',
-        headers: {
-          'X-MBX-APIKEY': apiConfig.apiKey,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: `${tpQueryString}&signature=${tpSignature}`,
-      });
-
-      if (!tpResponse.ok) {
-        const data = await tpResponse.json() as { msg?: string };
-        console.warn(`[TowerScheduler] 止盈单失败: ${data.msg || tpResponse.status}`);
-      }
+      // 止盈单不在此处下，等入场单成交后由 orderMonitor 下单
 
       success++;
 
