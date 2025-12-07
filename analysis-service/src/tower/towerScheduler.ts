@@ -589,11 +589,17 @@ function calculateOrders(
     console.log(`[TowerScheduler] 空单塔块: ${selectedBearish.map(b => `${b.entry.toFixed(0)} ${b.source} ${b.timeframe}`).join(' | ')}`);
   }
 
+  // 下单前按价格排序（离当前价格近的分配小保证金）
+  // 多单：价格从高到低（近 → 远）
+  // 空单：价格从低到高（近 → 远）
+  const orderedBullish = [...selectedBullish].sort((a, b) => b.entry - a.entry);
+  const orderedBearish = [...selectedBearish].sort((a, b) => a.entry - b.entry);
+
   // 转换为订单
   const orders: TowerOrder[] = [];
 
-  for (let i = 0; i < selectedBullish.length; i++) {
-    const block = selectedBullish[i];
+  for (let i = 0; i < orderedBullish.length; i++) {
+    const block = orderedBullish[i];
     const margin = baseMargin + i * marginIncrement;
     const positionValue = margin * leverage;
     const quantity = Math.floor((positionValue / block.entry) * 1000) / 1000;
@@ -611,8 +617,8 @@ function calculateOrders(
     });
   }
 
-  for (let i = 0; i < selectedBearish.length; i++) {
-    const block = selectedBearish[i];
+  for (let i = 0; i < orderedBearish.length; i++) {
+    const block = orderedBearish[i];
     const margin = baseMargin + i * marginIncrement;
     const positionValue = margin * leverage;
     const quantity = Math.floor((positionValue / block.entry) * 1000) / 1000;
