@@ -276,8 +276,8 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
   }
 }
 
-// 当前价格附近订单检查阈值（千分之五 = 0.5%）
-const NEAR_PRICE_RATIO = 5 / 1000;
+// 当前价格附近订单检查阈值（百分之一 = 1%）
+const NEAR_PRICE_RATIO = 1 / 100;
 
 /**
  * 检查订单数量
@@ -332,7 +332,7 @@ async function checkOrdersCount(
     const bearish = towerOrders.filter(o => o.side === 'SELL').length;
     const sufficient = bullish >= requiredLayers && bearish >= requiredLayers;
 
-    // 检查是否有订单在当前价格附近（千分之五 = 0.5%）
+    // 检查是否有订单在当前价格附近（百分之一 = 1%）
     let hasNearOrder = false;
     if (currentPrice > 0) {
       const nearDistance = currentPrice * NEAR_PRICE_RATIO;
