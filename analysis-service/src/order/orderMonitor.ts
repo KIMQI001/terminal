@@ -167,7 +167,7 @@ async function handleEntryFilled(
 
       if (slResult.success) {
         slOrderId = slResult.orderId?.toString() || null;
-        console.log(`[OrderMonitor] 止损单下单成功: ${slOrderId}`);
+        console.log(`[OrderMonitor] 止损单下单成功: ${slClientId}`);
       } else {
         errors.push(`止损单失败: ${slResult.error}`);
         console.error(`[OrderMonitor] 止损单失败: ${slResult.error}`);
@@ -193,7 +193,7 @@ async function handleEntryFilled(
 
       if (fixedTpResult.success) {
         tpOrderId = fixedTpResult.orderId?.toString() || null;
-        console.log(`[OrderMonitor] 固定止盈单下单成功: ${tpOrderId}`);
+        console.log(`[OrderMonitor] 固定止盈单下单成功: ${tpClientId}`);
       } else {
         errors.push(`固定止盈单失败: ${fixedTpResult.error}`);
         console.error(`[OrderMonitor] 固定止盈单失败: ${fixedTpResult.error}`);
@@ -225,7 +225,7 @@ async function handleEntryFilled(
       });
 
       if (trailingTpResult.success) {
-        console.log(`[OrderMonitor] 追踪止盈单下单成功: ${trailingTpResult.orderId}`);
+        console.log(`[OrderMonitor] 追踪止盈单下单成功: ${trailClientId}`);
       } else {
         errors.push(`追踪止盈单失败: ${trailingTpResult.error}`);
         console.error(`[OrderMonitor] 追踪止盈单失败: ${trailingTpResult.error}`);
