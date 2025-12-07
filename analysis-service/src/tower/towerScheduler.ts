@@ -508,18 +508,26 @@ function calculateOrders(
     let lastEntry: number | null = null;
 
     for (const block of blockList) {
+      // 检查间距（与上一个块的间距，无论是否被选中）
       if (lastEntry !== null) {
         const spacing = Math.abs(block.entry - lastEntry);
-        if (spacing < minSpacing) continue;
+        if (spacing < minSpacing) {
+          console.log(`[TowerScheduler] 跳过 ${block.entry.toFixed(0)} ${block.source} (间距 ${spacing.toFixed(0)} < ${minSpacing.toFixed(0)})`);
+          continue;
+        }
       }
 
+      // 更新 lastEntry（每个有效块都更新，即使被 startLayer 跳过）
+      lastEntry = block.entry;
+
+      // 检查 startLayer（跳过前 N-1 层）
       if (skipped < startLayer - 1) {
         skipped++;
+        console.log(`[TowerScheduler] 跳过第 ${skipped} 层: ${block.entry.toFixed(0)} ${block.source}`);
         continue;
       }
 
       result.push(block);
-      lastEntry = block.entry;
 
       if (result.length >= count) break;
     }
