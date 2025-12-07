@@ -391,13 +391,16 @@ async function cancelRemainingOrders(
     const openOrdersResult = await getOpenOrders(apiConfig, order.symbol);
     if (!openOrdersResult.success || !openOrdersResult.orders) return;
 
-    const ordersToCancel = openOrdersResult.orders.filter(o =>
-      o.positionSide === order.positionSide &&
-      (o.type === 'STOP_MARKET' || o.type === 'TAKE_PROFIT_MARKET' || o.type === 'TRAILING_STOP_MARKET')
-    );
+    // 只取消当前订单的止盈止损单，通过 clientOrderId 前缀匹配
+    const orderPrefix = order.clientOrderId;
+    const ordersToCancel = openOrdersResult.orders.filter(o => {
+      const clientId = o.clientOrderId || '';
+      // 匹配格式: ict_tower_xxx_sl, ict_tower_xxx_tp, ict_tower_xxx_tr
+      return clientId.startsWith(orderPrefix + '_');
+    });
 
     for (const orderToCancel of ordersToCancel) {
-      console.log(`[OrderMonitor] 取消剩余订单: ${orderToCancel.orderId} (${orderToCancel.type})`);
+      console.log(`[OrderMonitor] 取消剩余订单: ${orderToCancel.clientOrderId} (${orderToCancel.type})`);
       await cancelOrder(apiConfig, order.symbol, orderToCancel.orderId);
     }
   } catch (error) {
