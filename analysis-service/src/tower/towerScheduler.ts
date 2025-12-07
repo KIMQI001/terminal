@@ -497,7 +497,7 @@ function calculateOrders(
   // 最小间距（万分之 N）
   const minSpacing = currentPrice * (minSpacingRatio / 10000);
 
-  // 筛选函数：保证相邻塔块间距 >= minSpacing
+  // 筛选函数：保证所有已选塔块之间间距 >= minSpacing
   const filterWithSpacing = (
     blockList: typeof allBullish,
     startLayer: number,
@@ -505,20 +505,18 @@ function calculateOrders(
   ) => {
     const result: typeof blockList = [];
     let skipped = 0;
-    let lastEntry: number | null = null;
 
     for (const block of blockList) {
-      // 检查间距（与上一个块的间距，无论是否被选中）
-      if (lastEntry !== null) {
-        const spacing = Math.abs(block.entry - lastEntry);
-        if (spacing < minSpacing) {
-          console.log(`[TowerScheduler] 跳过 ${block.entry.toFixed(0)} ${block.source} (间距 ${spacing.toFixed(0)} < ${minSpacing.toFixed(0)})`);
-          continue;
-        }
-      }
+      // 检查与所有已选中块的间距（防止 OTE 优先排序后价格相近的块都被选中）
+      const tooClose = result.some(selected => {
+        const spacing = Math.abs(block.entry - selected.entry);
+        return spacing < minSpacing;
+      });
 
-      // 更新 lastEntry（每个有效块都更新，即使被 startLayer 跳过）
-      lastEntry = block.entry;
+      if (tooClose) {
+        console.log(`[TowerScheduler] 跳过 ${block.entry.toFixed(0)} ${block.source} (与已选块间距 < ${minSpacing.toFixed(0)})`);
+        continue;
+      }
 
       // 检查 startLayer（跳过前 N-1 层）
       if (skipped < startLayer - 1) {
