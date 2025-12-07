@@ -287,8 +287,12 @@ async function placeBinanceOrder(
   const precision = getPrecision(params.symbol);
 
   // 生成自定义订单 ID（如果有前缀）
+  // 新格式 ict_tower_{timeframe}_{source}_{price} 已包含完整信息，不加时间戳
+  // 旧格式只有 ict_tower，需要加时间戳区分
   const clientOrderId = params.clientOrderIdPrefix
-    ? `${params.clientOrderIdPrefix}_${timestamp}`
+    ? (params.clientOrderIdPrefix.split('_').length >= 5
+        ? params.clientOrderIdPrefix  // 新格式，直接使用
+        : `${params.clientOrderIdPrefix}_${timestamp}`)  // 旧格式，加时间戳
     : undefined;
 
   // 根据交易方向确定持仓方向（双向持仓模式）
