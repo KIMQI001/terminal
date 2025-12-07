@@ -73,7 +73,8 @@ export function TowerOrderModal({ block, onClose, defaultMargin }: TowerOrderMod
       return;
     }
 
-    // 下单（使用 ict_tower 前缀标记）
+    // 下单（使用和托管一致的 ict_tower 格式）
+    const priceStr = Math.round(block.entry).toString();
     const result = await placeOrder(
       {
         type: "limit",
@@ -82,7 +83,7 @@ export function TowerOrderModal({ block, onClose, defaultMargin }: TowerOrderMod
         stopPrice: block.stopLoss,
         takeProfit: block.takeProfit,
         quantity: quantity,
-        clientOrderIdPrefix: "ict_tower",
+        clientOrderIdPrefix: `ict_tower_${block.timeframe}_${block.source}_${priceStr}`,
       },
       symbol
     );
