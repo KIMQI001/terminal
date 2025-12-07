@@ -147,10 +147,11 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
       }
     }
 
-    // 2. 检查当前订单数量
+    // 2. 检查当前订单数量和位置
     const orderCheck = await checkOrdersCount(apiConfig, management.symbol, management.towerLayers);
-    if (orderCheck.sufficient) {
-      console.log(`[TowerScheduler] 订单充足，跳过: 多${orderCheck.bullish}空${orderCheck.bearish}`);
+    if (orderCheck.sufficient || orderCheck.hasNearOrder) {
+      const reason = orderCheck.hasNearOrder ? '有订单在当前价附近' : `订单充足 多${orderCheck.bullish}空${orderCheck.bearish}`;
+      console.log(`[TowerScheduler] 跳过更新: ${reason}`);
       addRecord({
         managementId: management.id,
         bullishCount: orderCheck.bullish,
@@ -158,7 +159,7 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
         totalMargin: 0,
         success: true,
         skipped: true,
-        errorMessage: undefined, // 跳过不是错误，不设置 errorMessage
+        errorMessage: undefined,
       });
       updateRunTime(management.id);
       return;
@@ -275,6 +276,9 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
   }
 }
 
+// 当前价格附近订单检查阈值（千分之五 = 0.5%）
+const NEAR_PRICE_RATIO = 5 / 1000;
+
 /**
  * 检查订单数量
  */
@@ -282,7 +286,7 @@ async function checkOrdersCount(
   apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
   symbol: string,
   requiredLayers: number
-): Promise<{ bullish: number; bearish: number; sufficient: boolean }> {
+): Promise<{ bullish: number; bearish: number; sufficient: boolean; hasNearOrder: boolean }> {
   const baseUrl = apiConfig.isTestnet
     ? 'https://testnet.binancefuture.com'
     : 'https://fapi.binance.com';
@@ -292,20 +296,32 @@ async function checkOrdersCount(
     const queryString = `symbol=${symbol}&timestamp=${timestamp}`;
     const signature = generateSignature(queryString, apiConfig.apiSecret);
 
-    const response = await fetch(
-      `${baseUrl}/fapi/v1/openOrders?${queryString}&signature=${signature}`,
-      { headers: { 'X-MBX-APIKEY': apiConfig.apiKey } }
-    );
+    // 并行获取订单和当前价格
+    const [ordersResponse, priceResponse] = await Promise.all([
+      fetch(
+        `${baseUrl}/fapi/v1/openOrders?${queryString}&signature=${signature}`,
+        { headers: { 'X-MBX-APIKEY': apiConfig.apiKey } }
+      ),
+      fetch(`${baseUrl}/fapi/v1/ticker/price?symbol=${symbol}`)
+    ]);
 
-    if (!response.ok) {
-      return { bullish: 0, bearish: 0, sufficient: false };
+    if (!ordersResponse.ok) {
+      return { bullish: 0, bearish: 0, sufficient: false, hasNearOrder: false };
     }
 
-    const orders = await response.json() as Array<{
+    const orders = await ordersResponse.json() as Array<{
       clientOrderId: string;
       side: string;
       type: string;
+      price: string;
     }>;
+
+    // 获取当前价格
+    let currentPrice = 0;
+    if (priceResponse.ok) {
+      const priceData = await priceResponse.json() as { price: string };
+      currentPrice = parseFloat(priceData.price);
+    }
 
     // 只统计 ict_tower 前缀的限价单
     const towerOrders = orders.filter(
@@ -316,10 +332,23 @@ async function checkOrdersCount(
     const bearish = towerOrders.filter(o => o.side === 'SELL').length;
     const sufficient = bullish >= requiredLayers && bearish >= requiredLayers;
 
-    return { bullish, bearish, sufficient };
+    // 检查是否有订单在当前价格附近（千分之五 = 0.5%）
+    let hasNearOrder = false;
+    if (currentPrice > 0) {
+      const nearDistance = currentPrice * NEAR_PRICE_RATIO;
+      hasNearOrder = towerOrders.some(o => {
+        const orderPrice = parseFloat(o.price);
+        return Math.abs(orderPrice - currentPrice) <= nearDistance;
+      });
+      if (hasNearOrder) {
+        console.log(`[TowerScheduler] 有订单在当前价 ${currentPrice.toFixed(1)} 附近（±${nearDistance.toFixed(0)}）`);
+      }
+    }
+
+    return { bullish, bearish, sufficient, hasNearOrder };
   } catch (error) {
     console.error('[TowerScheduler] 检查订单失败:', error);
-    return { bullish: 0, bearish: 0, sufficient: false };
+    return { bullish: 0, bearish: 0, sufficient: false, hasNearOrder: false };
   }
 }
 
