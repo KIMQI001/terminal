@@ -1279,6 +1279,15 @@ export default function TowerPage() {
                         <span className={order.side === "BUY" ? "text-green-400" : "text-red-400"}>
                           {order.side === "BUY" ? "多" : "空"}
                         </span>
+                        {/* ICT 指标 */}
+                        {(() => {
+                          const ictInfo = parseIctInfo(order.clientOrderId);
+                          return ictInfo ? (
+                            <span className="px-1 rounded text-[10px] bg-purple-500/20 text-purple-400">
+                              {ictInfo.timeframe} {ictInfo.source}
+                            </span>
+                          ) : null;
+                        })()}
                         <span className="text-[var(--text-secondary)]">
                           {order.entryPrice?.toFixed(0) ?? "-"} → {order.closePrice?.toFixed(0) ?? "-"}
                         </span>
