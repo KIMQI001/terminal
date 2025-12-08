@@ -1269,15 +1269,18 @@ export default function TowerPage() {
                           : "bg-red-500/10 border border-red-500/20"
                       }`}
                     >
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5">
                         <span className={(order.pnlAmount ?? 0) >= 0 ? "text-green-400" : "text-red-400"}>
                           {(order.pnlAmount ?? 0) >= 0 ? "✓" : "✗"}
                         </span>
-                        <span className="text-[var(--text-tertiary)]">
+                        <span className="text-[var(--text-tertiary)] w-8">
                           {order.closedAt ? new Date(order.closedAt).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" }) : "-"}
                         </span>
-                        <span className={order.side === "BUY" ? "text-green-400" : "text-red-400"}>
+                        <span className={`w-4 ${order.side === "BUY" ? "text-green-400" : "text-red-400"}`}>
                           {order.side === "BUY" ? "多" : "空"}
+                        </span>
+                        <span className="text-[var(--text-secondary)]">
+                          {order.entryPrice?.toFixed(0) ?? "-"}→{order.closePrice?.toFixed(0) ?? "-"}
                         </span>
                         {/* ICT 指标 */}
                         {(() => {
@@ -1288,11 +1291,8 @@ export default function TowerPage() {
                             </span>
                           ) : null;
                         })()}
-                        <span className="text-[var(--text-secondary)]">
-                          {order.entryPrice?.toFixed(0) ?? "-"} → {order.closePrice?.toFixed(0) ?? "-"}
-                        </span>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5">
                         <span className={`px-1 rounded text-[10px] ${
                           order.closeReason === "tp"
                             ? "bg-green-500/20 text-green-400"
@@ -1300,16 +1300,14 @@ export default function TowerPage() {
                             ? "bg-red-500/20 text-red-400"
                             : "bg-blue-500/20 text-blue-400"
                         }`}>
-                          {order.closeReason === "tp" ? "止盈" : order.closeReason === "sl" ? "止损" : order.closeReason === "trailing" ? "追踪" : "手动"}
+                          {order.closeReason === "tp" ? "盈" : order.closeReason === "sl" ? "损" : order.closeReason === "trailing" ? "追" : "手"}
                         </span>
                         <span className={(order.pnlAmount ?? 0) >= 0 ? "text-green-400 font-medium" : "text-red-400 font-medium"}>
-                          {(order.pnlAmount ?? 0) >= 0 ? "+" : ""}{(order.pnlAmount ?? 0).toFixed(2)}U
+                          {(order.pnlAmount ?? 0) >= 0 ? "+" : ""}{(order.pnlAmount ?? 0).toFixed(1)}
                         </span>
-                        {order.actualRR !== null && order.actualRR !== undefined && (
-                          <span className="text-[var(--text-tertiary)]">
-                            ({order.actualRR >= 0 ? "+" : ""}{order.actualRR.toFixed(1)}R)
-                          </span>
-                        )}
+                        <span className="text-[var(--text-tertiary)]">
+                          {order.actualRR !== null && order.actualRR !== undefined ? `${order.actualRR >= 0 ? "+" : ""}${order.actualRR.toFixed(1)}R` : ""}
+                        </span>
                       </div>
                     </div>
                   ))}
