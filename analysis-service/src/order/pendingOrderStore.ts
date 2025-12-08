@@ -411,7 +411,26 @@ export function cleanupOldPendingOrders(): number {
   `).run();
 
   if (result.changes > 0) {
-    console.log(`[PendingOrderStore] 清理了 ${result.changes} 个过期订单`);
+    console.log(`[PendingOrderStore] 清理了 ${result.changes} 个过期 pending 订单`);
+  }
+
+  return result.changes;
+}
+
+/**
+ * 清理已取消和错误订单 (3天前的 canceled/error 订单)
+ */
+export function cleanupCanceledOrders(): number {
+  const db = getDatabase();
+
+  const result = db.prepare(`
+    DELETE FROM pending_entry_orders
+    WHERE status IN ('canceled', 'error')
+    AND datetime(created_at) < datetime('now', '-3 days')
+  `).run();
+
+  if (result.changes > 0) {
+    console.log(`[PendingOrderStore] 清理了 ${result.changes} 个已取消/错误订单`);
   }
 
   return result.changes;

@@ -75,6 +75,10 @@ export function stopTowerScheduler(): void {
 let positionMonitorCounter = 0;
 const POSITION_MONITOR_INTERVAL = 2; // 每 2 次调度循环监控一次（即每 60 秒）
 
+// 数据库清理计数器
+let cleanupCounter = 0;
+const CLEANUP_INTERVAL = 120; // 每 120 次调度循环清理一次（即每 1 小时）
+
 /**
  * 检查并执行到期的托管任务
  */
@@ -99,6 +103,15 @@ async function checkAndExecute(): Promise<void> {
     positionMonitorCounter = 0;
     console.log('[TowerScheduler] 执行仓位监控...');
     await monitorAndRepairPositions();
+  }
+
+  // 定期清理数据库（每 1 小时）
+  cleanupCounter++;
+  if (cleanupCounter >= CLEANUP_INTERVAL) {
+    cleanupCounter = 0;
+    const { cleanupCanceledOrders, cleanupOldPendingOrders } = await import('../order/pendingOrderStore');
+    cleanupOldPendingOrders();
+    cleanupCanceledOrders();
   }
 }
 
