@@ -24,7 +24,7 @@ const MIN_TP_DISTANCE = 1000;
 const MIN_DISTANCE_RATIO = 0.003; // 千分之三
 
 // OTE 优先选择参数
-const OTE_PRIORITY_DISTANCE = 1000; // 1000点内的OTE优先
+const OTE_PRIORITY_DISTANCE = 2000; // 2000点内的OTE优先
 const TIMEFRAME_PRIORITY: Record<string, number> = {
   '1d': 5, '4h': 4, '1h': 3, '15m': 2, '5m': 1
 };
