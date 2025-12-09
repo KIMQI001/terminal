@@ -48,6 +48,7 @@ interface TowerManagementConfig {
   bullishStartLayer: number;
   bearishStartLayer: number;
   minSpacingRatio: number;
+  minEntryDistance: number;
   lastRunAt: string | null;
   nextRunAt: string | null;
   createdAt: string;
@@ -168,6 +169,7 @@ export default function TowerPage() {
   const [bullishStartLayer, setBullishStartLayer] = useState(1);
   const [bearishStartLayer, setBearishStartLayer] = useState(1);
   const [minSpacingRatio, setMinSpacingRatio] = useState(5); // 万分之几，默认5（万分之五）
+  const [minEntryDistance, setMinEntryDistance] = useState(5); // 启动间距（千分比），默认千分之五
   const [autoInterval, setAutoInterval] = useState(15); // 托管间隔（分钟），默认15分钟
   const [isAutoOrdering, setIsAutoOrdering] = useState(false);
   const [orderProgress, setOrderProgress] = useState<{
@@ -252,6 +254,7 @@ export default function TowerPage() {
           bullishStartLayer,
           bearishStartLayer,
           minSpacingRatio,
+          minEntryDistance,
         }),
       });
       return response.json();
@@ -292,6 +295,7 @@ export default function TowerPage() {
       setBullishStartLayer(config.bullishStartLayer);
       setBearishStartLayer(config.bearishStartLayer);
       setMinSpacingRatio(config.minSpacingRatio);
+      setMinEntryDistance(config.minEntryDistance ?? 5);
       setAutoInterval(config.intervalMinutes);
       // 同步到 localStorage
       localStorage.setItem(STORAGE_KEYS.BASE_MARGIN, String(config.baseMargin));
@@ -952,6 +956,19 @@ export default function TowerPage() {
                 >
                   {[0, 10, 20, 30, 50, 100].map((n) => (
                     <option key={n} value={n}>{n}‱</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-[var(--text-tertiary)]">启动</span>
+                <select
+                  value={minEntryDistance}
+                  onChange={(e) => setMinEntryDistance(Number(e.target.value))}
+                  className="w-14 px-1 py-1 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
+                >
+                  {[5, 10, 15, 20, 25, 30].map((n) => (
+                    <option key={n} value={n}>{n}‰</option>
                   ))}
                 </select>
               </div>

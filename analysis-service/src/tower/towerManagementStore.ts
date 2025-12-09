@@ -18,6 +18,7 @@ export interface TowerManagementConfig {
   bullishStartLayer: number;     // 多塔起始层
   bearishStartLayer: number;     // 空塔起始层
   minSpacingRatio: number;       // 最小间距（万分比）
+  minEntryDistance: number;      // 启动间距（点数）
   lastRunAt: string | null;      // 上次执行时间
   nextRunAt: string | null;      // 下次执行时间
   createdAt: string;
@@ -50,6 +51,7 @@ interface ManagementRow {
   bullish_start_layer: number;
   bearish_start_layer: number;
   min_spacing_ratio: number;
+  min_entry_distance: number;
   last_run_at: string | null;
   next_run_at: string | null;
   created_at: string;
@@ -114,6 +116,12 @@ export function initTowerManagementTables(): void {
     CREATE INDEX IF NOT EXISTS idx_tower_records_management ON tower_management_records(management_id);
   `);
 
+  // 迁移：添加 min_entry_distance 字段
+  try {
+    db.exec(`ALTER TABLE tower_management ADD COLUMN min_entry_distance INTEGER NOT NULL DEFAULT 500`);
+    console.log('[TowerManagement] 添加 min_entry_distance 字段');
+  } catch { /* 列已存在 */ }
+
   console.log('[TowerManagement] 表初始化完成');
 }
 
@@ -158,6 +166,7 @@ export function upsertManagement(config: {
   bullishStartLayer: number;
   bearishStartLayer: number;
   minSpacingRatio: number;
+  minEntryDistance: number;
 }): TowerManagementConfig {
   const db = getDatabase();
   const now = new Date().toISOString();
@@ -179,6 +188,7 @@ export function upsertManagement(config: {
         bullish_start_layer = ?,
         bearish_start_layer = ?,
         min_spacing_ratio = ?,
+        min_entry_distance = ?,
         next_run_at = ?,
         updated_at = ?
       WHERE user_id = ? AND symbol = ?
@@ -191,6 +201,7 @@ export function upsertManagement(config: {
       config.bullishStartLayer,
       config.bearishStartLayer,
       config.minSpacingRatio,
+      config.minEntryDistance,
       nextRunAt,
       now,
       config.userId,
@@ -203,9 +214,9 @@ export function upsertManagement(config: {
     db.prepare(`
       INSERT INTO tower_management (
         user_id, symbol, is_active, interval_minutes, base_margin, margin_increment,
-        tower_layers, bullish_start_layer, bearish_start_layer, min_spacing_ratio,
+        tower_layers, bullish_start_layer, bearish_start_layer, min_spacing_ratio, min_entry_distance,
         next_run_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       config.userId,
       config.symbol,
@@ -217,6 +228,7 @@ export function upsertManagement(config: {
       config.bullishStartLayer,
       config.bearishStartLayer,
       config.minSpacingRatio,
+      config.minEntryDistance,
       nextRunAt,
       now,
       now
@@ -425,6 +437,7 @@ function rowToConfig(row: ManagementRow): TowerManagementConfig {
     bullishStartLayer: row.bullish_start_layer,
     bearishStartLayer: row.bearish_start_layer,
     minSpacingRatio: row.min_spacing_ratio,
+    minEntryDistance: row.min_entry_distance ?? 500,
     lastRunAt: row.last_run_at,
     nextRunAt: row.next_run_at,
     createdAt: row.created_at,

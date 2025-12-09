@@ -21,7 +21,6 @@ let isRunning = false;
 // 止损止盈参数
 const MAX_SL_DISTANCE = 200;
 const MIN_TP_DISTANCE = 1000;
-const MIN_DISTANCE_RATIO = 0.003; // 千分之三
 
 // OTE 优先选择参数
 const OTE_PRIORITY_DISTANCE = 2000; // 2000点内的OTE优先
@@ -534,8 +533,9 @@ function calculateOrders(
     }
   }
 
-  // 最小距离（千分之三）
-  const minDistance = currentPrice * MIN_DISTANCE_RATIO;
+  // 最小距离（启动间距，千分比）
+  const { minEntryDistance = 5 } = management;
+  const minDistance = currentPrice * (minEntryDistance / 1000);
   // 最小间距（万分之 N）
   const minSpacing = currentPrice * (minSpacingRatio / 10000);
 

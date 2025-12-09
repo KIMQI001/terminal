@@ -90,6 +90,7 @@ towerManagementRoutes.post('/', (req: Request, res: Response) => {
       bullishStartLayer = 1,
       bearishStartLayer = 1,
       minSpacingRatio = 5,
+      minEntryDistance = 5,
     } = req.body;
 
     if (!userId || !symbol) {
@@ -111,6 +112,7 @@ towerManagementRoutes.post('/', (req: Request, res: Response) => {
       bullishStartLayer,
       bearishStartLayer,
       minSpacingRatio,
+      minEntryDistance,
     });
 
     console.log(`[TowerManagement API] 更新配置: userId=${userId}, symbol=${symbol}, active=${isActive}`);
@@ -131,7 +133,7 @@ towerManagementRoutes.post('/', (req: Request, res: Response) => {
 /**
  * POST /api/tower-management/start
  * 启动托管
- * Body: { userId, symbol, intervalMinutes, baseMargin, marginIncrement, towerLayers, bullishStartLayer, bearishStartLayer, minSpacingRatio }
+ * Body: { userId, symbol, intervalMinutes, baseMargin, marginIncrement, towerLayers, bullishStartLayer, bearishStartLayer, minSpacingRatio, minEntryDistance }
  */
 towerManagementRoutes.post('/start', (req: Request, res: Response) => {
   try {
@@ -145,6 +147,7 @@ towerManagementRoutes.post('/start', (req: Request, res: Response) => {
       bullishStartLayer = 1,
       bearishStartLayer = 1,
       minSpacingRatio = 5,
+      minEntryDistance = 5,
     } = req.body;
 
     if (!userId || !symbol) {
@@ -167,9 +170,10 @@ towerManagementRoutes.post('/start', (req: Request, res: Response) => {
       bullishStartLayer,
       bearishStartLayer,
       minSpacingRatio,
+      minEntryDistance,
     });
 
-    console.log(`[TowerManagement API] 启动托管: userId=${userId}, symbol=${symbol}, baseMargin=${baseMargin}, layers=${towerLayers}, 多起=${bullishStartLayer}, 空起=${bearishStartLayer}, 间距=${minSpacingRatio}`);
+    console.log(`[TowerManagement API] 启动托管: userId=${userId}, symbol=${symbol}, baseMargin=${baseMargin}, layers=${towerLayers}, 启动间距=${minEntryDistance}‰`);
 
     res.json({
       success: true,
