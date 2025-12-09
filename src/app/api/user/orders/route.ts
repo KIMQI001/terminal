@@ -80,7 +80,8 @@ async function getBinanceAlgoOrders(
 
   const signature = generateBinanceSignature(queryString, apiSecret);
 
-  const url = `${baseUrl}/fapi/v1/algoOrders?${queryString}&signature=${signature}`;
+  // 正确端点: /fapi/v1/openAlgoOrders
+  const url = `${baseUrl}/fapi/v1/openAlgoOrders?${queryString}&signature=${signature}`;
 
   const response = await fetch(url, {
     headers: {
@@ -96,7 +97,8 @@ async function getBinanceAlgoOrders(
     return [];
   }
 
-  return data.algoOrders || [];
+  // 返回 orders 数组
+  return data.orders || [];
 }
 
 // GET /api/user/orders - 获取挂单列表（包括普通订单和 Algo 条件单）
@@ -157,24 +159,24 @@ export async function GET(request: NextRequest) {
       symbol: string;
       side: string;
       positionSide: string;
-      type: string;
+      orderType: string;        // API 返回的是 orderType，不是 type
       quantity: string;
-      triggerPrice: string;
+      triggerPrice?: string;
       activationPrice?: string;
       callbackRate?: string;
-      status: string;
+      algoStatus: string;       // API 返回的是 algoStatus，不是 status
       createTime: number;
     }) => ({
       id: order.algoId.toString(),
-      clientOrderId: order.clientAlgoId,
+      clientOrderId: order.clientAlgoId || '',
       symbol: order.symbol,
       side: order.side.toLowerCase(),
       positionSide: order.positionSide,
-      type: order.type.toLowerCase().replace('_', '-'),
+      type: (order.orderType || 'STOP_MARKET').toLowerCase().replace('_', '-'),
       quantity: parseFloat(order.quantity),
       price: undefined,
-      stopPrice: parseFloat(order.triggerPrice) || parseFloat(order.activationPrice || '0') || undefined,
-      status: order.status.toLowerCase(),
+      stopPrice: parseFloat(order.triggerPrice || '0') || parseFloat(order.activationPrice || '0') || undefined,
+      status: (order.algoStatus || 'new').toLowerCase(),
       time: order.createTime,
       isAlgo: true,
       callbackRate: order.callbackRate ? parseFloat(order.callbackRate) : undefined,
