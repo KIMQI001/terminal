@@ -727,17 +727,18 @@ async function placeOrders(
       // 平仓方向
       const closeSide = order.side === 'BUY' ? 'SELL' : 'BUY';
 
-      // 2. 下止损单（STOP_MARKET）
+      // 2. 下止损单（STOP_MARKET）- 使用 Algo Order API
       await delay(100);
       const slTimestamp = Date.now();
       const slParams: Record<string, string | number> = {
+        algoType: 'CONDITIONAL',
         symbol,
         side: closeSide,
         positionSide: order.positionSide,
         type: 'STOP_MARKET',
         quantity: order.quantity.toFixed(3),
-        stopPrice: order.stopLoss.toFixed(1),
-        newClientOrderId: `${clientOrderId}_sl`,
+        triggerPrice: order.stopLoss.toFixed(1),
+        clientAlgoId: `${clientOrderId}_sl`,
         timestamp: slTimestamp,
       };
 
@@ -746,7 +747,7 @@ async function placeOrders(
         .join('&');
       const slSignature = generateSignature(slQueryString, apiConfig.apiSecret);
 
-      const slResponse = await fetch(`${baseUrl}/fapi/v1/order`, {
+      const slResponse = await fetch(`${baseUrl}/fapi/v1/algoOrder`, {
         method: 'POST',
         headers: {
           'X-MBX-APIKEY': apiConfig.apiKey,
@@ -758,6 +759,8 @@ async function placeOrders(
       if (!slResponse.ok) {
         const data = await slResponse.json() as { msg?: string };
         console.warn(`[TowerScheduler] 止损单失败: ${data.msg || slResponse.status}`);
+      } else {
+        console.log(`[TowerScheduler] 止损单下单成功: ${clientOrderId}_sl`);
       }
 
       // 止盈单不在此处下，等入场单成交后由 orderMonitor 下单
