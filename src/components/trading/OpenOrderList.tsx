@@ -14,6 +14,8 @@ const orderTypeLabels: Record<string, string> = {
   "take-profit_market": "止盈",
   "stop-limit": "止损限价",
   "stop_limit": "止损限价",
+  "trailing-stop-market": "追踪",
+  "trailing_stop_market": "追踪",
 };
 
 export function OpenOrderList() {
@@ -39,9 +41,9 @@ export function OpenOrderList() {
     return () => clearInterval(interval);
   }, [symbol, fetchOpenOrders]);
 
-  const handleCancel = async (orderId: string, orderSymbol: string) => {
+  const handleCancel = async (orderId: string, orderSymbol: string, isAlgo?: boolean) => {
     setCancellingId(orderId);
-    const success = await cancelOrder(orderId, orderSymbol);
+    const success = await cancelOrder(orderId, orderSymbol, isAlgo);
     if (success) {
       // 刷新挂单列表
       fetchOpenOrders(symbol);
@@ -53,7 +55,7 @@ export function OpenOrderList() {
   const handleCancelGroup = async (group: RealOrder[], groupIndex: number) => {
     setCancellingGroup(groupIndex);
     for (const order of group) {
-      await cancelOrder(order.id, order.symbol);
+      await cancelOrder(order.id, order.symbol, order.isAlgo);
     }
     fetchOpenOrders(symbol);
     setCancellingGroup(null);
@@ -153,7 +155,9 @@ export function OpenOrderList() {
               >
                 <div className="flex items-center gap-3">
                   <span className={`text-xs px-1.5 py-0.5 rounded min-w-[40px] text-center ${
-                    order.type.includes('stop')
+                    order.type.includes('trailing')
+                      ? 'bg-purple-100 text-purple-600'
+                      : order.type.includes('stop')
                       ? 'bg-red-100 text-red-600'
                       : order.type.includes('profit')
                       ? 'bg-green-100 text-green-600'
@@ -162,7 +166,9 @@ export function OpenOrderList() {
                     {orderTypeLabels[order.type] || order.type}
                   </span>
                   <span className="text-sm font-mono">
-                    {(order.stopPrice || order.price)?.toLocaleString() || "-"}
+                    {order.type.includes('trailing') && order.callbackRate
+                      ? `激活:${order.stopPrice?.toLocaleString() || '-'} 回撤:${order.callbackRate}%`
+                      : (order.stopPrice || order.price)?.toLocaleString() || "-"}
                   </span>
                 </div>
                 <Button
@@ -170,7 +176,7 @@ export function OpenOrderList() {
                   size="sm"
                   className="h-6 text-xs text-gray-500 hover:text-red-500"
                   disabled={cancellingId === order.id}
-                  onClick={() => handleCancel(order.id, order.symbol)}
+                  onClick={() => handleCancel(order.id, order.symbol, order.isAlgo)}
                 >
                   {cancellingId === order.id ? '...' : '×'}
                 </Button>

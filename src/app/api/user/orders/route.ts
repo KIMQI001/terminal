@@ -25,7 +25,7 @@ function generateBinanceSignature(queryString: string, apiSecret: string): strin
   return crypto.createHmac('sha256', apiSecret).update(queryString).digest('hex');
 }
 
-// 获取挂单列表
+// 获取普通挂单列表
 async function getBinanceOpenOrders(
   apiKey: string,
   apiSecret: string,
@@ -61,7 +61,45 @@ async function getBinanceOpenOrders(
   return data;
 }
 
-// GET /api/user/orders - 获取挂单列表
+// 获取 Algo 条件单列表（止损/止盈/追踪止盈）
+async function getBinanceAlgoOrders(
+  apiKey: string,
+  apiSecret: string,
+  isTestnet: boolean,
+  symbol?: string
+) {
+  const baseUrl = isTestnet
+    ? 'https://testnet.binancefuture.com'
+    : 'https://fapi.binance.com';
+
+  const timestamp = Date.now();
+  let queryString = `timestamp=${timestamp}`;
+  if (symbol) {
+    queryString = `symbol=${symbol}&${queryString}`;
+  }
+
+  const signature = generateBinanceSignature(queryString, apiSecret);
+
+  const url = `${baseUrl}/fapi/v1/algoOrders?${queryString}&signature=${signature}`;
+
+  const response = await fetch(url, {
+    headers: {
+      'X-MBX-APIKEY': apiKey,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    // Algo API 可能返回空或错误，不抛出异常
+    console.warn('获取 Algo 订单警告:', data.msg);
+    return [];
+  }
+
+  return data.algoOrders || [];
+}
+
+// GET /api/user/orders - 获取挂单列表（包括普通订单和 Algo 条件单）
 export async function GET(request: NextRequest) {
   const user = await authenticateUser(request);
   if (!user) {
@@ -78,10 +116,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '未找到 Binance API 配置' }, { status: 404 });
     }
 
-    const orders = await getBinanceOpenOrders(config.apiKey, config.apiSecret, config.isTestnet, symbol);
+    // 并行获取普通订单和 Algo 条件单
+    const [normalOrders, algoOrders] = await Promise.all([
+      getBinanceOpenOrders(config.apiKey, config.apiSecret, config.isTestnet, symbol),
+      getBinanceAlgoOrders(config.apiKey, config.apiSecret, config.isTestnet, symbol),
+    ]);
 
-    // 格式化订单数据
-    const formattedOrders = orders.map((order: {
+    // 格式化普通订单
+    const formattedNormalOrders = normalOrders.map((order: {
       orderId: number;
       clientOrderId: string;
       symbol: string;
@@ -105,9 +147,44 @@ export async function GET(request: NextRequest) {
       stopPrice: parseFloat(order.stopPrice) || undefined,
       status: order.status.toLowerCase(),
       time: order.time,
+      isAlgo: false,
     }));
 
-    return NextResponse.json({ success: true, orders: formattedOrders });
+    // 格式化 Algo 条件单
+    const formattedAlgoOrders = algoOrders.map((order: {
+      algoId: number;
+      clientAlgoId: string;
+      symbol: string;
+      side: string;
+      positionSide: string;
+      type: string;
+      quantity: string;
+      triggerPrice: string;
+      activationPrice?: string;
+      callbackRate?: string;
+      status: string;
+      createTime: number;
+    }) => ({
+      id: order.algoId.toString(),
+      clientOrderId: order.clientAlgoId,
+      symbol: order.symbol,
+      side: order.side.toLowerCase(),
+      positionSide: order.positionSide,
+      type: order.type.toLowerCase().replace('_', '-'),
+      quantity: parseFloat(order.quantity),
+      price: undefined,
+      stopPrice: parseFloat(order.triggerPrice) || parseFloat(order.activationPrice || '0') || undefined,
+      status: order.status.toLowerCase(),
+      time: order.createTime,
+      isAlgo: true,
+      callbackRate: order.callbackRate ? parseFloat(order.callbackRate) : undefined,
+    }));
+
+    // 合并并按时间排序
+    const allOrders = [...formattedNormalOrders, ...formattedAlgoOrders]
+      .sort((a, b) => b.time - a.time);
+
+    return NextResponse.json({ success: true, orders: allOrders });
   } catch (error) {
     console.error('Get open orders error:', error);
     return NextResponse.json({

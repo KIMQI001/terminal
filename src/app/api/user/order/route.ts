@@ -495,7 +495,7 @@ async function cancelBinanceOrder(
   };
 }
 
-// 取消所有订单
+// 取消所有普通订单
 async function cancelAllBinanceOrders(
   apiKey: string,
   apiSecret: string,
@@ -528,6 +528,81 @@ async function cancelAllBinanceOrders(
   return {
     success: true,
     message: '全部订单已取消',
+  };
+}
+
+// 取消 Algo 条件单
+async function cancelBinanceAlgoOrder(
+  apiKey: string,
+  apiSecret: string,
+  isTestnet: boolean,
+  symbol: string,
+  algoId: number
+) {
+  const baseUrl = isTestnet
+    ? 'https://testnet.binancefuture.com'
+    : 'https://fapi.binance.com';
+
+  const timestamp = Date.now();
+  const queryString = `symbol=${symbol}&algoId=${algoId}&timestamp=${timestamp}`;
+  const signature = generateBinanceSignature(queryString, apiSecret);
+
+  const url = `${baseUrl}/fapi/v1/algoOrder?${queryString}&signature=${signature}`;
+
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: {
+      'X-MBX-APIKEY': apiKey,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.msg || '取消 Algo 订单失败');
+  }
+
+  return {
+    success: true,
+    message: 'Algo 订单已取消',
+    algoId: data.algoId,
+  };
+}
+
+// 取消所有 Algo 条件单
+async function cancelAllBinanceAlgoOrders(
+  apiKey: string,
+  apiSecret: string,
+  isTestnet: boolean,
+  symbol: string
+) {
+  const baseUrl = isTestnet
+    ? 'https://testnet.binancefuture.com'
+    : 'https://fapi.binance.com';
+
+  const timestamp = Date.now();
+  const queryString = `symbol=${symbol}&timestamp=${timestamp}`;
+  const signature = generateBinanceSignature(queryString, apiSecret);
+
+  const url = `${baseUrl}/fapi/v1/allAlgoOrders?${queryString}&signature=${signature}`;
+
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: {
+      'X-MBX-APIKEY': apiKey,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    // 可能没有 Algo 订单，忽略错误
+    console.warn('取消全部 Algo 订单警告:', data.msg);
+  }
+
+  return {
+    success: true,
+    message: '全部 Algo 订单已取消',
   };
 }
 
@@ -585,7 +660,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// DELETE /api/user/order - 取消订单
+// DELETE /api/user/order - 取消订单（支持普通订单和 Algo 条件单）
 export async function DELETE(request: NextRequest) {
   const user = await authenticateUser(request);
   if (!user) {
@@ -597,6 +672,7 @@ export async function DELETE(request: NextRequest) {
     const symbol = searchParams.get('symbol');
     const orderId = searchParams.get('orderId');
     const cancelAll = searchParams.get('cancelAll');
+    const isAlgo = searchParams.get('isAlgo') === 'true';
 
     if (!symbol) {
       return NextResponse.json({ error: '请指定交易对' }, { status: 400 });
@@ -608,15 +684,20 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: '未找到 Binance API 配置' }, { status: 404 });
     }
 
-    // 取消全部订单
+    // 取消全部订单（包括普通订单和 Algo 条件单）
     if (cancelAll === 'true') {
-      const result = await cancelAllBinanceOrders(
-        config.apiKey,
-        config.apiSecret,
-        config.isTestnet,
-        symbol
-      );
-      return NextResponse.json(result);
+      // 并行取消普通订单和 Algo 订单
+      const [normalResult, algoResult] = await Promise.allSettled([
+        cancelAllBinanceOrders(config.apiKey, config.apiSecret, config.isTestnet, symbol),
+        cancelAllBinanceAlgoOrders(config.apiKey, config.apiSecret, config.isTestnet, symbol),
+      ]);
+
+      return NextResponse.json({
+        success: true,
+        message: '全部订单已取消',
+        normal: normalResult.status === 'fulfilled' ? normalResult.value : { error: (normalResult as PromiseRejectedResult).reason?.message },
+        algo: algoResult.status === 'fulfilled' ? algoResult.value : { error: (algoResult as PromiseRejectedResult).reason?.message },
+      });
     }
 
     // 取消单个订单
@@ -624,15 +705,44 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: '请指定订单ID' }, { status: 400 });
     }
 
-    const result = await cancelBinanceOrder(
-      config.apiKey,
-      config.apiSecret,
-      config.isTestnet,
-      symbol,
-      parseInt(orderId)
-    );
+    // 根据 isAlgo 参数选择取消普通订单还是 Algo 订单
+    // 如果未指定 isAlgo，先尝试普通订单，失败后尝试 Algo 订单
+    if (isAlgo) {
+      const result = await cancelBinanceAlgoOrder(
+        config.apiKey,
+        config.apiSecret,
+        config.isTestnet,
+        symbol,
+        parseInt(orderId)
+      );
+      return NextResponse.json(result);
+    }
 
-    return NextResponse.json(result);
+    // 先尝试取消普通订单
+    try {
+      const result = await cancelBinanceOrder(
+        config.apiKey,
+        config.apiSecret,
+        config.isTestnet,
+        symbol,
+        parseInt(orderId)
+      );
+      return NextResponse.json(result);
+    } catch {
+      // 普通订单取消失败，尝试取消 Algo 订单
+      try {
+        const result = await cancelBinanceAlgoOrder(
+          config.apiKey,
+          config.apiSecret,
+          config.isTestnet,
+          symbol,
+          parseInt(orderId)
+        );
+        return NextResponse.json(result);
+      } catch (algoError) {
+        throw algoError;
+      }
+    }
   } catch (error) {
     console.error('Cancel order error:', error);
     return NextResponse.json({

@@ -30,6 +30,8 @@ export interface RealOrder {
   stopPrice?: number;
   status: string;
   time: number;
+  isAlgo?: boolean;         // 是否为 Algo 条件单
+  callbackRate?: number;    // 追踪止盈回调比例
 }
 
 // 获取订单类型优先级（限价 < 止盈 < 止损）
@@ -125,7 +127,7 @@ interface OrderState {
   addOrder: (data: OrderFormData, symbol: string) => Order;
   placeOrder: (data: OrderFormData, symbol: string) => Promise<{ success: boolean; error?: string; warnings?: string[] }>;
   updateOrderStatus: (id: string, status: OrderStatus, filledQuantity?: number) => void;
-  cancelOrder: (id: string, symbol: string) => Promise<boolean>;
+  cancelOrder: (id: string, symbol: string, isAlgo?: boolean) => Promise<boolean>;
   cancelAllOrders: (symbol: string) => Promise<boolean>;
   fetchOpenOrders: (symbol?: string) => Promise<void>;
   getOpenOrders: () => Order[];
@@ -254,7 +256,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     }));
   },
 
-  cancelOrder: async (id, symbol) => {
+  cancelOrder: async (id, symbol, isAlgo?: boolean) => {
     const token = useUserStore.getState().token;
     if (!token) {
       console.error('未登录，无法取消订单');
@@ -262,7 +264,12 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     }
 
     try {
-      const response = await fetch(`/api/user/order?symbol=${symbol}&orderId=${id}`, {
+      let url = `/api/user/order?symbol=${symbol}&orderId=${id}`;
+      if (isAlgo) {
+        url += '&isAlgo=true';
+      }
+
+      const response = await fetch(url, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
