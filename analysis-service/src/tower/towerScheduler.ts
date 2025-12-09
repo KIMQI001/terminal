@@ -22,8 +22,7 @@ let isRunning = false;
 const MAX_SL_DISTANCE = 200;
 const MIN_TP_DISTANCE = 1000;
 
-// OTE 优先选择参数
-const OTE_PRIORITY_DISTANCE = 2000; // 2000点内的OTE优先
+// 时间周期优先级（同距离时大级别优先）
 const TIMEFRAME_PRIORITY: Record<string, number> = {
   '1d': 5, '4h': 4, '1h': 3, '15m': 2, '5m': 1
 };
@@ -575,8 +574,8 @@ function calculateOrders(
     return result;
   };
 
-  // OTE优先排序函数：1000点内OTE优先，大级别优先，然后按距离
-  const sortByOtePriority = (
+  // 按距离排序函数：近的优先，同距离大级别优先
+  const sortByDistance = (
     blocks: typeof allBullish,
     currentPrice: number
   ) => {
@@ -584,38 +583,24 @@ function calculateOrders(
       const distanceA = Math.abs(a.entry - currentPrice);
       const distanceB = Math.abs(b.entry - currentPrice);
 
-      const isOteA = a.source === 'OTE' && distanceA <= OTE_PRIORITY_DISTANCE;
-      const isOteB = b.source === 'OTE' && distanceB <= OTE_PRIORITY_DISTANCE;
-
-      // 1. 1000点内OTE优先
-      if (isOteA && !isOteB) return -1;
-      if (!isOteA && isOteB) return 1;
-
-      // 2. 同为OTE（1000点内）：大级别优先，同级别近的优先
-      if (isOteA && isOteB) {
-        const tfA = TIMEFRAME_PRIORITY[a.timeframe] || 0;
-        const tfB = TIMEFRAME_PRIORITY[b.timeframe] || 0;
-        if (tfB !== tfA) return tfB - tfA; // 大级别优先
-        return distanceA - distanceB; // 近的优先
-      }
-
-      // 3. 都不是OTE（或OTE超过1000点）：按距离，同距离大级别优先
+      // 按距离排序，近的优先
       if (distanceA !== distanceB) {
-        return distanceA - distanceB; // 近的优先
+        return distanceA - distanceB;
       }
+      // 同距离大级别优先
       const tfA = TIMEFRAME_PRIORITY[a.timeframe] || 0;
       const tfB = TIMEFRAME_PRIORITY[b.timeframe] || 0;
-      return tfB - tfA; // 大级别优先
+      return tfB - tfA;
     });
   };
 
   // 筛选塔块
-  const bullishCandidates = sortByOtePriority(
+  const bullishCandidates = sortByDistance(
     allBullish.filter(b => b.entry < currentPrice && currentPrice - b.entry >= minDistance),
     currentPrice
   );
 
-  const bearishCandidates = sortByOtePriority(
+  const bearishCandidates = sortByDistance(
     allBearish.filter(b => b.entry > currentPrice && b.entry - currentPrice >= minDistance),
     currentPrice
   );
@@ -623,7 +608,7 @@ function calculateOrders(
   const selectedBullish = filterWithSpacing(bullishCandidates, bullishStartLayer, towerLayers);
   const selectedBearish = filterWithSpacing(bearishCandidates, bearishStartLayer, towerLayers);
 
-  // 日志：显示选中的塔块（OTE优先排序后）
+  // 日志：显示选中的塔块
   if (selectedBullish.length > 0) {
     console.log(`[TowerScheduler] 多单塔块: ${selectedBullish.map(b => `${b.entry.toFixed(0)} ${b.source} ${b.timeframe}`).join(' | ')}`);
   }
