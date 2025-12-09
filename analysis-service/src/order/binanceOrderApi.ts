@@ -356,6 +356,9 @@ export async function cancelOrderByClientId(
 /**
  * 下追踪止盈单 (TRAILING_STOP_MARKET)
  *
+ * 注意：从 2025-12-09 开始，Binance 将条件订单迁移到 Algo Service
+ * 必须使用 /fapi/v1/algoOrder 端点
+ *
  * 原理：
  * - 设置 activationPrice 作为激活价格（达到此价后开始追踪）
  * - 设置 callbackRate 作为回撤比例（从最高/低价回撤此比例后触发）
@@ -376,7 +379,7 @@ export async function placeTrailingStopOrder(
     clientOrderId?: string;
   }
 ): Promise<OrderResult> {
-  return placeOrder(config, {
+  return placeAlgoOrder(config, {
     symbol: params.symbol,
     side: params.side,
     positionSide: params.positionSide,
@@ -385,8 +388,110 @@ export async function placeTrailingStopOrder(
     callbackRate: params.callbackRate,
     activationPrice: params.activationPrice,
     clientOrderId: params.clientOrderId,
-    reduceOnly: true,
   });
+}
+
+/**
+ * 下条件订单到 Binance Futures Algo Service
+ * 用于 STOP_MARKET, TAKE_PROFIT_MARKET, TRAILING_STOP_MARKET 等条件订单
+ *
+ * 从 2025-12-09 开始，这些订单类型必须使用此 API
+ */
+export async function placeAlgoOrder(
+  config: BinanceApiConfig,
+  params: {
+    symbol: string;
+    side: 'BUY' | 'SELL';
+    positionSide: 'LONG' | 'SHORT';
+    type: 'STOP_MARKET' | 'TAKE_PROFIT_MARKET' | 'TRAILING_STOP_MARKET';
+    quantity: number;
+    triggerPrice?: number;        // 触发价格 (STOP_MARKET/TAKE_PROFIT_MARKET)
+    callbackRate?: number;        // 追踪止盈回调比例 (0.1-10, 代表 0.1%-10%)
+    activationPrice?: number;     // 追踪止盈激活价格
+    clientOrderId?: string;
+    reduceOnly?: boolean;
+  }
+): Promise<OrderResult> {
+  const baseUrl = config.isTestnet
+    ? 'https://testnet.binancefuture.com'
+    : 'https://fapi.binance.com';
+
+  const timestamp = Date.now();
+  const precision = getPrecision(params.symbol);
+
+  // 构建请求参数
+  const queryParams: Record<string, string | number> = {
+    algoType: 'CONDITIONAL',
+    symbol: params.symbol,
+    side: params.side,
+    positionSide: params.positionSide,
+    type: params.type,
+    quantity: formatQuantity(params.quantity, precision.quantity),
+    timestamp,
+  };
+
+  // 止盈止损单需要触发价格
+  if ((params.type === 'STOP_MARKET' || params.type === 'TAKE_PROFIT_MARKET') && params.triggerPrice) {
+    queryParams.triggerPrice = formatPrice(params.triggerPrice, precision.price);
+  }
+
+  // 追踪止盈单参数
+  if (params.type === 'TRAILING_STOP_MARKET') {
+    if (params.callbackRate) {
+      queryParams.callbackRate = params.callbackRate;
+    }
+    if (params.activationPrice) {
+      queryParams.activationPrice = formatPrice(params.activationPrice, precision.price);
+    }
+  }
+
+  // 自定义订单 ID
+  if (params.clientOrderId) {
+    queryParams.clientAlgoId = params.clientOrderId;
+  }
+
+  // 只减仓
+  if (params.reduceOnly !== false) {
+    queryParams.reduceOnly = 'true';
+  }
+
+  // 生成签名
+  const queryString = Object.entries(queryParams)
+    .map(([key, value]) => `${key}=${value}`)
+    .join('&');
+  const signature = generateSignature(queryString, config.apiSecret);
+
+  try {
+    const response = await fetch(`${baseUrl}/fapi/v1/algoOrder`, {
+      method: 'POST',
+      headers: {
+        'X-MBX-APIKEY': config.apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: `${queryString}&signature=${signature}`,
+    });
+
+    const data = await response.json() as { msg?: string; algoId?: number; clientAlgoId?: string; success?: boolean };
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: data.msg || `HTTP ${response.status}`,
+      };
+    }
+
+    return {
+      success: true,
+      orderId: data.algoId,
+      clientOrderId: data.clientAlgoId,
+      status: 'NEW',
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '网络请求失败',
+    };
+  }
 }
 
 /**
