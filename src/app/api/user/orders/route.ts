@@ -91,17 +91,14 @@ async function getBinanceAlgoOrders(
 
   const data = await response.json();
 
-  console.log('[AlgoOrders] 响应状态:', response.status, response.ok);
-  console.log('[AlgoOrders] 响应数据:', JSON.stringify(data, null, 2));
-
   if (!response.ok) {
     // Algo API 可能返回空或错误，不抛出异常
     console.warn('获取 Algo 订单警告:', data.msg);
     return [];
   }
 
-  // 返回 orders 数组
-  const orders = data.orders || [];
+  // API 直接返回数组，不是 { orders: [...] }
+  const orders = Array.isArray(data) ? data : (data.orders || []);
   console.log('[AlgoOrders] 订单数量:', orders.length);
   return orders;
 }
