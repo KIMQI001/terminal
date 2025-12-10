@@ -599,7 +599,7 @@ export interface OpenOrderInfo {
 }
 
 /**
- * 获取当前挂单
+ * 获取当前挂单（包括普通订单和 Algo 条件单）
  */
 export async function getOpenOrders(
   config: BinanceApiConfig,
@@ -617,14 +617,29 @@ export async function getOpenOrders(
   const signature = generateSignature(queryString, config.apiSecret);
 
   try {
-    const response = await fetch(`${baseUrl}/fapi/v1/openOrders?${queryString}&signature=${signature}`, {
-      method: 'GET',
-      headers: {
-        'X-MBX-APIKEY': config.apiKey,
-      },
-    });
+    // 并行获取普通订单和 Algo 条件单
+    const [normalResponse, algoResponse] = await Promise.all([
+      // 普通订单
+      fetch(`${baseUrl}/fapi/v1/openOrders?${queryString}&signature=${signature}`, {
+        method: 'GET',
+        headers: { 'X-MBX-APIKEY': config.apiKey },
+      }),
+      // Algo 条件单（需要重新生成签名，因为时间戳可能不同）
+      (async () => {
+        const algoTimestamp = Date.now();
+        let algoQueryString = `timestamp=${algoTimestamp}`;
+        if (symbol) {
+          algoQueryString = `symbol=${symbol}&${algoQueryString}`;
+        }
+        const algoSignature = generateSignature(algoQueryString, config.apiSecret);
+        return fetch(`${baseUrl}/fapi/v1/openAlgoOrders?${algoQueryString}&signature=${algoSignature}`, {
+          method: 'GET',
+          headers: { 'X-MBX-APIKEY': config.apiKey },
+        });
+      })(),
+    ]);
 
-    const data = await response.json() as Array<{
+    const normalData = await normalResponse.json() as Array<{
       orderId: number;
       symbol: string;
       clientOrderId: string;
@@ -640,14 +655,15 @@ export async function getOpenOrders(
       time: number;
     }> | { msg?: string };
 
-    if (!response.ok) {
+    if (!normalResponse.ok) {
       return {
         success: false,
-        error: (data as { msg?: string }).msg || `HTTP ${response.status}`,
+        error: (normalData as { msg?: string }).msg || `HTTP ${normalResponse.status}`,
       };
     }
 
-    const orders = (data as Array<{
+    // 格式化普通订单
+    const normalOrders = (normalData as Array<{
       orderId: number;
       symbol: string;
       clientOrderId: string;
@@ -677,7 +693,46 @@ export async function getOpenOrders(
       time: o.time,
     }));
 
-    return { success: true, orders };
+    // 处理 Algo 订单
+    let algoOrders: OpenOrderInfo[] = [];
+    if (algoResponse.ok) {
+      const algoData = await algoResponse.json() as Array<{
+        algoId: number;
+        symbol: string;
+        clientAlgoId: string;
+        quantity: string;
+        side: string;
+        positionSide: string;
+        orderType: string;
+        triggerPrice?: string;
+        activationPrice?: string;
+        algoStatus: string;
+        createTime: number;
+      }>;
+
+      if (Array.isArray(algoData)) {
+        algoOrders = algoData.map(o => ({
+          orderId: o.algoId,
+          symbol: o.symbol,
+          clientOrderId: o.clientAlgoId || '',
+          price: 0,
+          origQty: parseFloat(o.quantity),
+          executedQty: 0,
+          status: o.algoStatus,
+          type: o.orderType || 'STOP_MARKET',
+          side: o.side as 'BUY' | 'SELL',
+          positionSide: o.positionSide as 'LONG' | 'SHORT' | 'BOTH',
+          stopPrice: parseFloat(o.triggerPrice || '0') || parseFloat(o.activationPrice || '0'),
+          workingType: 'CONTRACT_PRICE',
+          time: o.createTime,
+        }));
+      }
+    }
+
+    // 合并两种订单
+    const allOrders = [...normalOrders, ...algoOrders];
+
+    return { success: true, orders: allOrders };
   } catch (error) {
     return {
       success: false,
