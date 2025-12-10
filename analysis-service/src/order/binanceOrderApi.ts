@@ -460,7 +460,7 @@ export async function cancelOrderByClientId(
  * - 设置 callbackRate 作为回撤比例（从最高/低价回撤此比例后触发）
  *
  * 例如做多：
- * - activationPrice = 入场价 * 1.015 (盈利1.5%后激活)
+ * - activationPrice = 入场价 * 1.02 (盈利2%后激活)
  * - callbackRate = 0.3 (从最高价回撤0.3%后触发卖出)
  */
 export async function placeTrailingStopOrder(
