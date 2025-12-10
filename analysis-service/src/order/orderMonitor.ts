@@ -306,19 +306,9 @@ async function handleLiqGridEntryFilled(
   const errors: string[] = [];
 
   try {
-    // 检查是否已有止盈单
-    const existingOrdersResult = await getOpenOrders(apiConfig, pendingOrder.symbol);
-    const existingOrders = existingOrdersResult.success ? (existingOrdersResult.orders || []) : [];
-
-    const hasTakeProfit = existingOrders.some(o =>
-      o.positionSide === pendingOrder.positionSide &&
-      o.type === 'TAKE_PROFIT_MARKET'
-    );
-
-    console.log(`[LiqGrid] 检查现有订单: 止盈=${hasTakeProfit}`);
-
-    // 只下止盈单（如果有 takeProfit 且 > 0）
-    if (!hasTakeProfit && pendingOrder.takeProfit > 0) {
+    // 流动性网格：每个入场单都需要独立的止盈单，不检查是否已有
+    // （与 tower 策略不同，网格可能同时有多个同方向持仓）
+    if (pendingOrder.takeProfit > 0) {
       const tpSuffix = Math.random().toString(36).slice(-4);
       const tpClientId = `${clientOrderId}_tp${tpSuffix}`;
       console.log(`[LiqGrid] 下止盈单: ${pendingOrder.takeProfit}`);
@@ -339,9 +329,8 @@ async function handleLiqGridEntryFilled(
         errors.push(`止盈单失败: ${tpResult.error}`);
         console.error(`[LiqGrid] 止盈单失败: ${tpResult.error}`);
       }
-    } else if (hasTakeProfit) {
-      console.log(`[LiqGrid] 止盈单已存在，跳过`);
-      tpOrderId = 'exists';
+    } else {
+      console.log(`[LiqGrid] 无止盈价，跳过止盈单`);
     }
 
     // 更新数据库状态（liq_grid 没有止损，所以 slOrderId 为 null）
