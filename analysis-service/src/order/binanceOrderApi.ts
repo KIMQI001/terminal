@@ -104,7 +104,7 @@ export async function placeOrder(
       queryParams.callbackRate = params.callbackRate;
     }
     if (params.activationPrice) {
-      queryParams.activationPrice = formatPrice(params.activationPrice, precision.price);
+      queryParams.activatePrice = formatPrice(params.activationPrice, precision.price);  // Binance 实际用 activatePrice
     }
   }
 
@@ -206,7 +206,7 @@ export async function placeAlgoOrder(
       queryParams.callbackRate = params.callbackRate;
     }
     if (params.activationPrice) {
-      queryParams.activationPrice = formatPrice(params.activationPrice, precision.price);
+      queryParams.activatePrice = formatPrice(params.activationPrice, precision.price);  // Binance 实际用 activatePrice
     }
   }
 
