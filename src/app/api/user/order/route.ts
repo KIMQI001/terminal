@@ -584,7 +584,8 @@ async function cancelAllBinanceAlgoOrders(
   const queryString = `symbol=${symbol}&timestamp=${timestamp}`;
   const signature = generateBinanceSignature(queryString, apiSecret);
 
-  const url = `${baseUrl}/fapi/v1/allAlgoOrders?${queryString}&signature=${signature}`;
+  // 正确的端点是 /fapi/v1/algoOpenOrders（不是 allAlgoOrders）
+  const url = `${baseUrl}/fapi/v1/algoOpenOrders?${queryString}&signature=${signature}`;
 
   const response = await fetch(url, {
     method: 'DELETE',
