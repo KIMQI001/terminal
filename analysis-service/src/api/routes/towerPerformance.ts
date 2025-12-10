@@ -18,9 +18,23 @@ towerPerformanceRoutes.get('/stats', (req: Request, res: Response) => {
 
     const stats = getPerformanceStats({ days, symbol });
 
+    // 转换字段名以匹配前端接口
     res.json({
       success: true,
-      data: stats,
+      data: {
+        totalPnL: stats.totalPnl,
+        totalTrades: stats.totalOrders,
+        winCount: stats.winCount,
+        lossCount: stats.lossCount,
+        winRate: stats.winRate * 100, // 转换为百分比
+        avgWin: stats.avgWinAmount,
+        avgLoss: stats.avgLossAmount,
+        profitFactor: stats.profitFactor,
+        largestWin: stats.largestWin,
+        largestLoss: stats.largestLoss,
+        avgRR: stats.avgRR,
+        byCloseReason: stats.byCloseReason,
+      },
     });
   } catch (error) {
     console.error('[TowerPerformance] GET /stats error:', error);
