@@ -46,8 +46,11 @@ async function handleOrderFilled(event: OrderTradeUpdateEvent): Promise<void> {
   const clientOrderId = order.clientOrderId;
   const symbol = order.symbol;
 
-  // 快速过滤：只处理 ict_tower 前缀的订单
-  if (!clientOrderId.startsWith('ict_tower')) {
+  // 快速过滤：只处理 ict_tower 或 liq_grid 前缀的订单
+  const isTowerOrder = clientOrderId.startsWith('ict_tower');
+  const isLiqGridOrder = clientOrderId.startsWith('liq_grid');
+
+  if (!isTowerOrder && !isLiqGridOrder) {
     return;
   }
 
@@ -86,7 +89,13 @@ async function handleOrderFilled(event: OrderTradeUpdateEvent): Promise<void> {
   // 处理入场单状态变化
   if (order.orderStatus === 'FILLED') {
     console.log(`[OrderMonitor] ${symbol} 入场单成交: ${clientOrderId} @ ${order.averagePrice}`);
-    await handleEntryFilled(clientOrderId, order, pendingOrder);
+
+    // 根据订单类型选择不同的处理逻辑
+    if (isLiqGridOrder) {
+      await handleLiqGridEntryFilled(clientOrderId, order, pendingOrder);
+    } else {
+      await handleEntryFilled(clientOrderId, order, pendingOrder);
+    }
   } else if (order.orderStatus === 'CANCELED') {
     console.log(`[OrderMonitor] ${symbol} 入场单取消: ${clientOrderId}`);
     await handleEntryCanceled(clientOrderId);
@@ -262,6 +271,153 @@ async function handleEntryFilled(
       `**请手动下单止盈止损！**`
     );
   }
+}
+
+/**
+ * 处理流动性网格订单入场成交
+ * 只下止盈单，不下止损单，不下追踪止盈
+ */
+async function handleLiqGridEntryFilled(
+  clientOrderId: string,
+  order: OrderTradeUpdateEvent['order'],
+  pendingOrder: PendingEntryOrder
+): Promise<void> {
+  const filledPrice = parseFloat(order.averagePrice);
+
+  // 更新状态为已成交
+  markOrderFilled(clientOrderId, filledPrice);
+
+  if (!config) {
+    console.error('[OrderMonitor] 配置未初始化');
+    markOrderError(clientOrderId, '配置未初始化');
+    return;
+  }
+
+  const apiConfig: BinanceApiConfig = {
+    apiKey: config.apiKey,
+    apiSecret: config.apiSecret,
+    isTestnet: config.isTestnet,
+  };
+
+  // 平仓方向 (与入场方向相反)
+  const closeSide = pendingOrder.side === 'BUY' ? 'SELL' : 'BUY';
+
+  let tpOrderId: string | null = null;
+  const errors: string[] = [];
+
+  try {
+    // 检查是否已有止盈单
+    const existingOrdersResult = await getOpenOrders(apiConfig, pendingOrder.symbol);
+    const existingOrders = existingOrdersResult.success ? (existingOrdersResult.orders || []) : [];
+
+    const hasTakeProfit = existingOrders.some(o =>
+      o.positionSide === pendingOrder.positionSide &&
+      o.type === 'TAKE_PROFIT_MARKET'
+    );
+
+    console.log(`[LiqGrid] 检查现有订单: 止盈=${hasTakeProfit}`);
+
+    // 只下止盈单（如果有 takeProfit 且 > 0）
+    if (!hasTakeProfit && pendingOrder.takeProfit > 0) {
+      const tpSuffix = Math.random().toString(36).slice(-4);
+      const tpClientId = `${clientOrderId}_tp${tpSuffix}`;
+      console.log(`[LiqGrid] 下止盈单: ${pendingOrder.takeProfit}`);
+
+      const tpResult = await placeTakeProfitOrder(apiConfig, {
+        symbol: pendingOrder.symbol,
+        side: closeSide,
+        positionSide: pendingOrder.positionSide,
+        quantity: pendingOrder.quantity,
+        takeProfitPrice: pendingOrder.takeProfit,
+        clientOrderId: tpClientId,
+      });
+
+      if (tpResult.success) {
+        tpOrderId = tpResult.orderId?.toString() || null;
+        console.log(`[LiqGrid] 止盈单下单成功: ${tpClientId}`);
+      } else {
+        errors.push(`止盈单失败: ${tpResult.error}`);
+        console.error(`[LiqGrid] 止盈单失败: ${tpResult.error}`);
+      }
+    } else if (hasTakeProfit) {
+      console.log(`[LiqGrid] 止盈单已存在，跳过`);
+      tpOrderId = 'exists';
+    }
+
+    // 更新数据库状态（liq_grid 没有止损，所以 slOrderId 为 null）
+    if (tpOrderId) {
+      markSlTpPlaced(clientOrderId, null, tpOrderId);
+    }
+
+    if (errors.length > 0) {
+      markOrderError(clientOrderId, errors.join('; '));
+    }
+
+    // 发送钉钉通知
+    await sendLiqGridFilledNotification(pendingOrder, filledPrice, tpOrderId, errors);
+
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : '未知错误';
+    console.error(`[LiqGrid] 下止盈单异常:`, error);
+    markOrderError(clientOrderId, errorMsg);
+
+    // 发送错误通知
+    await sendDingtalkMarkdown(
+      '流动性网格止盈下单失败',
+      `### 流动性网格止盈下单失败 ❌\n\n` +
+      `- **订单**: ${clientOrderId}\n` +
+      `- **交易对**: ${pendingOrder.symbol}\n` +
+      `- **成交价**: $${filledPrice.toFixed(2)}\n` +
+      `- **错误**: ${errorMsg}\n\n` +
+      `**请手动下单止盈！**`
+    );
+  }
+}
+
+/**
+ * 发送流动性网格入场成交通知
+ */
+async function sendLiqGridFilledNotification(
+  order: PendingEntryOrder,
+  filledPrice: number,
+  tpOrderId: string | null,
+  errors: string[]
+): Promise<void> {
+  const direction = order.side === 'BUY' ? '做多' : '做空';
+  const symbol = order.symbol.replace('USDC', '').replace('USDT', '');
+
+  // 计算预期盈利点数
+  const profitPoints = order.side === 'BUY'
+    ? order.takeProfit - filledPrice
+    : filledPrice - order.takeProfit;
+
+  let statusIcon = '✅';
+  let statusText = '止盈已挂单';
+
+  if (errors.length > 0) {
+    statusIcon = '⚠️';
+    statusText = `止盈失败: ${errors.join(', ')}`;
+  }
+
+  if (!tpOrderId) {
+    statusIcon = '❌';
+    statusText = '止盈挂单失败，请手动处理';
+  }
+
+  const content = [
+    `### ${statusIcon} 流动性网格成交`,
+    '',
+    `- **交易对**: ${symbol}`,
+    `- **方向**: ${direction}`,
+    `- **成交价**: $${filledPrice.toFixed(2)}`,
+    `- **数量**: ${order.quantity.toFixed(3)}`,
+    `- **止盈价**: $${order.takeProfit.toFixed(2)}`,
+    `- **预期盈利**: ${profitPoints.toFixed(2)} 点`,
+    '',
+    `**状态**: ${statusText}`,
+  ].join('\n');
+
+  await sendDingtalkMarkdown(`${symbol} 流动性网格${direction}成交`, content);
 }
 
 /**

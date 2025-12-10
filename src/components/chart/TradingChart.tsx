@@ -20,6 +20,7 @@ import { ICTOverlay } from "./ICTOverlay";
 import { OTEPanel } from "./OTEPanel";
 import { FVGPanel } from "./FVGPanel";
 import { LiquidationPanel } from "./LiquidationPanel";
+import { LiquidityGridPanel } from "./LiquidityGridPanel";
 import { OBPanel } from "./OBPanel";
 import { OrderCancelOverlay } from "./OrderCancelOverlay";
 import { fetchKlines } from "@/lib/binance/api";
@@ -914,6 +915,7 @@ export function TradingChart() {
         <FVGPanel />
         <OBPanel />
         <LiquidationPanel />
+        <LiquidityGridPanel />
       </div>
       <MeasurementTool />
     </div>
