@@ -14,10 +14,16 @@ export async function GET(request: NextRequest) {
       url += `?${queryString}`;
     }
 
-    const response = await fetch(url);
+    const response = await fetch(url, { cache: 'no-store' });
     const data = await response.json();
 
-    return NextResponse.json(data);
+    return NextResponse.json(data, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      },
+    });
   } catch (error) {
     console.error("[API] tower-performance/orders error:", error);
     return NextResponse.json(
