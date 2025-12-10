@@ -359,12 +359,34 @@ export function TradingChart() {
 
   // Fetch data and setup WebSocket
   useEffect(() => {
+    // 使用标记来处理竞态条件
+    let isCancelled = false;
+    const currentSymbol = symbol;
+    const currentTimeframe = timeframe;
+
+    // 立即断开旧的 WebSocket，防止旧数据继续推送
+    if (wsRef.current) {
+      wsRef.current.disconnect();
+      wsRef.current = null;
+    }
+
+    // 清空旧数据，防止闪烁
+    if (candleSeriesRef.current) {
+      candleSeriesRef.current.setData([]);
+    }
+
     const loadData = async () => {
       setLoading(true);
       try {
         // BTC/ETH 请求 5000 根，其他交易对请求 1000 根
-        const limit = (symbol === "BTCUSDC" || symbol === "ETHUSDC") ? 5000 : 1000;
-        const data = await fetchKlines(symbol, timeframe, limit);
+        const limit = (currentSymbol === "BTCUSDC" || currentSymbol === "ETHUSDC") ? 5000 : 1000;
+        const data = await fetchKlines(currentSymbol, currentTimeframe, limit);
+
+        // 检查是否已被取消（symbol/timeframe 已变化）
+        if (isCancelled) {
+          return;
+        }
+
         setCandles(data);
         calculateIndicators(data);
 
@@ -378,46 +400,53 @@ export function TradingChart() {
           }));
           candleSeriesRef.current.setData(chartData);
         }
+
+        // 数据加载完成后再启动 WebSocket
+        if (!isCancelled) {
+          wsRef.current = new BinanceWebSocket(currentSymbol, currentTimeframe, (candle, isClosed) => {
+            // 再次检查是否已取消
+            if (isCancelled) return;
+
+            updateCandle(candle);
+
+            if (candleSeriesRef.current) {
+              candleSeriesRef.current.update({
+                time: candle.time as Time,
+                open: candle.open,
+                high: candle.high,
+                low: candle.low,
+                close: candle.close,
+              });
+            }
+
+            if (isClosed) {
+              // Recalculate indicators when a candle closes
+              const updatedCandles = useChartStore.getState().candles;
+              calculateIndicators(updatedCandles);
+            }
+          });
+
+          wsRef.current.connect();
+          setConnected(true);
+        }
       } catch (error) {
-        console.error("Failed to load klines:", error);
+        if (!isCancelled) {
+          console.error("Failed to load klines:", error);
+        }
       } finally {
-        setLoading(false);
+        if (!isCancelled) {
+          setLoading(false);
+        }
       }
     };
 
     loadData();
 
-    // Setup WebSocket
-    if (wsRef.current) {
-      wsRef.current.disconnect();
-    }
-
-    wsRef.current = new BinanceWebSocket(symbol, timeframe, (candle, isClosed) => {
-      updateCandle(candle);
-
-      if (candleSeriesRef.current) {
-        candleSeriesRef.current.update({
-          time: candle.time as Time,
-          open: candle.open,
-          high: candle.high,
-          low: candle.low,
-          close: candle.close,
-        });
-      }
-
-      if (isClosed) {
-        // Recalculate indicators when a candle closes
-        const updatedCandles = useChartStore.getState().candles;
-        calculateIndicators(updatedCandles);
-      }
-    });
-
-    wsRef.current.connect();
-    setConnected(true);
-
     return () => {
+      isCancelled = true;
       if (wsRef.current) {
         wsRef.current.disconnect();
+        wsRef.current = null;
         setConnected(false);
       }
     };
