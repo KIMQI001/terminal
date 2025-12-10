@@ -223,6 +223,9 @@ export async function placeAlgoOrder(
     .join('&');
   const signature = generateSignature(queryString, config.apiSecret);
 
+  // 调试日志：打印实际请求参数
+  console.log(`[AlgoOrder] 请求参数:`, JSON.stringify(queryParams, null, 2));
+
   try {
     const response = await fetch(`${baseUrl}/fapi/v1/algoOrder`, {
       method: 'POST',
