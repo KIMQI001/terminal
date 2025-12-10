@@ -236,7 +236,10 @@ export async function placeAlgoOrder(
       body: `${queryString}&signature=${signature}`,
     });
 
-    const data = await response.json() as { msg?: string; algoId?: number; clientAlgoId?: string; success?: boolean };
+    const data = await response.json() as { msg?: string; algoId?: number; clientAlgoId?: string; success?: boolean; activatePrice?: string; callbackRate?: string };
+
+    // 调试日志：打印 Binance 返回的响应
+    console.log(`[AlgoOrder] 响应数据:`, JSON.stringify(data, null, 2));
 
     if (!response.ok) {
       return {
