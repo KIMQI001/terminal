@@ -394,7 +394,7 @@ export function TradingChart() {
         setCandles(data);
         calculateIndicators(data);
 
-        if (candleSeriesRef.current) {
+        if (candleSeriesRef.current && chartRef.current) {
           const chartData: CandlestickData<Time>[] = data.map((c) => ({
             time: c.time as Time,
             open: c.open,
@@ -403,6 +403,9 @@ export function TradingChart() {
             close: c.close,
           }));
           candleSeriesRef.current.setData(chartData);
+
+          // 切换 symbol 后让图表自适应价格轴范围
+          chartRef.current.timeScale().fitContent();
         }
 
         // 数据加载完成后再启动 WebSocket
