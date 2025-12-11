@@ -136,29 +136,24 @@ async function handleEntryFilled(
   const errors: string[] = [];
 
   try {
-    // 先检查是否已有止盈止损单（入场时可能已经下过了）
+    // 先检查是否已有当前入场单的止盈止损单（通过 clientOrderId 前缀匹配）
     const existingOrdersResult = await getOpenOrders(apiConfig, pendingOrder.symbol);
     const existingOrders = existingOrdersResult.success ? (existingOrdersResult.orders || []) : [];
 
-    // 检查是否已有止损单
-    const hasStopLoss = existingOrders.some(o =>
-      o.positionSide === pendingOrder.positionSide &&
-      o.type === 'STOP_MARKET'
-    );
+    // 只检查属于当前入场单的止盈止损（通过 clientOrderId 前缀匹配）
+    const orderPrefix = clientOrderId + '_';
+    const myOrders = existingOrders.filter(o => o.clientOrderId?.startsWith(orderPrefix));
 
-    // 检查是否已有止盈单
-    const hasTakeProfit = existingOrders.some(o =>
-      o.positionSide === pendingOrder.positionSide &&
-      (o.type === 'TAKE_PROFIT_MARKET' || o.type === 'TRAILING_STOP_MARKET')
-    );
+    // 检查是否已有止损单（属于当前入场单）
+    const hasStopLoss = myOrders.some(o => o.type === 'STOP_MARKET');
 
-    // 检查是否已有追踪止盈
-    const hasTrailingStop = existingOrders.some(o =>
-      o.positionSide === pendingOrder.positionSide &&
-      o.type === 'TRAILING_STOP_MARKET'
-    );
+    // 检查是否已有止盈单（属于当前入场单）
+    const hasTakeProfit = myOrders.some(o => o.type === 'LIMIT' || o.type === 'TAKE_PROFIT_MARKET');
 
-    console.log(`[OrderMonitor] 检查现有订单: 止损=${hasStopLoss}, 止盈=${hasTakeProfit}, 追踪=${hasTrailingStop}`);
+    // 检查是否已有追踪止盈（属于当前入场单）
+    const hasTrailingStop = myOrders.some(o => o.type === 'TRAILING_STOP_MARKET');
+
+    console.log(`[OrderMonitor] 检查现有订单(${clientOrderId}): 止损=${hasStopLoss}, 止盈=${hasTakeProfit}, 追踪=${hasTrailingStop}, 匹配订单数=${myOrders.length}`);
 
     // 只下缺失的单
     if (!hasStopLoss) {
