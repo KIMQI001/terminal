@@ -43,6 +43,10 @@ kline-server/target/
 kline-server/*.db
 kline-server/*.db-journal
 
+# Rust rolling-service
+rolling-service/target/
+rolling-service/config_*.toml
+
 # SQLite database
 /data/
 analysis-service/data/

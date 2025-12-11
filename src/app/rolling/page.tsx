@@ -14,7 +14,26 @@ const STORAGE_KEYS = {
   ROLL_PROFIT_RATIO: "rolling_profit_ratio",
   STOP_LOSS_RATIO: "rolling_stop_loss",
   TAKE_PROFIT_RATIO: "rolling_take_profit",
+  GRID_SPACING: "rolling_grid_spacing",
+  GRID_COUNT: "rolling_grid_count",
+  ORDER_SIZE: "rolling_order_size",
+  MAX_POSITION: "rolling_max_position",
+  TARGET_PRICE: "rolling_target_price",
+  STOP_ROLL_DISTANCE: "rolling_stop_roll_distance",
 };
+
+// 滚仓服务状态
+interface RollingServiceStatus {
+  isRunning: boolean;
+  direction: 'long' | 'short' | null;
+  symbol: string | null;
+  startTime: string | null;
+  config: {
+    takeProfitPercent: number;
+    stopLossPercent: number;
+    leverage: number;
+  } | null;
+}
 
 // 滚仓记录
 interface RollingRecord {
@@ -41,7 +60,7 @@ interface RollingState {
 
 export default function RollingPage() {
   const { symbol } = useChartStore();
-  const { user } = useUserStore();
+  const { user, token } = useUserStore();
 
   // 策略参数
   const [initialMargin, setInitialMargin] = useState(100);
@@ -50,6 +69,114 @@ export default function RollingPage() {
   const [rollProfitRatio, setRollProfitRatio] = useState(100); // 滚仓比例（浮盈的百分比）
   const [stopLossRatio, setStopLossRatio] = useState(50); // 止损比例（亏损保证金的百分比）
   const [takeProfitRatio, setTakeProfitRatio] = useState(300); // 止盈比例（盈利保证金的百分比）
+
+  // 网格参数
+  const [gridSpacing, setGridSpacing] = useState(1.0); // 网格间距 (USDT)
+  const [gridCount, setGridCount] = useState(10); // 网格数量
+  const [orderSize, setOrderSize] = useState(0.01); // 每单大小 (ETH)
+  const [maxPosition, setMaxPosition] = useState(1); // 最大仓位 (ETH)
+
+  // 目标价位停止滚仓
+  const [targetPrice, setTargetPrice] = useState(0); // 目标价位 (0=不设置)
+  const [stopRollDistance, setStopRollDistance] = useState(1); // 停止滚仓距离 (%)
+
+  // 滚仓服务状态
+  const [serviceStatus, setServiceStatus] = useState<RollingServiceStatus>({
+    isRunning: false,
+    direction: null,
+    symbol: null,
+    startTime: null,
+    config: null,
+  });
+  const [isLoading, setIsLoading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+
+  // 获取服务状态
+  const fetchServiceStatus = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch('/api/rolling', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        setServiceStatus(data.data);
+      }
+    } catch (error) {
+      console.error('获取滚仓状态失败:', error);
+    }
+  }, [token]);
+
+  // 启动滚仓服务
+  const startRollingService = async () => {
+    if (!token) {
+      setStatusMessage({ type: 'error', text: '请先登录' });
+      return;
+    }
+    setIsLoading(true);
+    setStatusMessage(null);
+    try {
+      const res = await fetch('/api/rolling', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          symbol: symbol || 'ETHUSDC',
+          leverage,
+          gridSpacing,
+          gridCount,
+          orderSize,
+          takeProfitPercent: takeProfitRatio / leverage, // 将保证金百分比转换为价格百分比
+          stopLossPercent: stopLossRatio / leverage,
+          useRollingMargin: rollProfitRatio > 0,
+          rollProfitRatio,
+          maxPosition,
+          targetPrice: targetPrice || 0, // 目标价位 (0=不设置)
+          stopRollDistance: stopRollDistance || 1, // 停止滚仓距离 (%)
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage({ type: 'success', text: data.message });
+        fetchServiceStatus();
+      } else {
+        setStatusMessage({ type: 'error', text: data.error });
+      }
+    } catch (error) {
+      setStatusMessage({ type: 'error', text: '启动失败: ' + (error instanceof Error ? error.message : '未知错误') });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 停止滚仓服务
+  const stopRollingService = async () => {
+    if (!token) {
+      setStatusMessage({ type: 'error', text: '请先登录' });
+      return;
+    }
+    setIsLoading(true);
+    setStatusMessage(null);
+    try {
+      const res = await fetch('/api/rolling', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage({ type: 'success', text: data.message });
+        fetchServiceStatus();
+      } else {
+        setStatusMessage({ type: 'error', text: data.error });
+      }
+    } catch (error) {
+      setStatusMessage({ type: 'error', text: '停止失败: ' + (error instanceof Error ? error.message : '未知错误') });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // 滚仓状态
   const [rollingState, setRollingState] = useState<RollingState>({
@@ -81,6 +208,12 @@ export default function RollingPage() {
       rollProfitRatio: localStorage.getItem(STORAGE_KEYS.ROLL_PROFIT_RATIO),
       stopLossRatio: localStorage.getItem(STORAGE_KEYS.STOP_LOSS_RATIO),
       takeProfitRatio: localStorage.getItem(STORAGE_KEYS.TAKE_PROFIT_RATIO),
+      gridSpacing: localStorage.getItem(STORAGE_KEYS.GRID_SPACING),
+      gridCount: localStorage.getItem(STORAGE_KEYS.GRID_COUNT),
+      orderSize: localStorage.getItem(STORAGE_KEYS.ORDER_SIZE),
+      maxPosition: localStorage.getItem(STORAGE_KEYS.MAX_POSITION),
+      targetPrice: localStorage.getItem(STORAGE_KEYS.TARGET_PRICE),
+      stopRollDistance: localStorage.getItem(STORAGE_KEYS.STOP_ROLL_DISTANCE),
     };
 
     if (saved.initialMargin) setInitialMargin(Number(saved.initialMargin));
@@ -89,7 +222,20 @@ export default function RollingPage() {
     if (saved.rollProfitRatio) setRollProfitRatio(Number(saved.rollProfitRatio));
     if (saved.stopLossRatio) setStopLossRatio(Number(saved.stopLossRatio));
     if (saved.takeProfitRatio) setTakeProfitRatio(Number(saved.takeProfitRatio));
-  }, []);
+    if (saved.gridSpacing) setGridSpacing(Number(saved.gridSpacing));
+    if (saved.gridCount) setGridCount(Number(saved.gridCount));
+    if (saved.orderSize) setOrderSize(Number(saved.orderSize));
+    if (saved.maxPosition) setMaxPosition(Number(saved.maxPosition));
+    if (saved.targetPrice) setTargetPrice(Number(saved.targetPrice));
+    if (saved.stopRollDistance) setStopRollDistance(Number(saved.stopRollDistance));
+
+    // 获取滚仓服务状态
+    fetchServiceStatus();
+
+    // 定期轮询状态
+    const interval = setInterval(fetchServiceStatus, 5000);
+    return () => clearInterval(interval);
+  }, [fetchServiceStatus]);
 
   // 保存设置到 localStorage
   const saveToLocalStorage = useCallback((key: string, value: number) => {
@@ -463,28 +609,207 @@ export default function RollingPage() {
             </div>
           </div>
 
+          {/* 网格参数 */}
+          <div className="p-4 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
+            <h3 className="text-sm font-medium text-[var(--text-primary)] mb-3">网格参数</h3>
+
+            <div className="grid grid-cols-2 gap-4">
+              {/* 网格间距 */}
+              <div>
+                <label className="text-xs text-[var(--text-tertiary)] block mb-1">网格间距 (USDT)</label>
+                <select
+                  value={gridSpacing}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setGridSpacing(v);
+                    saveToLocalStorage(STORAGE_KEYS.GRID_SPACING, v);
+                  }}
+                  className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-sm text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                >
+                  {[0.5, 1, 2, 3, 5, 10].map(n => (
+                    <option key={n} value={n}>{n} USDT</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 网格数量 */}
+              <div>
+                <label className="text-xs text-[var(--text-tertiary)] block mb-1">网格数量</label>
+                <select
+                  value={gridCount}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setGridCount(v);
+                    saveToLocalStorage(STORAGE_KEYS.GRID_COUNT, v);
+                  }}
+                  className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-sm text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                >
+                  {[5, 10, 15, 20, 30].map(n => (
+                    <option key={n} value={n}>{n} 格</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 每单大小 */}
+              <div>
+                <label className="text-xs text-[var(--text-tertiary)] block mb-1">每单大小 (ETH)</label>
+                <input
+                  type="number"
+                  value={orderSize}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setOrderSize(v);
+                    saveToLocalStorage(STORAGE_KEYS.ORDER_SIZE, v);
+                  }}
+                  className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-sm text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                  min={0.001}
+                  step={0.001}
+                />
+              </div>
+
+              {/* 最大仓位 */}
+              <div>
+                <label className="text-xs text-[var(--text-tertiary)] block mb-1">最大仓位 (ETH)</label>
+                <input
+                  type="number"
+                  value={maxPosition}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setMaxPosition(v);
+                    saveToLocalStorage(STORAGE_KEYS.MAX_POSITION, v);
+                  }}
+                  className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-sm text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                  min={0}
+                  step={0.1}
+                />
+                <p className="text-xs text-[var(--text-tertiary)] mt-1">0=不限制</p>
+              </div>
+            </div>
+          </div>
+
+          {/* 目标价位设置 */}
+          <div className="p-4 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
+            <h3 className="text-sm font-medium text-[var(--text-primary)] mb-3">目标价位（接近时停止滚仓）</h3>
+
+            <div className="grid grid-cols-2 gap-4">
+              {/* 目标价位 */}
+              <div>
+                <label className="text-xs text-[var(--text-tertiary)] block mb-1">目标价位</label>
+                <input
+                  type="number"
+                  value={targetPrice}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setTargetPrice(v);
+                    saveToLocalStorage(STORAGE_KEYS.TARGET_PRICE, v);
+                  }}
+                  className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-sm text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                  min={0}
+                  step={1}
+                  placeholder="如 3300"
+                />
+                <p className="text-xs text-[var(--text-tertiary)] mt-1">0=不设置目标价</p>
+              </div>
+
+              {/* 停止滚仓距离 */}
+              <div>
+                <label className="text-xs text-[var(--text-tertiary)] block mb-1">停止滚仓距离 (%)</label>
+                <select
+                  value={stopRollDistance}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setStopRollDistance(v);
+                    saveToLocalStorage(STORAGE_KEYS.STOP_ROLL_DISTANCE, v);
+                  }}
+                  className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-sm text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                >
+                  {[0.5, 1, 1.5, 2, 3, 5].map(n => (
+                    <option key={n} value={n}>距目标 {n}%</option>
+                  ))}
+                </select>
+                <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                  {targetPrice > 0 && (
+                    <>停止价: {(targetPrice * (1 - stopRollDistance / 100)).toFixed(2)} (多) / {(targetPrice * (1 + stopRollDistance / 100)).toFixed(2)} (空)</>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {targetPrice > 0 && (
+              <div className="mt-3 p-2 bg-yellow-500/10 rounded text-xs text-yellow-400">
+                多头滚仓: 价格达到 {(targetPrice * (1 - stopRollDistance / 100)).toFixed(2)} 时停止补单
+                <br />
+                空头滚仓: 价格达到 {(targetPrice * (1 + stopRollDistance / 100)).toFixed(2)} 时停止补单
+              </div>
+            )}
+          </div>
+
+          {/* 滚仓服务状态 */}
+          {serviceStatus.isRunning && (
+            <div className={`p-4 rounded-lg border ${
+              serviceStatus.direction === 'long'
+                ? 'bg-green-500/10 border-green-500/30'
+                : 'bg-red-500/10 border-red-500/30'
+            }`}>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className={`text-sm font-medium ${
+                  serviceStatus.direction === 'long' ? 'text-green-400' : 'text-red-400'
+                }`}>
+                  滚仓服务运行中
+                </h3>
+                <span className="px-2 py-1 text-xs rounded bg-black/30">
+                  {serviceStatus.direction === 'long' ? '做多' : '做空'}
+                </span>
+              </div>
+              <div className="text-xs text-[var(--text-tertiary)] space-y-1">
+                <p>交易对: {serviceStatus.symbol}</p>
+                <p>启动时间: {serviceStatus.startTime ? new Date(serviceStatus.startTime).toLocaleString() : '-'}</p>
+                {serviceStatus.config && (
+                  <>
+                    <p>止盈: {serviceStatus.config.takeProfitPercent}% | 止损: {serviceStatus.config.stopLossPercent}%</p>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 状态消息 */}
+          {statusMessage && (
+            <div className={`p-3 rounded-lg text-sm ${
+              statusMessage.type === 'success' ? 'bg-green-500/20 text-green-400' :
+              statusMessage.type === 'error' ? 'bg-red-500/20 text-red-400' :
+              'bg-blue-500/20 text-blue-400'
+            }`}>
+              {statusMessage.text}
+            </div>
+          )}
+
           {/* 操作按钮 */}
           <div className="p-4 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
             <h3 className="text-sm font-medium text-[var(--text-primary)] mb-3">策略操作</h3>
 
-            <div className="flex gap-3">
+            {serviceStatus.isRunning ? (
               <button
-                disabled
-                className="flex-1 py-3 bg-green-500 hover:bg-green-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+                onClick={stopRollingService}
+                disabled={isLoading}
+                className="w-full py-3 bg-gray-500 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
               >
-                🚀 开启做多滚仓
+                {isLoading ? '停止中...' : '停止滚仓服务'}
               </button>
-              <button
-                disabled
-                className="flex-1 py-3 bg-red-500 hover:bg-red-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
-              >
-                🔻 开启做空滚仓
-              </button>
-            </div>
-
-            <p className="text-xs text-[var(--text-tertiary)] text-center mt-3">
-              后端自动化功能开发中...
-            </p>
+            ) : (
+              <div className="space-y-3">
+                <button
+                  onClick={startRollingService}
+                  disabled={isLoading}
+                  className="w-full py-3 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+                >
+                  {isLoading ? '启动中...' : '开启滚仓服务'}
+                </button>
+                <p className="text-xs text-[var(--text-tertiary)] text-center">
+                  自动检测当前持仓方向（需要先有单向持仓）
+                </p>
+              </div>
+            )}
           </div>
 
           {/* 滚仓对比表 */}
