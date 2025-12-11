@@ -23,6 +23,7 @@ import { startApiServer } from './api';
 import { startOrderMonitor, stopOrderMonitor } from './order/orderMonitor';
 import { getFirstBinanceApiConfig, closeApiConfigReader } from './order/apiConfigReader';
 import { startTowerScheduler, stopTowerScheduler } from './tower/towerScheduler';
+import { startLiqGridScheduler, stopLiqGridScheduler } from './liqGrid/liqGridScheduler';
 
 async function main(): Promise<void> {
   console.log('═══════════════════════════════════════');
@@ -68,12 +69,16 @@ async function main(): Promise<void> {
 
   // 启动守塔托管调度器（后台定时执行守塔策略）
   startTowerScheduler();
+
+  // 启动流动性网格调度器（后台定时执行流动性网格策略）
+  startLiqGridScheduler();
 }
 
 // 优雅退出
 process.on('SIGINT', () => {
   console.log('\n📴 收到 SIGINT 信号，正在退出...');
   stopTowerScheduler();
+  stopLiqGridScheduler();
   stopOrderMonitor();
   closeApiConfigReader();
   closeDatabase();
@@ -83,6 +88,7 @@ process.on('SIGINT', () => {
 process.on('SIGTERM', () => {
   console.log('\n📴 收到 SIGTERM 信号，正在退出...');
   stopTowerScheduler();
+  stopLiqGridScheduler();
   stopOrderMonitor();
   closeApiConfigReader();
   closeDatabase();

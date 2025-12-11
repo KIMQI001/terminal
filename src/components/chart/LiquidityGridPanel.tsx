@@ -4,32 +4,42 @@ import { useState, useEffect, useCallback } from "react";
 import { useChartStore } from "@/stores/chartStore";
 import { useUserStore } from "@/stores/userStore";
 
-// localStorage keys
+// localStorage keys (仅用于初始化默认值)
 const STORAGE_KEY_BASE_MARGIN = "liq_grid_base_margin";
 const STORAGE_KEY_MARGIN_PER_LEVEL = "liq_grid_margin_per_level";
 const STORAGE_KEY_LEVERAGE = "liq_grid_leverage";
 const STORAGE_KEY_UPDATE_INTERVAL = "liq_grid_update_interval";
 
-interface LiquidationLevel {
-  price: number;
-  volume: number;
-  side: "long" | "short";
+interface ManagementConfig {
+  id: number;
+  userId: number;
+  symbol: string;
+  isActive: boolean;
+  intervalMinutes: number;
+  baseMargin: number;
+  marginPerLevel: number;
+  leverage: number;
+  lastRunAt: string | null;
+  nextRunAt: string | null;
 }
 
-interface GridOrder {
-  entryPrice: number;
-  side: "BUY" | "SELL";
-  tpPrice: number;
+interface ManagementStats {
+  totalExecutions: number;
+  successCount: number;
+  failedCount: number;
+  skippedCount: number;
 }
 
 export function LiquidityGridPanel() {
   const [isCollapsed, setIsCollapsed] = useState(true);
-  const [isManaged, setIsManaged] = useState(false);
-  const [isUpdating, setIsUpdating] = useState(false);
-  const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>("");
 
-  // 策略参数
+  // 服务端状态
+  const [management, setManagement] = useState<ManagementConfig | null>(null);
+  const [stats, setStats] = useState<ManagementStats | null>(null);
+
+  // 策略参数（本地编辑状态）
   const [baseMargin, setBaseMargin] = useState(() => {
     if (typeof window !== "undefined") {
       return Number(localStorage.getItem(STORAGE_KEY_BASE_MARGIN)) || 50;
@@ -52,10 +62,10 @@ export function LiquidityGridPanel() {
     if (typeof window !== "undefined") {
       return Number(localStorage.getItem(STORAGE_KEY_UPDATE_INTERVAL)) || 60;
     }
-    return 60; // 默认60分钟
+    return 60;
   });
 
-  const { liquidationData, symbol } = useChartStore();
+  const { symbol } = useChartStore();
   const { token } = useUserStore();
 
   // 保存参数到 localStorage
@@ -75,159 +85,80 @@ export function LiquidityGridPanel() {
     localStorage.setItem(STORAGE_KEY_UPDATE_INTERVAL, String(updateInterval));
   }, [updateInterval]);
 
-  // 找出局部峰值
-  const findPeaks = useCallback((levels: LiquidationLevel[], count: number): LiquidationLevel[] => {
-    if (levels.length === 0) return [];
+  // 从服务端加载托管状态
+  const fetchManagement = useCallback(async () => {
+    if (!token || !symbol) return;
 
-    const sorted = [...levels].sort((a, b) => a.price - b.price);
-    const allPeaks: LiquidationLevel[] = [];
-
-    for (let i = 0; i < sorted.length; i++) {
-      const prev = sorted[i - 1]?.volume || 0;
-      const curr = sorted[i].volume;
-      const next = sorted[i + 1]?.volume || 0;
-
-      if (curr > prev && curr > next) {
-        allPeaks.push(sorted[i]);
-      } else if (i === 0 && curr > next) {
-        allPeaks.push(sorted[i]);
-      } else if (i === sorted.length - 1 && curr > prev) {
-        allPeaks.push(sorted[i]);
-      }
-    }
-
-    allPeaks.sort((a, b) => b.volume - a.volume);
-
-    const MIN_DISTANCE_RATIO = 0.002;
-    const filteredPeaks: LiquidationLevel[] = [];
-
-    for (const peak of allPeaks) {
-      const minDistance = peak.price * MIN_DISTANCE_RATIO;
-      const isTooClose = filteredPeaks.some(
-        (p) => Math.abs(p.price - peak.price) < minDistance
+    try {
+      const response = await fetch(
+        `/api/analysis/liq-grid-management?symbol=${symbol}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
       );
 
-      if (!isTooClose) {
-        filteredPeaks.push(peak);
+      const data = await response.json();
+      if (data.success) {
+        setManagement(data.management);
+        setStats(data.stats);
+
+        // 如果有服务端配置，同步到本地
+        if (data.management) {
+          setBaseMargin(data.management.baseMargin);
+          setMarginPerLevel(data.management.marginPerLevel);
+          setLeverage(data.management.leverage);
+          setUpdateInterval(data.management.intervalMinutes);
+        }
       }
-
-      if (filteredPeaks.length >= count) break;
+    } catch (error) {
+      console.error("[LiqGridPanel] 获取托管状态失败:", error);
     }
+  }, [token, symbol]);
 
-    return filteredPeaks.sort((a, b) => b.price - a.price);
-  }, []);
-
-  // 计算网格订单
-  const calculateGridOrders = useCallback((): GridOrder[] => {
-    if (!liquidationData?.levels) return [];
-
-    const levels: LiquidationLevel[] = liquidationData.levels.map((l) => ({
-      price: l.price,
-      volume: l.amount,
-      side: l.side,
-    }));
-
-    const longLevels = levels.filter((l) => l.side === "long");
-    const shortLevels = levels.filter((l) => l.side === "short");
-
-    const longPeaks = findPeaks(longLevels, 5);
-    const shortPeaks = findPeaks(shortLevels, 5);
-
-    const orders: GridOrder[] = [];
-
-    // 多头清算峰 → 开多单（抄底）→ 止盈设在空头清算峰（最近的）
-    const lowestShortPeak = shortPeaks.length > 0
-      ? shortPeaks.reduce((min, p) => (p.price < min.price ? p : min), shortPeaks[0])
-      : null;
-
-    for (const peak of longPeaks) {
-      const tpPrice = lowestShortPeak?.price || peak.price * 1.02;
-      orders.push({
-        entryPrice: peak.price,
-        side: "BUY",
-        tpPrice,
-      });
+  // 初始加载
+  useEffect(() => {
+    if (!isCollapsed) {
+      fetchManagement();
     }
+  }, [isCollapsed, fetchManagement]);
 
-    // 空头清算峰 → 开空单（摸顶）→ 止盈设在多头清算峰（最近的）
-    const highestLongPeak = longPeaks.length > 0
-      ? longPeaks.reduce((max, p) => (p.price > max.price ? p : max), longPeaks[0])
-      : null;
+  // 定时刷新状态（托管中时）
+  useEffect(() => {
+    if (!management?.isActive || isCollapsed) return;
 
-    for (const peak of shortPeaks) {
-      const tpPrice = highestLongPeak?.price || peak.price * 0.98;
-      orders.push({
-        entryPrice: peak.price,
-        side: "SELL",
-        tpPrice,
-      });
-    }
+    const timer = setInterval(() => {
+      fetchManagement();
+    }, 30 * 1000); // 每 30 秒刷新
 
-    return orders.sort((a, b) => b.entryPrice - a.entryPrice);
-  }, [liquidationData, findPeaks]);
+    return () => clearInterval(timer);
+  }, [management?.isActive, isCollapsed, fetchManagement]);
 
-  // 计算每层保证金
-  const calculateMarginForLevel = useCallback((levelIndex: number): number => {
-    return baseMargin + marginPerLevel * levelIndex;
-  }, [baseMargin, marginPerLevel]);
-
-  // 计算总保证金
+  // 计算总保证金（基于5层多单+5层空单）
   const totalMargin = useCallback(() => {
-    const orders = calculateGridOrders();
-    const sellCount = orders.filter(o => o.side === "SELL").length;
-    const buyCount = orders.filter(o => o.side === "BUY").length;
-
     let total = 0;
-    // 空单保证金
-    for (let i = 0; i < sellCount; i++) {
-      total += calculateMarginForLevel(i);
+    // 多单 5 层
+    for (let i = 0; i < 5; i++) {
+      total += baseMargin + marginPerLevel * i;
     }
-    // 多单保证金
-    for (let i = 0; i < buyCount; i++) {
-      total += calculateMarginForLevel(i);
+    // 空单 5 层
+    for (let i = 0; i < 5; i++) {
+      total += baseMargin + marginPerLevel * i;
     }
     return total;
-  }, [calculateGridOrders, calculateMarginForLevel]);
+  }, [baseMargin, marginPerLevel]);
 
-  // 更新订单（取消旧订单，下新订单）
-  const updateOrders = useCallback(async () => {
+  // 启动托管
+  const handleStart = async () => {
     if (!token) {
       setStatusMessage("请先登录");
       return;
     }
 
-    const orders = calculateGridOrders();
-    if (orders.length === 0) {
-      setStatusMessage("没有检测到清算高峰");
-      return;
-    }
-
-    setIsUpdating(true);
-    setStatusMessage("更新中...");
+    setIsLoading(true);
+    setStatusMessage("启动中...");
 
     try {
-      // 多空分开处理保证金递增
-      // 空单：从最低价往上递增（最低价离当前价最近，保证金最小）
-      // 多单：从最高价往下递增（最高价离当前价最近，保证金最小）
-      const sellOrders = orders.filter(o => o.side === "SELL").sort((a, b) => a.entryPrice - b.entryPrice);
-      const buyOrders = orders.filter(o => o.side === "BUY").sort((a, b) => b.entryPrice - a.entryPrice);
-
-      const ordersWithMargin = [
-        ...sellOrders.map((o, i) => ({
-          entryPrice: o.entryPrice,
-          side: o.side,
-          tpPrice: o.tpPrice,
-          margin: calculateMarginForLevel(i),
-        })),
-        ...buyOrders.map((o, i) => ({
-          entryPrice: o.entryPrice,
-          side: o.side,
-          tpPrice: o.tpPrice,
-          margin: calculateMarginForLevel(i),
-        })),
-      ];
-
-      const response = await fetch("/api/liquidity-grid", {
+      const response = await fetch("/api/analysis/liq-grid-management/start", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -235,68 +166,66 @@ export function LiquidityGridPanel() {
         },
         body: JSON.stringify({
           symbol,
+          intervalMinutes: updateInterval,
+          baseMargin,
+          marginPerLevel,
           leverage,
-          orders: ordersWithMargin,
-          cancelExisting: true, // 取消现有 liq_grid 订单
         }),
       });
 
       const data = await response.json();
-
       if (data.success) {
-        const successCount = data.results?.filter((r: { success: boolean }) => r.success).length || 0;
-        setStatusMessage(`更新成功: ${successCount}/${orders.length} 单`);
-        setLastUpdateTime(new Date());
+        setManagement(data.management);
+        setStatusMessage("托管已启动");
       } else {
-        setStatusMessage(`更新失败: ${data.error}`);
+        setStatusMessage(`启动失败: ${data.error}`);
       }
     } catch (error) {
-      setStatusMessage(`更新出错: ${error instanceof Error ? error.message : "未知错误"}`);
+      setStatusMessage(`启动出错: ${error instanceof Error ? error.message : "未知错误"}`);
     } finally {
-      setIsUpdating(false);
-    }
-  }, [token, symbol, leverage, calculateGridOrders, calculateMarginForLevel]);
-
-  // 托管定时更新
-  useEffect(() => {
-    if (!isManaged) return;
-
-    // 立即执行一次
-    updateOrders();
-
-    // 设置定时器
-    const intervalMs = updateInterval * 60 * 1000;
-    const timer = setInterval(() => {
-      updateOrders();
-    }, intervalMs);
-
-    return () => clearInterval(timer);
-  }, [isManaged, updateInterval, updateOrders]);
-
-  // 停止托管
-  const handleStopManage = async () => {
-    setIsManaged(false);
-    setStatusMessage("托管已停止");
-
-    // 可选：取消所有 liq_grid 订单
-    if (token) {
-      try {
-        await fetch("/api/liquidity-grid", {
-          method: "DELETE",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ symbol }),
-        });
-        setStatusMessage("托管已停止，订单已取消");
-      } catch {
-        setStatusMessage("托管已停止，订单取消失败");
-      }
+      setIsLoading(false);
     }
   };
 
-  const orderCount = calculateGridOrders().length;
+  // 停止托管
+  const handleStop = async () => {
+    if (!token) return;
+
+    setIsLoading(true);
+    setStatusMessage("停止中...");
+
+    try {
+      const response = await fetch("/api/analysis/liq-grid-management/stop", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ symbol }),
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setManagement((prev) => (prev ? { ...prev, isActive: false } : null));
+        setStatusMessage("托管已停止");
+      } else {
+        setStatusMessage(`停止失败: ${data.error}`);
+      }
+    } catch (error) {
+      setStatusMessage(`停止出错: ${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 格式化时间
+  const formatTime = (isoString: string | null) => {
+    if (!isoString) return "-";
+    const date = new Date(isoString);
+    return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  };
+
+  const isActive = management?.isActive ?? false;
 
   return (
     <div className="bg-white/95 border border-gray-200 rounded-lg shadow-lg mt-2">
@@ -307,7 +236,7 @@ export function LiquidityGridPanel() {
       >
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-gray-600">流动性网格</span>
-          {isManaged && (
+          {isActive && (
             <span className="px-1.5 py-0.5 text-[9px] bg-green-100 text-green-600 rounded">
               托管中
             </span>
@@ -331,7 +260,7 @@ export function LiquidityGridPanel() {
                 value={baseMargin}
                 onChange={(e) => setBaseMargin(Number(e.target.value))}
                 className="w-14 px-1 py-0.5 text-[10px] border rounded text-center"
-                disabled={isManaged}
+                disabled={isActive}
               />
               <span className="text-[10px] text-gray-400">+</span>
               <input
@@ -339,7 +268,7 @@ export function LiquidityGridPanel() {
                 value={marginPerLevel}
                 onChange={(e) => setMarginPerLevel(Number(e.target.value))}
                 className="w-12 px-1 py-0.5 text-[10px] border rounded text-center"
-                disabled={isManaged}
+                disabled={isActive}
               />
               <span className="text-[10px] text-gray-400">U/层</span>
             </div>
@@ -352,7 +281,7 @@ export function LiquidityGridPanel() {
                 value={leverage}
                 onChange={(e) => setLeverage(Number(e.target.value))}
                 className="w-14 px-1 py-0.5 text-[10px] border rounded text-center"
-                disabled={isManaged}
+                disabled={isActive}
               />
               <span className="text-[10px] text-gray-400">x</span>
             </div>
@@ -364,7 +293,7 @@ export function LiquidityGridPanel() {
                 value={updateInterval}
                 onChange={(e) => setUpdateInterval(Number(e.target.value))}
                 className="px-1 py-0.5 text-[10px] border rounded"
-                disabled={isManaged}
+                disabled={isActive}
               >
                 <option value={15}>15 分钟</option>
                 <option value={30}>30 分钟</option>
@@ -378,18 +307,26 @@ export function LiquidityGridPanel() {
           {/* 统计信息 */}
           <div className="bg-gray-50 rounded p-2 space-y-1">
             <div className="flex justify-between text-[10px]">
-              <span className="text-gray-500">订单数量:</span>
-              <span className="font-mono">{orderCount} 单</span>
-            </div>
-            <div className="flex justify-between text-[10px]">
-              <span className="text-gray-500">总保证金:</span>
+              <span className="text-gray-500">预估保证金:</span>
               <span className="font-mono">{totalMargin().toFixed(0)} USDT</span>
             </div>
-            {lastUpdateTime && (
+            {management && (
+              <>
+                <div className="flex justify-between text-[10px]">
+                  <span className="text-gray-500">上次更新:</span>
+                  <span className="font-mono">{formatTime(management.lastRunAt)}</span>
+                </div>
+                <div className="flex justify-between text-[10px]">
+                  <span className="text-gray-500">下次更新:</span>
+                  <span className="font-mono">{formatTime(management.nextRunAt)}</span>
+                </div>
+              </>
+            )}
+            {stats && (
               <div className="flex justify-between text-[10px]">
-                <span className="text-gray-500">上次更新:</span>
+                <span className="text-gray-500">执行统计:</span>
                 <span className="font-mono">
-                  {lastUpdateTime.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}
+                  {stats.successCount}成功 / {stats.skippedCount}跳过 / {stats.failedCount}失败
                 </span>
               </div>
             )}
@@ -398,9 +335,11 @@ export function LiquidityGridPanel() {
           {/* 状态消息 */}
           {statusMessage && (
             <div className={`text-[10px] px-2 py-1 rounded ${
-              statusMessage.includes("成功") ? "bg-green-50 text-green-600" :
-              statusMessage.includes("失败") || statusMessage.includes("出错") ? "bg-red-50 text-red-600" :
-              "bg-gray-50 text-gray-600"
+              statusMessage.includes("成功") || statusMessage.includes("启动") || statusMessage.includes("停止")
+                ? "bg-green-50 text-green-600"
+                : statusMessage.includes("失败") || statusMessage.includes("出错")
+                  ? "bg-red-50 text-red-600"
+                  : "bg-gray-50 text-gray-600"
             }`}>
               {statusMessage}
             </div>
@@ -408,29 +347,21 @@ export function LiquidityGridPanel() {
 
           {/* 操作按钮 */}
           <div className="flex gap-2">
-            {!isManaged ? (
-              <>
-                <button
-                  onClick={updateOrders}
-                  disabled={isUpdating || orderCount === 0}
-                  className="flex-1 py-1.5 text-[11px] font-semibold bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isUpdating ? "更新中..." : "更新订单"}
-                </button>
-                <button
-                  onClick={() => setIsManaged(true)}
-                  disabled={orderCount === 0}
-                  className="flex-1 py-1.5 text-[11px] font-semibold bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  启动托管
-                </button>
-              </>
+            {!isActive ? (
+              <button
+                onClick={handleStart}
+                disabled={isLoading}
+                className="w-full py-1.5 text-[11px] font-semibold bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isLoading ? "启动中..." : "启动托管"}
+              </button>
             ) : (
               <button
-                onClick={handleStopManage}
-                className="w-full py-1.5 text-[11px] font-semibold bg-red-500 text-white rounded hover:bg-red-600"
+                onClick={handleStop}
+                disabled={isLoading}
+                className="w-full py-1.5 text-[11px] font-semibold bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                停止托管
+                {isLoading ? "停止中..." : "停止托管"}
               </button>
             )}
           </div>

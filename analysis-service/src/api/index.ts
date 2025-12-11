@@ -11,6 +11,7 @@ import { analyzeRoutes } from './routes/analyze';
 import { pendingOrdersRoutes } from './routes/pendingOrders';
 import { towerManagementRoutes } from './routes/towerManagement';
 import { towerPerformanceRoutes } from './routes/towerPerformance';
+import { liqGridManagementRoutes } from './routes/liqGridManagement';
 
 /**
  * 启动 HTTP API 服务器
@@ -38,6 +39,7 @@ export function startApiServer(port: number = 3002): void {
   app.use('/api/pending-orders', pendingOrdersRoutes);
   app.use('/api/tower-management', towerManagementRoutes);
   app.use('/api/tower-performance', towerPerformanceRoutes);
+  app.use('/api/liq-grid-management', liqGridManagementRoutes);
 
   // 404 处理
   app.use((_req, res) => {
@@ -80,5 +82,8 @@ export function startApiServer(port: number = 3002): void {
     console.log('  - POST /api/tower-management/stop (停止托管)');
     console.log('  - GET /api/tower-performance/stats (战绩统计)');
     console.log('  - GET /api/tower-performance/orders (战绩列表)');
+    console.log('  - GET /api/liq-grid-management?userId=1&symbol=ETHUSDC (流动性网格托管配置)');
+    console.log('  - POST /api/liq-grid-management/start (启动流动性网格托管)');
+    console.log('  - POST /api/liq-grid-management/stop (停止流动性网格托管)');
   });
 }
