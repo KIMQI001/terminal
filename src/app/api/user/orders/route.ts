@@ -99,7 +99,6 @@ async function getBinanceAlgoOrders(
 
   // API 直接返回数组，不是 { orders: [...] }
   const orders = Array.isArray(data) ? data : (data.orders || []);
-  console.log('[AlgoOrders] 订单数量:', orders.length);
   return orders;
 }
 
@@ -120,15 +119,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '未找到 Binance API 配置' }, { status: 404 });
     }
 
-    console.log('[Orders] 查询 symbol:', symbol, 'isTestnet:', config.isTestnet);
-
     // 并行获取普通订单和 Algo 条件单
     const [normalOrders, algoOrders] = await Promise.all([
       getBinanceOpenOrders(config.apiKey, config.apiSecret, config.isTestnet, symbol),
       getBinanceAlgoOrders(config.apiKey, config.apiSecret, config.isTestnet, symbol),
     ]);
-
-    console.log('[Orders] 普通订单数:', normalOrders.length, 'Algo订单数:', algoOrders.length);
 
     // 格式化普通订单
     const formattedNormalOrders = normalOrders.map((order: {
