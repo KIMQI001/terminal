@@ -174,8 +174,16 @@ export function LiquidityGridPanel() {
   // 计算总保证金
   const totalMargin = useCallback(() => {
     const orders = calculateGridOrders();
+    const sellCount = orders.filter(o => o.side === "SELL").length;
+    const buyCount = orders.filter(o => o.side === "BUY").length;
+
     let total = 0;
-    for (let i = 0; i < orders.length; i++) {
+    // 空单保证金
+    for (let i = 0; i < sellCount; i++) {
+      total += calculateMarginForLevel(i);
+    }
+    // 多单保证金
+    for (let i = 0; i < buyCount; i++) {
       total += calculateMarginForLevel(i);
     }
     return total;
@@ -198,13 +206,26 @@ export function LiquidityGridPanel() {
     setStatusMessage("更新中...");
 
     try {
-      // 构建订单数据，每层保证金递增
-      const ordersWithMargin = orders.map((o, i) => ({
-        entryPrice: o.entryPrice,
-        side: o.side,
-        tpPrice: o.tpPrice,
-        margin: calculateMarginForLevel(i),
-      }));
+      // 多空分开处理保证金递增
+      // 空单：从最高价往下递增（越高的价格，保证金越小）
+      // 多单：从最低价往上递增（越低的价格，保证金越小）
+      const sellOrders = orders.filter(o => o.side === "SELL").sort((a, b) => b.entryPrice - a.entryPrice);
+      const buyOrders = orders.filter(o => o.side === "BUY").sort((a, b) => a.entryPrice - b.entryPrice);
+
+      const ordersWithMargin = [
+        ...sellOrders.map((o, i) => ({
+          entryPrice: o.entryPrice,
+          side: o.side,
+          tpPrice: o.tpPrice,
+          margin: calculateMarginForLevel(i),
+        })),
+        ...buyOrders.map((o, i) => ({
+          entryPrice: o.entryPrice,
+          side: o.side,
+          tpPrice: o.tpPrice,
+          margin: calculateMarginForLevel(i),
+        })),
+      ];
 
       const response = await fetch("/api/liquidity-grid", {
         method: "POST",
