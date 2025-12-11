@@ -181,24 +181,30 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
     let orders = calculateGridOrders(liqData, management, longNotional, shortNotional);
 
     // 7. 根据持仓过滤订单位置
-    // 多单入场价必须在持仓之下（抄底加仓）
-    // 空单入场价必须在持仓之上（摸顶加仓）
-    if (longPosition) {
-      const longEntryPrice = longPosition.entryPrice;
-      const beforeCount = orders.filter(o => o.side === 'BUY').length;
-      orders = orders.filter(o => o.side !== 'BUY' || o.entryPrice < longEntryPrice);
-      const afterCount = orders.filter(o => o.side === 'BUY').length;
-      if (beforeCount !== afterCount) {
-        console.log(`[LiqGridScheduler] 有多头持仓 @ ${longEntryPrice}，过滤掉 ${beforeCount - afterCount} 个多单`);
+    // 多单必须低于所有持仓成本（避免在持仓成本附近开多）
+    // 空单必须高于所有持仓成本（避免在持仓成本附近开空）
+    const positionCosts: number[] = [];
+    if (longPosition) positionCosts.push(longPosition.entryPrice);
+    if (shortPosition) positionCosts.push(shortPosition.entryPrice);
+
+    if (positionCosts.length > 0) {
+      const minCost = Math.min(...positionCosts);
+      const maxCost = Math.max(...positionCosts);
+
+      // 多单必须 < 所有持仓成本的最低价
+      const buyBeforeCount = orders.filter(o => o.side === 'BUY').length;
+      orders = orders.filter(o => o.side !== 'BUY' || o.entryPrice < minCost);
+      const buyAfterCount = orders.filter(o => o.side === 'BUY').length;
+      if (buyBeforeCount !== buyAfterCount) {
+        console.log(`[LiqGridScheduler] 持仓最低成本 ${minCost.toFixed(2)}，过滤掉 ${buyBeforeCount - buyAfterCount} 个多单`);
       }
-    }
-    if (shortPosition) {
-      const shortEntryPrice = shortPosition.entryPrice;
-      const beforeCount = orders.filter(o => o.side === 'SELL').length;
-      orders = orders.filter(o => o.side !== 'SELL' || o.entryPrice > shortEntryPrice);
-      const afterCount = orders.filter(o => o.side === 'SELL').length;
-      if (beforeCount !== afterCount) {
-        console.log(`[LiqGridScheduler] 有空头持仓 @ ${shortEntryPrice}，过滤掉 ${beforeCount - afterCount} 个空单`);
+
+      // 空单必须 > 所有持仓成本的最高价
+      const sellBeforeCount = orders.filter(o => o.side === 'SELL').length;
+      orders = orders.filter(o => o.side !== 'SELL' || o.entryPrice > maxCost);
+      const sellAfterCount = orders.filter(o => o.side === 'SELL').length;
+      if (sellBeforeCount !== sellAfterCount) {
+        console.log(`[LiqGridScheduler] 持仓最高成本 ${maxCost.toFixed(2)}，过滤掉 ${sellBeforeCount - sellAfterCount} 个空单`);
       }
     }
 
