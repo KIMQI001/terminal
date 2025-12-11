@@ -115,12 +115,10 @@ export function LiquidityGridPanel() {
     }
   }, [token, symbol]);
 
-  // 初始加载
+  // 初始加载和 symbol 切换时获取状态（无论面板是否折叠）
   useEffect(() => {
-    if (!isCollapsed) {
-      fetchManagement();
-    }
-  }, [isCollapsed, fetchManagement]);
+    fetchManagement();
+  }, [fetchManagement]);
 
   // 定时刷新状态（托管中时）
   useEffect(() => {

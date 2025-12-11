@@ -376,6 +376,9 @@ export function TradingChart() {
       candleSeriesRef.current.setData([]);
     }
 
+    // 清空清算数据，防止显示旧 symbol 的数据
+    useChartStore.getState().setLiquidationData(null);
+
     const loadData = async () => {
       setLoading(true);
       try {
