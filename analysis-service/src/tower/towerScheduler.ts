@@ -959,6 +959,7 @@ function calculateSlTpForPosition(
 
 /**
  * 下修复订单
+ * 从 2025-12-09 开始，STOP_MARKET/TAKE_PROFIT_MARKET 必须使用 Algo Order API
  */
 async function placeRepairOrder(
   apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
@@ -983,14 +984,16 @@ async function placeRepairOrder(
   const priceStr = Math.round(params.stopPrice).toString();
   const clientOrderId = `ict_repair_${sideShort}_${typeShort}_${priceStr}`;
 
+  // 使用 Algo Order API
   const orderParams: Record<string, string | number> = {
+    algoType: 'CONDITIONAL',
     symbol: params.symbol,
     side: closeSide,
     positionSide: params.positionSide,
     type: params.type,
     quantity: params.quantity.toFixed(3),
-    stopPrice: params.stopPrice.toFixed(1),
-    newClientOrderId: clientOrderId,
+    triggerPrice: params.stopPrice.toFixed(1),  // Algo API 用 triggerPrice 而非 stopPrice
+    clientAlgoId: clientOrderId,  // Algo API 用 clientAlgoId 而非 newClientOrderId
     timestamp,
   };
 
@@ -1000,7 +1003,7 @@ async function placeRepairOrder(
   const signature = generateSignature(queryString, apiConfig.apiSecret);
 
   try {
-    const response = await fetch(`${baseUrl}/fapi/v1/order`, {
+    const response = await fetch(`${baseUrl}/fapi/v1/algoOrder`, {
       method: 'POST',
       headers: {
         'X-MBX-APIKEY': apiConfig.apiKey,
