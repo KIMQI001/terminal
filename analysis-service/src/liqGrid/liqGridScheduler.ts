@@ -306,12 +306,12 @@ function calculateGridOrders(
   const orders: GridOrder[] = [];
 
   // 根据持仓计算新订单的起点保证金
-  // 公式：持仓价值/杠杆/3 + marginPerLevel（相当于从持仓对应的层级+1开始）
+  // 公式：持仓价值/杠杆/5 + marginPerLevel（相当于从持仓对应的层级+1开始）
   const longBaseMargin = longNotional > 0
-    ? Math.round(longNotional / leverage / 3) + marginPerLevel
+    ? Math.round(longNotional / leverage / 5) + marginPerLevel
     : baseMargin;
   const shortBaseMargin = shortNotional > 0
-    ? Math.round(shortNotional / leverage / 3) + marginPerLevel
+    ? Math.round(shortNotional / leverage / 5) + marginPerLevel
     : baseMargin;
 
   if (longNotional > 0) {
