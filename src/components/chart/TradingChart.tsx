@@ -376,6 +376,13 @@ export function TradingChart() {
       candleSeriesRef.current.setData([]);
     }
 
+    // 重置价格轴为自动模式，确保新数据能正确显示
+    if (chartRef.current) {
+      chartRef.current.priceScale('left').applyOptions({
+        autoScale: true,
+      });
+    }
+
     // 清空清算数据，防止显示旧 symbol 的数据
     useChartStore.getState().setLiquidationData(null);
 
