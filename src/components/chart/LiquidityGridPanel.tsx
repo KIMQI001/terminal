@@ -207,10 +207,10 @@ export function LiquidityGridPanel() {
 
     try {
       // 多空分开处理保证金递增
-      // 空单：从最高价往下递增（越高的价格，保证金越小）
-      // 多单：从最低价往上递增（越低的价格，保证金越小）
-      const sellOrders = orders.filter(o => o.side === "SELL").sort((a, b) => b.entryPrice - a.entryPrice);
-      const buyOrders = orders.filter(o => o.side === "BUY").sort((a, b) => a.entryPrice - b.entryPrice);
+      // 空单：从最低价往上递增（最低价离当前价最近，保证金最小）
+      // 多单：从最高价往下递增（最高价离当前价最近，保证金最小）
+      const sellOrders = orders.filter(o => o.side === "SELL").sort((a, b) => a.entryPrice - b.entryPrice);
+      const buyOrders = orders.filter(o => o.side === "BUY").sort((a, b) => b.entryPrice - a.entryPrice);
 
       const ordersWithMargin = [
         ...sellOrders.map((o, i) => ({
