@@ -167,14 +167,18 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
     // 4. 设置杠杆
     await setLeverage(apiConfig, management.symbol, management.leverage);
 
-    // 5. 获取当前持仓，用于过滤订单位置
+    // 5. 获取当前持仓，用于过滤订单位置和计算起点保证金
     const positionsResult = await getPositions(apiConfig, management.symbol);
     const positions = positionsResult.success ? positionsResult.positions || [] : [];
     const longPosition = positions.find(p => p.positionSide === 'LONG' && Math.abs(p.positionAmt) >= 0.001);
     const shortPosition = positions.find(p => p.positionSide === 'SHORT' && Math.abs(p.positionAmt) >= 0.001);
 
-    // 6. 计算网格订单
-    let orders = calculateGridOrders(liqData, management);
+    // 获取持仓价值用于计算新订单起点保证金
+    const longNotional = longPosition?.notional || 0;
+    const shortNotional = shortPosition?.notional || 0;
+
+    // 6. 计算网格订单（传入持仓价值，用于计算起点保证金）
+    let orders = calculateGridOrders(liqData, management, longNotional, shortNotional);
 
     // 7. 根据持仓过滤订单位置
     // 多单入场价必须在持仓之下（抄底加仓）
@@ -279,15 +283,37 @@ interface GridOrder {
 
 /**
  * 计算网格订单
+ * @param liqData 清算数据
+ * @param management 配置
+ * @param longNotional 多头持仓价值（用于计算新多单起点保证金）
+ * @param shortNotional 空头持仓价值（用于计算新空单起点保证金）
  */
 function calculateGridOrders(
   liqData: { longPeaks: LiquidationLevel[]; shortPeaks: LiquidationLevel[]; currentPrice: number },
-  management: LiqGridManagementConfig
+  management: LiqGridManagementConfig,
+  longNotional: number = 0,
+  shortNotional: number = 0
 ): GridOrder[] {
-  const { longPeaks, shortPeaks, currentPrice } = liqData;
+  const { longPeaks, shortPeaks } = liqData;
   const { baseMargin, marginPerLevel, leverage } = management;
 
   const orders: GridOrder[] = [];
+
+  // 根据持仓计算新订单的起点保证金
+  // 公式：持仓价值/杠杆/3 + marginPerLevel（相当于从持仓对应的层级+1开始）
+  const longBaseMargin = longNotional > 0
+    ? Math.round(longNotional / leverage / 3) + marginPerLevel
+    : baseMargin;
+  const shortBaseMargin = shortNotional > 0
+    ? Math.round(shortNotional / leverage / 3) + marginPerLevel
+    : baseMargin;
+
+  if (longNotional > 0) {
+    console.log(`[LiqGridScheduler] 多头持仓价值 ${longNotional.toFixed(0)} USDT，新多单起点保证金: ${longBaseMargin} USDT`);
+  }
+  if (shortNotional > 0) {
+    console.log(`[LiqGridScheduler] 空头持仓价值 ${shortNotional.toFixed(0)} USDT，新空单起点保证金: ${shortBaseMargin} USDT`);
+  }
 
   // 多头清算峰 → 开多单（抄底）→ 止盈设在空头清算峰（最近的）
   const lowestShortPeak = shortPeaks.length > 0
@@ -299,7 +325,7 @@ function calculateGridOrders(
   for (let i = 0; i < sortedLongPeaks.length; i++) {
     const peak = sortedLongPeaks[i];
     const tpPrice = lowestShortPeak?.price || peak.price * 1.02;
-    const margin = baseMargin + marginPerLevel * i;
+    const margin = longBaseMargin + marginPerLevel * i;
     const quantity = (margin * leverage) / peak.price;
 
     orders.push({
@@ -322,7 +348,7 @@ function calculateGridOrders(
   for (let i = 0; i < sortedShortPeaks.length; i++) {
     const peak = sortedShortPeaks[i];
     const tpPrice = highestLongPeak?.price || peak.price * 0.98;
-    const margin = baseMargin + marginPerLevel * i;
+    const margin = shortBaseMargin + marginPerLevel * i;
     const quantity = (margin * leverage) / peak.price;
 
     orders.push({
@@ -447,7 +473,7 @@ async function savePendingOrder(params: {
 async function getPositions(
   apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
   symbol: string
-): Promise<{ success: boolean; positions?: Array<{ positionSide: string; positionAmt: number; entryPrice: number }> }> {
+): Promise<{ success: boolean; positions?: Array<{ positionSide: string; positionAmt: number; entryPrice: number; notional: number }> }> {
   const baseUrl = apiConfig.isTestnet
     ? 'https://testnet.binancefuture.com'
     : 'https://fapi.binance.com';
@@ -469,6 +495,7 @@ async function getPositions(
       positionSide: string;
       positionAmt: string;
       entryPrice: string;
+      notional: string;
     }>;
 
     return {
@@ -479,6 +506,7 @@ async function getPositions(
           positionSide: p.positionSide,
           positionAmt: parseFloat(p.positionAmt),
           entryPrice: parseFloat(p.entryPrice),
+          notional: Math.abs(parseFloat(p.notional)),
         })),
     };
   } catch {
