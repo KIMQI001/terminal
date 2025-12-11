@@ -221,6 +221,18 @@ export function Header() {
           </Button>
         </Link>
 
+        {/* 滚仓策略按钮 */}
+        <Link href="/rolling">
+          <Button
+            variant="outline"
+            size="sm"
+            title="滚仓策略"
+          >
+            🎢
+            滚
+          </Button>
+        </Link>
+
         {/* AI 分析按钮 */}
         <Link href="/analysis">
           <Button
