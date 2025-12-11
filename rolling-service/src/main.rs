@@ -63,9 +63,10 @@ async fn main() -> Result<()> {
     info!("方向: {}", direction_str);
     info!("网格间距: {} USDT", config.grid.grid_spacing);
     info!("网格数量: {}", config.grid.grid_count);
-    info!("每单大小: {} ETH", config.grid.order_size);
+    info!("每单保证金: {} USDT", config.grid.order_margin);
+    info!("最大保证金: {} USDT", config.grid.max_margin);
     info!("杠杆: {}x", config.grid.leverage);
-    info!("止盈: {}%", config.rolling.take_profit_percent);
+    info!("止盈目标价: {:.2}", config.rolling.target_price);
     if config.rolling.stop_loss_percent > 0.0 {
         info!("止损: {}%", config.rolling.stop_loss_percent);
     } else {
@@ -76,17 +77,13 @@ async fn main() -> Result<()> {
     } else {
         info!("滚仓模式: 未启用");
     }
-    if config.rolling.target_price > 0.0 {
-        let stop_price = if config.grid.direction == Direction::Long {
-            config.rolling.target_price * (1.0 - config.rolling.stop_roll_distance / 100.0)
-        } else {
-            config.rolling.target_price * (1.0 + config.rolling.stop_roll_distance / 100.0)
-        };
-        info!("目标价位: {:.2}, 停止滚仓价: {:.2} (距离{}%)",
-              config.rolling.target_price, stop_price, config.rolling.stop_roll_distance);
+    // 计算停止补单价
+    let stop_price = if config.grid.direction == Direction::Long {
+        config.rolling.target_price * (1.0 - config.rolling.stop_roll_distance / 100.0)
     } else {
-        info!("目标价位: 未设置");
-    }
+        config.rolling.target_price * (1.0 + config.rolling.stop_roll_distance / 100.0)
+    };
+    info!("停止补单价: {:.2} (距目标{}%)", stop_price, config.rolling.stop_roll_distance);
 
     // 创建 WebSocket 订单管理器
     let api = Arc::new(WsOrderManager::new(config.binance.clone()));

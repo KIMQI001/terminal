@@ -17,9 +17,8 @@ const STORAGE_KEYS = {
   LEVERAGE: "rolling_leverage",
   GRID_SPACING: "rolling_grid_spacing",
   GRID_COUNT: "rolling_grid_count",
-  ORDER_SIZE: "rolling_order_size",
-  MAX_POSITION: "rolling_max_position",
-  TAKE_PROFIT: "rolling_take_profit",
+  ORDER_MARGIN: "rolling_order_margin",
+  MAX_MARGIN: "rolling_max_margin",
   STOP_LOSS: "rolling_stop_loss",
   ROLL_PROFIT_RATIO: "rolling_profit_ratio",
   TARGET_PRICE: "rolling_target_price",
@@ -33,7 +32,7 @@ interface RollingServiceStatus {
   symbol: string | null;
   startTime: string | null;
   config: {
-    takeProfitPercent: number;
+    targetPrice: number;
     stopLossPercent: number;
     leverage: number;
   } | null;
@@ -44,18 +43,16 @@ export default function RollingPage() {
 
   // 交易对选择
   const [selectedSymbol, setSelectedSymbol] = useState('ETHUSDC');
-  const symbolConfig = SUPPORTED_SYMBOLS.find(s => s.symbol === selectedSymbol) || SUPPORTED_SYMBOLS[0];
 
   // 核心参数
   const [leverage, setLeverage] = useState(20);
-  const [gridSpacing, setGridSpacing] = useState(1.0);
+  const [gridSpacing, setGridSpacing] = useState(1);
   const [gridCount, setGridCount] = useState(10);
-  const [orderSize, setOrderSize] = useState(0.01);
-  const [maxPosition, setMaxPosition] = useState(1);
-  const [takeProfit, setTakeProfit] = useState(5);
+  const [orderMargin, setOrderMargin] = useState(10);  // 每单保证金 USDT
+  const [maxMargin, setMaxMargin] = useState(100);     // 最大保证金 USDT
   const [stopLoss, setStopLoss] = useState(3);
   const [rollProfitRatio, setRollProfitRatio] = useState(80);
-  const [targetPrice, setTargetPrice] = useState(0);
+  const [targetPrice, setTargetPrice] = useState(0);   // 目标价位 = 止盈价
   const [stopRollDistance, setStopRollDistance] = useState(1);
 
   // 服务状态
@@ -105,12 +102,11 @@ export default function RollingPage() {
           leverage,
           gridSpacing,
           gridCount,
-          orderSize,
-          takeProfitPercent: takeProfit,
+          orderMargin,
+          maxMargin,
           stopLossPercent: stopLoss,
           useRollingMargin: rollProfitRatio > 0,
           rollProfitRatio,
-          maxPosition,
           targetPrice,
           stopRollDistance,
         }),
@@ -168,9 +164,8 @@ export default function RollingPage() {
     load(STORAGE_KEYS.LEVERAGE, setLeverage);
     load(STORAGE_KEYS.GRID_SPACING, setGridSpacing);
     load(STORAGE_KEYS.GRID_COUNT, setGridCount);
-    load(STORAGE_KEYS.ORDER_SIZE, setOrderSize);
-    load(STORAGE_KEYS.MAX_POSITION, setMaxPosition);
-    load(STORAGE_KEYS.TAKE_PROFIT, setTakeProfit);
+    load(STORAGE_KEYS.ORDER_MARGIN, setOrderMargin);
+    load(STORAGE_KEYS.MAX_MARGIN, setMaxMargin);
     load(STORAGE_KEYS.STOP_LOSS, setStopLoss);
     load(STORAGE_KEYS.ROLL_PROFIT_RATIO, setRollProfitRatio);
     load(STORAGE_KEYS.TARGET_PRICE, setTargetPrice);
@@ -243,7 +238,7 @@ export default function RollingPage() {
           {/* 基础参数 */}
           <div className="p-4 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
             <h3 className="text-sm font-medium text-[var(--text-primary)] mb-3">基础参数</h3>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className={labelClass}>杠杆</label>
                 <select value={leverage} onChange={(e) => { const v = Number(e.target.value); setLeverage(v); save(STORAGE_KEYS.LEVERAGE, v); }} className={inputClass}>
@@ -254,12 +249,6 @@ export default function RollingPage() {
                 <label className={labelClass}>滚仓比例</label>
                 <select value={rollProfitRatio} onChange={(e) => { const v = Number(e.target.value); setRollProfitRatio(v); save(STORAGE_KEYS.ROLL_PROFIT_RATIO, v); }} className={inputClass}>
                   {[0, 50, 60, 70, 80, 90, 100].map(n => <option key={n} value={n}>{n === 0 ? '不滚仓' : `${n}%`}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className={labelClass}>止盈 %</label>
-                <select value={takeProfit} onChange={(e) => { const v = Number(e.target.value); setTakeProfit(v); save(STORAGE_KEYS.TAKE_PROFIT, v); }} className={inputClass}>
-                  {[3, 5, 8, 10, 15, 20].map(n => <option key={n} value={n}>{n}%</option>)}
                 </select>
               </div>
               <div>
@@ -278,7 +267,7 @@ export default function RollingPage() {
               <div>
                 <label className={labelClass}>间距 (USDT)</label>
                 <select value={gridSpacing} onChange={(e) => { const v = Number(e.target.value); setGridSpacing(v); save(STORAGE_KEYS.GRID_SPACING, v); }} className={inputClass}>
-                  {[0.5, 1, 2, 3, 5, 10].map(n => <option key={n} value={n}>{n}</option>)}
+                  {[0.01, 0.1, 1, 5, 10, 20].map(n => <option key={n} value={n}>{n}</option>)}
                 </select>
               </div>
               <div>
@@ -288,34 +277,34 @@ export default function RollingPage() {
                 </select>
               </div>
               <div>
-                <label className={labelClass}>每单 ({symbolConfig.baseAsset})</label>
-                <input type="number" value={orderSize} onChange={(e) => { const v = Number(e.target.value); setOrderSize(v); save(STORAGE_KEYS.ORDER_SIZE, v); }} className={inputClass} min={0.001} step={0.001} />
+                <label className={labelClass}>每单保证金 (USDT)</label>
+                <input type="number" value={orderMargin} onChange={(e) => { const v = Number(e.target.value); setOrderMargin(v); save(STORAGE_KEYS.ORDER_MARGIN, v); }} className={inputClass} min={1} step={1} />
               </div>
               <div>
-                <label className={labelClass}>最大仓位 ({symbolConfig.baseAsset})</label>
-                <input type="number" value={maxPosition} onChange={(e) => { const v = Number(e.target.value); setMaxPosition(v); save(STORAGE_KEYS.MAX_POSITION, v); }} className={inputClass} min={0} step={0.1} />
+                <label className={labelClass}>最大保证金 (USDT)</label>
+                <input type="number" value={maxMargin} onChange={(e) => { const v = Number(e.target.value); setMaxMargin(v); save(STORAGE_KEYS.MAX_MARGIN, v); }} className={inputClass} min={0} step={10} />
               </div>
             </div>
           </div>
 
-          {/* 目标价位 */}
+          {/* 目标价位 = 止盈价 */}
           <div className="p-4 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
-            <h3 className="text-sm font-medium text-[var(--text-primary)] mb-3">目标价位 <span className="text-xs text-[var(--text-tertiary)] font-normal">接近时停止补单</span></h3>
+            <h3 className="text-sm font-medium text-[var(--text-primary)] mb-3">止盈目标价 <span className="text-xs text-[var(--text-tertiary)] font-normal">到达时平仓止盈</span></h3>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className={labelClass}>目标价</label>
-                <input type="number" value={targetPrice} onChange={(e) => { const v = Number(e.target.value); setTargetPrice(v); save(STORAGE_KEYS.TARGET_PRICE, v); }} className={inputClass} placeholder="0=不设置" />
+                <label className={labelClass}>目标价 (止盈)</label>
+                <input type="number" value={targetPrice} onChange={(e) => { const v = Number(e.target.value); setTargetPrice(v); save(STORAGE_KEYS.TARGET_PRICE, v); }} className={inputClass} placeholder="必填" />
               </div>
               <div>
-                <label className={labelClass}>停止距离</label>
+                <label className={labelClass}>停止补单距离</label>
                 <select value={stopRollDistance} onChange={(e) => { const v = Number(e.target.value); setStopRollDistance(v); save(STORAGE_KEYS.STOP_ROLL_DISTANCE, v); }} className={inputClass}>
                   {[0.5, 1, 1.5, 2, 3, 5].map(n => <option key={n} value={n}>{n}%</option>)}
                 </select>
               </div>
             </div>
             {targetPrice > 0 && (
-              <p className="text-xs text-yellow-400 mt-2">
-                停止价: {(targetPrice * (1 - stopRollDistance / 100)).toFixed(2)} (多) / {(targetPrice * (1 + stopRollDistance / 100)).toFixed(2)} (空)
+              <p className="text-xs text-green-400 mt-2">
+                止盈价: {targetPrice} | 停止补单: {(targetPrice * (1 - stopRollDistance / 100)).toFixed(2)} (多) / {(targetPrice * (1 + stopRollDistance / 100)).toFixed(2)} (空)
               </p>
             )}
           </div>

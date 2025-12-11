@@ -11,16 +11,15 @@ symbol = "ETHUSDC"
 direction = "long"        # 交易方向: "long"(做多) 或 "short"(做空)
 grid_spacing = 1.0        # 网格间距 (USDT)
 grid_count = 10           # 网格数量
-order_size = 0.01         # 每单大小 (ETH)
+order_margin = 10         # 每单保证金 (USDT)
+max_margin = 100          # 最大保证金 (USDT)，达到后只用浮盈加仓，0=不限制
 leverage = 20             # 杠杆倍数
 price_precision = 2       # 价格精度
 quantity_precision = 3    # 数量精度
 
 [rolling]
-take_profit_percent = 5       # 止盈百分比
+target_price = 4000           # 目标止盈价 (必填)
 stop_loss_percent = 3         # 止损百分比 (0=不设止损)
 use_rolling_margin = false    # 是否用浮盈滚仓
 roll_profit_ratio = 80        # 滚仓比例
-max_position = 1              # 最大仓位 (ETH)，达到后只用浮盈加仓，0=不限制
-target_price = 0              # 目标价位 (0=不设置)
-stop_roll_distance = 1        # 停止滚仓距离 (%)，价格接近目标价时停止补单
+stop_roll_distance = 1        # 停止补单距离 (%)，价格接近目标价时停止补单

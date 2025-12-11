@@ -52,7 +52,7 @@ pub struct GridEngine {
     position: Arc<RwLock<Position>>,        // 当前持仓
     take_profit_order_id: Arc<RwLock<Option<String>>>,  // 当前止盈单ID
     stop_loss_order_id: Arc<RwLock<Option<String>>>,    // 当前止损单ID
-    total_cost: Arc<RwLock<f64>>,           // 累计投入成本（用于计算浮盈）
+    total_margin: Arc<RwLock<f64>>,         // 累计投入保证金 (USDT)
 }
 
 impl GridEngine {
@@ -68,8 +68,17 @@ impl GridEngine {
             position: Arc::new(RwLock::new(Position::default())),
             take_profit_order_id: Arc::new(RwLock::new(None)),
             stop_loss_order_id: Arc::new(RwLock::new(None)),
-            total_cost: Arc::new(RwLock::new(0.0)),
+            total_margin: Arc::new(RwLock::new(0.0)),
         }
+    }
+
+    /// 根据保证金和当前价格计算下单数量
+    /// 数量 = 保证金 * 杠杆 / 价格
+    fn calculate_quantity_from_margin(&self, margin: f64, price: f64) -> f64 {
+        let leverage = self.grid_config.leverage as f64;
+        let quantity = margin * leverage / price;
+        let factor = 10_f64.powi(self.grid_config.quantity_precision as i32);
+        (quantity * factor).round() / factor
     }
 
     /// 获取交易方向
@@ -91,6 +100,7 @@ impl GridEngine {
         let mut actions = Vec::new();
         let spacing = self.grid_config.grid_spacing;
         let is_long = self.is_long();
+        let order_margin = self.grid_config.order_margin;
 
         for i in 0..self.grid_config.grid_count {
             let price = if is_long {
@@ -107,11 +117,13 @@ impl GridEngine {
                 )
             };
 
+            // 根据保证金计算下单数量
+            let quantity = self.calculate_quantity_from_margin(order_margin, price);
             let client_order_id = self.generate_client_order_id(price);
 
             actions.push(GridOrderAction {
                 price,
-                quantity: self.grid_config.order_size,
+                quantity,
                 client_order_id,
                 is_buy: is_long,  // 做多=买单入场，做空=卖单入场
             });
@@ -119,8 +131,8 @@ impl GridEngine {
 
         let direction_str = if is_long { "做多" } else { "做空" };
         let order_type = if is_long { "买单" } else { "卖单" };
-        info!("初始化网格({}): 基准价={}, 创建{}个{}, 每单{} ETH",
-              direction_str, base_price, actions.len(), order_type, self.grid_config.order_size);
+        info!("初始化网格({}): 基准价={}, 创建{}个{}, 每单保证金={} USDT",
+              direction_str, base_price, actions.len(), order_type, order_margin);
         actions
     }
 
@@ -165,12 +177,15 @@ impl GridEngine {
             pos.entry_price = (old_cost + new_cost) / pos.quantity;
         }
 
-        // 累计投入成本
-        *self.total_cost.write().await += new_cost;
+        // 累计投入保证金 = 成交金额 / 杠杆
+        let leverage = self.grid_config.leverage as f64;
+        let margin_used = new_cost / leverage;
+        *self.total_margin.write().await += margin_used;
 
+        let total_margin = *self.total_margin.read().await;
         let direction_str = if self.is_long() { "买单" } else { "卖单" };
-        info!("{}成交: {} @ {}, 持仓更新: {:.4} -> {:.4} ETH, 均价: {:.2}",
-              direction_str, filled_qty, filled_price, old_qty, pos.quantity, pos.entry_price);
+        info!("{}成交: {} @ {}, 持仓: {:.4} -> {:.4}, 均价: {:.2}, 已用保证金: {:.2} USDT",
+              direction_str, filled_qty, filled_price, old_qty, pos.quantity, pos.entry_price, total_margin);
 
         // 返回 true 表示需要更新止盈单
         true
@@ -196,69 +211,56 @@ impl GridEngine {
         }
     }
 
-    /// 计算滚仓后的订单大小（基于浮盈，平均分配到每个网格）
-    /// 如果设置了 max_position 且已达到，则只用浮盈加仓
-    pub async fn calculate_rolling_order_size(&self) -> f64 {
-        let pos = self.position.read().await;
-        let current_position = pos.quantity;
-        drop(pos);
+    /// 计算滚仓后的订单保证金和数量
+    /// 如果设置了 max_margin 且已达到，则只用浮盈加仓
+    /// 返回: 订单数量
+    pub async fn calculate_rolling_order_size(&self, order_price: f64) -> f64 {
+        let total_margin = *self.total_margin.read().await;
+        let max_margin = self.grid_config.max_margin;
+        let base_margin = self.grid_config.order_margin;
 
-        let max_position = self.rolling_config.max_position;
-        let base_order_size = self.grid_config.order_size;
-
-        // 检查是否达到最大仓位
-        let reached_max = max_position > 0.0 && current_position >= max_position;
+        // 检查是否达到最大保证金
+        let reached_max = max_margin > 0.0 && total_margin >= max_margin;
 
         // 计算浮盈部分
         let unrealized_pnl = self.calculate_unrealized_pnl().await;
         let has_profit = unrealized_pnl > 0.0 && self.rolling_config.use_rolling_margin;
 
-        // 情况1: 达到最大仓位
+        // 情况1: 达到最大保证金
         if reached_max {
             if !has_profit {
                 // 没有浮盈，不能加仓
-                info!("已达最大仓位 {:.4}/{:.4} ETH，无浮盈，暂停加仓", current_position, max_position);
+                info!("已达最大保证金 {:.2}/{:.2} USDT，无浮盈，暂停加仓", total_margin, max_margin);
                 return 0.0;
             }
 
             // 只用浮盈加仓
             let rolling_profit = unrealized_pnl * (self.rolling_config.roll_profit_ratio / 100.0);
-            let profit_per_grid = rolling_profit / self.grid_config.grid_count as f64;
-            let current_price = *self.current_price.read().await;
-            let leverage = self.grid_config.leverage as f64;
-            let extra_qty = profit_per_grid * leverage / current_price;
+            let profit_margin_per_grid = rolling_profit / self.grid_config.grid_count as f64;
+            let extra_qty = self.calculate_quantity_from_margin(profit_margin_per_grid, order_price);
 
-            let factor = 10_f64.powi(self.grid_config.quantity_precision as i32);
-            let rounded_size = (extra_qty * factor).round() / factor;
+            info!("已达最大保证金 {:.2}/{:.2} USDT，只用浮盈加仓: {:.4}",
+                  total_margin, max_margin, extra_qty);
 
-            info!("已达最大仓位 {:.4}/{:.4} ETH，只用浮盈加仓: {:.4} ETH",
-                  current_position, max_position, rounded_size);
-
-            return rounded_size;
+            return extra_qty;
         }
 
-        // 情况2: 未达最大仓位，正常计算
+        // 情况2: 未达最大保证金，正常计算
         if !has_profit {
-            // 没有浮盈，使用基础订单大小
-            return base_order_size;
+            // 没有浮盈，使用基础保证金
+            return self.calculate_quantity_from_margin(base_margin, order_price);
         }
 
-        // 使用浮盈滚仓
+        // 使用浮盈滚仓: 基础保证金 + 浮盈分摊
         let rolling_profit = unrealized_pnl * (self.rolling_config.roll_profit_ratio / 100.0);
-        let profit_per_grid = rolling_profit / self.grid_config.grid_count as f64;
-        let current_price = *self.current_price.read().await;
-        let leverage = self.grid_config.leverage as f64;
-        let extra_qty = profit_per_grid * leverage / current_price;
-        let new_size = base_order_size + extra_qty;
+        let profit_margin_per_grid = rolling_profit / self.grid_config.grid_count as f64;
+        let total_order_margin = base_margin + profit_margin_per_grid;
+        let new_qty = self.calculate_quantity_from_margin(total_order_margin, order_price);
 
-        let factor = 10_f64.powi(self.grid_config.quantity_precision as i32);
-        let rounded_size = (new_size * factor).round() / factor;
+        info!("滚仓计算: 保证金={:.2}/{:.2}, 浮盈={:.2}, 基础={:.2}, 滚仓加={:.2}, 数量={:.4}",
+              total_margin, max_margin, unrealized_pnl, base_margin, profit_margin_per_grid, new_qty);
 
-        info!("滚仓计算: 仓位={:.4}/{:.4}, 浮盈={:.2}, 分{}份每份={:.2}, 基础={:.4}, 新增={:.4}, 总={:.4}",
-              current_position, max_position, unrealized_pnl, self.grid_config.grid_count,
-              profit_per_grid, base_order_size, extra_qty, rounded_size);
-
-        rounded_size
+        new_qty
     }
 
     /// 检查并补充订单（价格跟随逻辑）
@@ -301,14 +303,6 @@ impl GridEngine {
             }
         }
 
-        // 计算滚仓后的订单大小
-        let order_size = self.calculate_rolling_order_size().await;
-
-        // 如果订单大小为0（达到最大仓位且无浮盈），不补单
-        if order_size <= 0.0 {
-            return (new_orders, orders_to_cancel);
-        }
-
         let spacing = self.grid_config.grid_spacing;
         let is_long = self.is_long();
 
@@ -327,12 +321,12 @@ impl GridEngine {
         if !has_coverage {
             // 价格附近没有订单，需要补单
             let base_price = *self.base_price.read().await;
-            let target_price = if is_long {
+            let supplement_target = if is_long {
                 current_price - spacing
             } else {
                 current_price + spacing
             };
-            let offset = ((target_price - base_price) / spacing).round() as i32;
+            let offset = ((supplement_target - base_price) / spacing).round() as i32;
             let new_price = Self::round_price(
                 base_price + offset as f64 * spacing,
                 self.grid_config.price_precision,
@@ -343,16 +337,22 @@ impl GridEngine {
                 .any(|o| (o.price - new_price).abs() < 0.01);
 
             if !has_order_at_price {
-                let direction_str = if is_long { "价格上涨" } else { "价格下跌" };
-                info!("{}，补单跟随: 当前价={:.2}, 补单价={:.2}, 数量={:.4}",
-                      direction_str, current_price, new_price, order_size);
+                // 计算滚仓后的订单大小
+                let order_size = self.calculate_rolling_order_size(new_price).await;
 
-                new_orders.push(GridOrderAction {
-                    price: new_price,
-                    quantity: order_size,
-                    client_order_id: self.generate_client_order_id(new_price),
-                    is_buy: is_long,
-                });
+                // 如果订单大小为0（达到最大保证金且无浮盈），不补单
+                if order_size > 0.0 {
+                    let direction_str = if is_long { "价格上涨" } else { "价格下跌" };
+                    info!("{}，补单跟随: 当前价={:.2}, 补单价={:.2}, 数量={:.4}",
+                          direction_str, current_price, new_price, order_size);
+
+                    new_orders.push(GridOrderAction {
+                        price: new_price,
+                        quantity: order_size,
+                        client_order_id: self.generate_client_order_id(new_price),
+                        is_buy: is_long,
+                    });
+                }
             }
         }
 
@@ -423,18 +423,22 @@ impl GridEngine {
                     // 检查是否已有该价格的订单
                     let already_exists = new_orders.iter().any(|o| (o.price - new_price).abs() < 0.01);
                     if !already_exists {
-                        new_orders.push(GridOrderAction {
-                            price: new_price,
-                            quantity: order_size,
-                            client_order_id: self.generate_client_order_id(new_price),
-                            is_buy: is_long,
-                        });
+                        // 计算该价格的订单数量
+                        let order_qty = self.calculate_rolling_order_size(new_price).await;
+                        if order_qty > 0.0 {
+                            new_orders.push(GridOrderAction {
+                                price: new_price,
+                                quantity: order_qty,
+                                client_order_id: self.generate_client_order_id(new_price),
+                                is_buy: is_long,
+                            });
+                        }
                     }
                 }
 
                 if !new_orders.is_empty() {
                     let order_type = if is_long { "买单" } else { "卖单" };
-                    info!("{}不足，补充{}个，每单{:.4}", order_type, missing, order_size);
+                    info!("{}不足，补充{}个", order_type, new_orders.len());
                 }
             }
         }
@@ -442,9 +446,9 @@ impl GridEngine {
         (new_orders, orders_to_cancel)
     }
 
-    /// 计算止盈单（基于持仓均价）
-    /// 做多: 卖出止盈（价格上涨）
-    /// 做空: 买入止盈（价格下跌）
+    /// 计算止盈单（使用目标价位作为止盈价）
+    /// 做多: 卖出止盈（价格上涨到目标价）
+    /// 做空: 买入止盈（价格下跌到目标价）
     pub async fn calculate_take_profit(&self) -> Option<CloseOrderAction> {
         let pos = self.position.read().await;
 
@@ -452,26 +456,18 @@ impl GridEngine {
             return None;
         }
 
-        let is_long = self.is_long();
-        let tp_price = if is_long {
-            // 做多：价格上涨止盈
-            Self::round_price(
-                pos.entry_price * (1.0 + self.rolling_config.take_profit_percent / 100.0),
-                self.grid_config.price_precision,
-            )
-        } else {
-            // 做空：价格下跌止盈
-            Self::round_price(
-                pos.entry_price * (1.0 - self.rolling_config.take_profit_percent / 100.0),
-                self.grid_config.price_precision,
-            )
-        };
+        // 使用目标价位作为止盈价
+        let tp_price = Self::round_price(
+            self.rolling_config.target_price,
+            self.grid_config.price_precision,
+        );
 
+        let is_long = self.is_long();
         let client_order_id = format!("roll_tp_{}", chrono::Utc::now().timestamp_millis());
 
         let direction_str = if is_long { "做多" } else { "做空" };
-        info!("计算止盈({}): 持仓={:.4} ETH, 均价={:.2}, 止盈价={:.2} ({:.1}%)",
-              direction_str, pos.quantity, pos.entry_price, tp_price, self.rolling_config.take_profit_percent);
+        info!("计算止盈({}): 持仓={:.4}, 均价={:.2}, 目标止盈价={:.2}",
+              direction_str, pos.quantity, pos.entry_price, tp_price);
 
         Some(CloseOrderAction {
             price: tp_price,

@@ -56,13 +56,12 @@ interface RollingConfig {
   leverage: number;
   gridSpacing: number;
   gridCount: number;
-  orderSize: number;
-  takeProfitPercent: number;
+  orderMargin: number;    // 每单保证金 USDT
+  maxMargin: number;      // 最大保证金 USDT
   stopLossPercent: number;
   useRollingMargin: boolean;
   rollProfitRatio: number;
-  maxPosition: number;
-  targetPrice: number;
+  targetPrice: number;    // 目标价位 = 止盈价
   stopRollDistance: number;
 }
 
@@ -143,18 +142,17 @@ symbol = "${config.symbol}"
 direction = "${direction}"
 grid_spacing = ${config.gridSpacing}
 grid_count = ${config.gridCount}
-order_size = ${config.orderSize}
+order_margin = ${config.orderMargin}
+max_margin = ${config.maxMargin}
 leverage = ${config.leverage}
 price_precision = ${precision.price}
 quantity_precision = ${precision.quantity}
 
 [rolling]
-take_profit_percent = ${config.takeProfitPercent}
+target_price = ${config.targetPrice}
 stop_loss_percent = ${config.stopLossPercent}
 use_rolling_margin = ${config.useRollingMargin}
 roll_profit_ratio = ${config.rollProfitRatio}
-max_position = ${config.maxPosition}
-target_price = ${config.targetPrice}
 stop_roll_distance = ${config.stopRollDistance}
 `;
 }
@@ -222,18 +220,26 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
+
+    // 目标价是必填的
+    if (!body.targetPrice || body.targetPrice <= 0) {
+      return NextResponse.json(
+        { success: false, error: '请设置止盈目标价' },
+        { status: 400 }
+      );
+    }
+
     const config: RollingConfig = {
       symbol: body.symbol || 'ETHUSDC',
       leverage: body.leverage || 20,
-      gridSpacing: body.gridSpacing || 1.0,
+      gridSpacing: body.gridSpacing || 1,
       gridCount: body.gridCount || 10,
-      orderSize: body.orderSize || 0.01,
-      takeProfitPercent: body.takeProfitPercent || 5,
+      orderMargin: body.orderMargin || 10,
+      maxMargin: body.maxMargin || 100,
       stopLossPercent: body.stopLossPercent || 3,
       useRollingMargin: body.useRollingMargin ?? true,
       rollProfitRatio: body.rollProfitRatio || 80,
-      maxPosition: body.maxPosition || 1,
-      targetPrice: body.targetPrice || 0,
+      targetPrice: body.targetPrice,
       stopRollDistance: body.stopRollDistance || 1,
     };
 
