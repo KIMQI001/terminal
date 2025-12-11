@@ -22,6 +22,7 @@ import {
   placeTrailingStopOrder,
   getOpenOrders,
   cancelOrder,
+  cancelAlgoOrder,
   BinanceApiConfig,
 } from './binanceOrderApi';
 import { sendDingtalkMarkdown } from '../notification/dingtalk';
@@ -527,6 +528,7 @@ function calculatePnL(
 
 /**
  * 取消剩余的止盈止损单
+ * 区分普通订单和 Algo 条件单，使用不同的取消 API
  */
 async function cancelRemainingOrders(
   order: PendingEntryOrder,
@@ -545,8 +547,16 @@ async function cancelRemainingOrders(
     });
 
     for (const orderToCancel of ordersToCancel) {
-      console.log(`[OrderMonitor] 取消剩余订单: ${orderToCancel.clientOrderId} (${orderToCancel.type})`);
-      await cancelOrder(apiConfig, order.symbol, orderToCancel.orderId);
+      const isAlgoOrder = ['STOP_MARKET', 'TAKE_PROFIT_MARKET', 'TRAILING_STOP_MARKET'].includes(orderToCancel.type);
+      console.log(`[OrderMonitor] 取消剩余订单: ${orderToCancel.clientOrderId} (${orderToCancel.type}) isAlgo=${isAlgoOrder}`);
+
+      if (isAlgoOrder) {
+        // Algo 条件单使用专门的 API
+        await cancelAlgoOrder(apiConfig, order.symbol, orderToCancel.orderId);
+      } else {
+        // 普通订单（如限价止盈单）
+        await cancelOrder(apiConfig, order.symbol, orderToCancel.orderId);
+      }
     }
   } catch (error) {
     console.error('[OrderMonitor] 取消剩余订单失败:', error);

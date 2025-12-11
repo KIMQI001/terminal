@@ -450,6 +450,49 @@ export async function cancelOrderByClientId(
 }
 
 /**
+ * 取消 Algo 条件单（止损/追踪止盈等）
+ * Algo 订单需要使用专门的 API 端点
+ */
+export async function cancelAlgoOrder(
+  config: BinanceApiConfig,
+  symbol: string,
+  algoId: number
+): Promise<{ success: boolean; error?: string }> {
+  const baseUrl = config.isTestnet
+    ? 'https://testnet.binancefuture.com'
+    : 'https://fapi.binance.com';
+
+  const timestamp = Date.now();
+  const queryString = `symbol=${symbol}&algoId=${algoId}&timestamp=${timestamp}`;
+  const signature = generateSignature(queryString, config.apiSecret);
+
+  try {
+    const response = await fetch(`${baseUrl}/fapi/v1/algoOrder?${queryString}&signature=${signature}`, {
+      method: 'DELETE',
+      headers: {
+        'X-MBX-APIKEY': config.apiKey,
+      },
+    });
+
+    const data = await response.json() as { msg?: string; success?: boolean };
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: data.msg || `HTTP ${response.status}`,
+      };
+    }
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '网络请求失败',
+    };
+  }
+}
+
+/**
  * 下追踪止盈单 (TRAILING_STOP_MARKET)
  *
  * 注意：从 2025-12-09 开始，Binance 将条件订单迁移到 Algo Service
