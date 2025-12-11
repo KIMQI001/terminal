@@ -167,10 +167,39 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
     // 4. 设置杠杆
     await setLeverage(apiConfig, management.symbol, management.leverage);
 
-    // 5. 计算网格订单
-    const orders = calculateGridOrders(liqData, management);
+    // 5. 获取当前持仓，用于过滤订单位置
+    const positionsResult = await getPositions(apiConfig, management.symbol);
+    const positions = positionsResult.success ? positionsResult.positions || [] : [];
+    const longPosition = positions.find(p => p.positionSide === 'LONG' && Math.abs(p.positionAmt) >= 0.001);
+    const shortPosition = positions.find(p => p.positionSide === 'SHORT' && Math.abs(p.positionAmt) >= 0.001);
+
+    // 6. 计算网格订单
+    let orders = calculateGridOrders(liqData, management);
+
+    // 7. 根据持仓过滤订单位置
+    // 多单入场价必须在持仓之下（抄底加仓）
+    // 空单入场价必须在持仓之上（摸顶加仓）
+    if (longPosition) {
+      const longEntryPrice = longPosition.entryPrice;
+      const beforeCount = orders.filter(o => o.side === 'BUY').length;
+      orders = orders.filter(o => o.side !== 'BUY' || o.entryPrice < longEntryPrice);
+      const afterCount = orders.filter(o => o.side === 'BUY').length;
+      if (beforeCount !== afterCount) {
+        console.log(`[LiqGridScheduler] 有多头持仓 @ ${longEntryPrice}，过滤掉 ${beforeCount - afterCount} 个多单`);
+      }
+    }
+    if (shortPosition) {
+      const shortEntryPrice = shortPosition.entryPrice;
+      const beforeCount = orders.filter(o => o.side === 'SELL').length;
+      orders = orders.filter(o => o.side !== 'SELL' || o.entryPrice > shortEntryPrice);
+      const afterCount = orders.filter(o => o.side === 'SELL').length;
+      if (beforeCount !== afterCount) {
+        console.log(`[LiqGridScheduler] 有空头持仓 @ ${shortEntryPrice}，过滤掉 ${beforeCount - afterCount} 个空单`);
+      }
+    }
+
     if (orders.length === 0) {
-      console.log('[LiqGridScheduler] 没有符合条件的清算峰值');
+      console.log('[LiqGridScheduler] 没有符合条件的订单（可能被持仓过滤）');
       addRecord({
         managementId: management.id,
         buyCount: 0,
@@ -178,13 +207,13 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
         totalMargin: 0,
         success: true,
         skipped: true,
-        errorMessage: '没有符合条件的清算峰值',
+        errorMessage: '没有符合条件的订单',
       });
       updateRunTime(management.id);
       return;
     }
 
-    // 6. 下单
+    // 8. 下单
     const result = await placeOrders(apiConfig, management.symbol, orders);
 
     // 7. 记录结果
@@ -410,6 +439,51 @@ async function savePendingOrder(params: {
 }): Promise<void> {
   const { addPendingOrder } = await import('../order/pendingOrderStore');
   addPendingOrder(params);
+}
+
+/**
+ * 获取持仓
+ */
+async function getPositions(
+  apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
+  symbol: string
+): Promise<{ success: boolean; positions?: Array<{ positionSide: string; positionAmt: number; entryPrice: number }> }> {
+  const baseUrl = apiConfig.isTestnet
+    ? 'https://testnet.binancefuture.com'
+    : 'https://fapi.binance.com';
+
+  try {
+    const timestamp = Date.now();
+    const queryString = `symbol=${symbol}&timestamp=${timestamp}`;
+    const signature = generateSignature(queryString, apiConfig.apiSecret);
+
+    const response = await fetch(
+      `${baseUrl}/fapi/v2/positionRisk?${queryString}&signature=${signature}`,
+      { headers: { 'X-MBX-APIKEY': apiConfig.apiKey } }
+    );
+
+    if (!response.ok) return { success: false };
+
+    const positions = await response.json() as Array<{
+      symbol: string;
+      positionSide: string;
+      positionAmt: string;
+      entryPrice: string;
+    }>;
+
+    return {
+      success: true,
+      positions: positions
+        .filter(p => p.symbol === symbol)
+        .map(p => ({
+          positionSide: p.positionSide,
+          positionAmt: parseFloat(p.positionAmt),
+          entryPrice: parseFloat(p.entryPrice),
+        })),
+    };
+  } catch {
+    return { success: false };
+  }
 }
 
 /**
