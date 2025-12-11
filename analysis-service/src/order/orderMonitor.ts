@@ -21,6 +21,7 @@ import {
   placeTakeProfitOrder,
   placeTrailingStopOrder,
   getOpenOrders,
+  getPositions,
   cancelOrder,
   cancelAlgoOrder,
   BinanceApiConfig,
@@ -270,8 +271,85 @@ async function handleEntryFilled(
 }
 
 /**
+ * 计算流动性网格止盈价（已知成本价）
+ * 找对向订单中满足 2% 利润的第一个，否则使用固定 2%
+ * @param entrySide 入场方向 (BUY/SELL)
+ * @param costPrice 持仓成本价
+ * @returns 止盈价
+ */
+async function calculateLiqGridTakeProfitWithCost(
+  apiConfig: BinanceApiConfig,
+  symbol: string,
+  entrySide: string,
+  costPrice: number
+): Promise<number> {
+  const minProfitRatio = 0.02;
+
+  try {
+    // 获取当前所有开放订单
+    const openOrdersResult = await getOpenOrders(apiConfig, symbol);
+    if (!openOrdersResult.success || !openOrdersResult.orders) {
+      console.log('[LiqGrid] 获取开放订单失败，使用固定2%止盈');
+      return entrySide === 'BUY' ? costPrice * 1.02 : costPrice * 0.98;
+    }
+
+    // 筛选 liq_grid 对向订单（限价入场单）
+    const orders = openOrdersResult.orders.filter(o => {
+      // 只要 liq_grid 开头的限价单
+      if (!o.clientOrderId?.startsWith('liq_grid')) return false;
+      if (o.type !== 'LIMIT') return false;
+      // 对向订单：入场做多找空单，入场做空找多单
+      if (entrySide === 'BUY') {
+        return o.side === 'SELL'; // 找空单（在上方）
+      } else {
+        return o.side === 'BUY'; // 找多单（在下方）
+      }
+    });
+
+    let minTpPrice: number;
+
+    if (entrySide === 'BUY') {
+      // 做多：止盈价 >= 持仓成本价 * 1.02
+      minTpPrice = costPrice * (1 + minProfitRatio);
+      // 找上方满足条件的第一个空单（价格最低的）
+      const validOrders = orders
+        .filter(o => o.price >= minTpPrice)
+        .sort((a, b) => a.price - b.price);
+
+      if (validOrders.length > 0) {
+        console.log(`[LiqGrid] 多单止盈: 成本价=${costPrice.toFixed(2)}, 最低止盈=${minTpPrice.toFixed(2)}, 选中对向空单=${validOrders[0].price}`);
+        return validOrders[0].price;
+      }
+    } else {
+      // 做空：止盈价 <= 持仓成本价 * 0.98
+      minTpPrice = costPrice * (1 - minProfitRatio);
+      // 找下方满足条件的第一个多单（价格最高的）
+      const validOrders = orders
+        .filter(o => o.price <= minTpPrice)
+        .sort((a, b) => b.price - a.price);
+
+      if (validOrders.length > 0) {
+        console.log(`[LiqGrid] 空单止盈: 成本价=${costPrice.toFixed(2)}, 最高止盈=${minTpPrice.toFixed(2)}, 选中对向多单=${validOrders[0].price}`);
+        return validOrders[0].price;
+      }
+    }
+
+    // 没有满足条件的对向订单，使用固定 2% 止盈
+    console.log(`[LiqGrid] 没有满足2%利润的对向订单，使用固定2%止盈: ${minTpPrice.toFixed(2)}`);
+    return minTpPrice;
+  } catch (error) {
+    console.error('[LiqGrid] 计算止盈价异常:', error);
+    // 出错时也返回固定 2% 止盈
+    const fallbackTpPrice = entrySide === 'BUY'
+      ? costPrice * 1.02
+      : costPrice * 0.98;
+    return fallbackTpPrice;
+  }
+}
+
+/**
  * 处理流动性网格订单入场成交
- * 只下止盈单，不下止损单，不下追踪止盈
+ * 一次性止盈整个持仓，每次入场后更新止盈单
  */
 async function handleLiqGridEntryFilled(
   clientOrderId: string,
@@ -297,41 +375,76 @@ async function handleLiqGridEntryFilled(
 
   // 平仓方向 (与入场方向相反)
   const closeSide = pendingOrder.side === 'BUY' ? 'SELL' : 'BUY';
+  const positionSide = pendingOrder.positionSide;
 
   let tpOrderId: string | null = null;
   const errors: string[] = [];
 
   try {
-    // 流动性网格：每个入场单都需要独立的止盈单，不检查是否已有
-    // （与 tower 策略不同，网格可能同时有多个同方向持仓）
-    if (pendingOrder.takeProfit > 0) {
-      // 缩短 clientOrderId，避免超过 36 字符限制
-      // 原格式: liq_grid_buy_320600_1765421043817 (34字符) + _tpxxxx = 超过36
-      // 新格式: lg_b_320600_tp (13字符) + 时间戳后6位
+    // 1. 取消现有的 liq_grid 止盈单
+    const existingOrders = await getOpenOrders(apiConfig, pendingOrder.symbol);
+    if (existingOrders.success && existingOrders.orders) {
+      const existingTpOrders = existingOrders.orders.filter(o =>
+        o.clientOrderId?.startsWith('lg_') &&
+        o.clientOrderId?.includes('_tp') &&
+        o.positionSide === positionSide &&
+        o.type === 'TAKE_PROFIT_MARKET'
+      );
+      for (const tpOrder of existingTpOrders) {
+        console.log(`[LiqGrid] 取消旧止盈单: ${tpOrder.clientOrderId}`);
+        await cancelAlgoOrder(apiConfig, pendingOrder.symbol, tpOrder.orderId);
+      }
+    }
+
+    // 2. 获取当前整个持仓数量
+    const positionsResult = await getPositions(apiConfig, pendingOrder.symbol);
+    let positionQty = pendingOrder.quantity; // 默认用入场数量
+    let costPrice = filledPrice;
+
+    if (positionsResult.success && positionsResult.positions) {
+      const position = positionsResult.positions.find(
+        p => p.positionSide === positionSide && Math.abs(parseFloat(String(p.positionAmt))) >= 0.001
+      );
+      if (position) {
+        positionQty = Math.abs(parseFloat(String(position.positionAmt)));
+        costPrice = parseFloat(String(position.entryPrice));
+        console.log(`[LiqGrid] 持仓: 数量=${positionQty}, 成本价=${costPrice}`);
+      }
+    }
+
+    // 3. 计算止盈价：找对向订单中满足 2% 利润的第一个
+    const takeProfitPrice = await calculateLiqGridTakeProfitWithCost(
+      apiConfig,
+      pendingOrder.symbol,
+      pendingOrder.side,
+      costPrice
+    );
+
+    if (takeProfitPrice > 0) {
+      // 缩短 clientOrderId
       const side = pendingOrder.side === 'BUY' ? 'b' : 's';
-      const price = Math.round(pendingOrder.entryPrice);
       const ts = Date.now().toString().slice(-6);
-      const tpClientId = `lg_${side}_${price}_tp${ts}`;
-      console.log(`[LiqGrid] 下止盈单: ${pendingOrder.takeProfit}, clientId=${tpClientId}`);
+      const tpClientId = `lg_${side}_tp${ts}`;
+      console.log(`[LiqGrid] 下止盈单: 价格=${takeProfitPrice}, 数量=${positionQty}, clientId=${tpClientId}`);
 
       const tpResult = await placeTakeProfitOrder(apiConfig, {
         symbol: pendingOrder.symbol,
         side: closeSide,
-        positionSide: pendingOrder.positionSide,
-        quantity: pendingOrder.quantity,
-        takeProfitPrice: pendingOrder.takeProfit,
+        positionSide: positionSide,
+        quantity: positionQty,
+        takeProfitPrice: takeProfitPrice,
         clientOrderId: tpClientId,
       });
 
       if (tpResult.success) {
         tpOrderId = tpResult.orderId?.toString() || null;
-        console.log(`[LiqGrid] 止盈单下单成功: ${tpClientId}`);
+        console.log(`[LiqGrid] 止盈单下单成功: ${tpClientId}, 止盈价=${takeProfitPrice}`);
       } else {
         errors.push(`止盈单失败: ${tpResult.error}`);
         console.error(`[LiqGrid] 止盈单失败: ${tpResult.error}`);
       }
     } else {
-      console.log(`[LiqGrid] 无止盈价，跳过止盈单`);
+      console.log(`[LiqGrid] 未找到满足2%利润的对向订单，跳过止盈单`);
     }
 
     // 更新数据库状态（liq_grid 没有止损，所以 slOrderId 为 null）
