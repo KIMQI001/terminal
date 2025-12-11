@@ -119,6 +119,91 @@ async function setLeverage(
   }
 }
 
+// 获取当前挂单
+async function getOpenOrders(
+  apiKey: string,
+  apiSecret: string,
+  isTestnet: boolean,
+  symbol: string
+): Promise<Array<{ orderId: number; clientOrderId: string }>> {
+  const baseUrl = isTestnet
+    ? 'https://testnet.binancefuture.com'
+    : 'https://fapi.binance.com';
+
+  const timestamp = Date.now();
+  const queryString = `symbol=${symbol}&timestamp=${timestamp}`;
+  const signature = generateBinanceSignature(queryString, apiSecret);
+
+  try {
+    const response = await fetch(`${baseUrl}/fapi/v1/openOrders?${queryString}&signature=${signature}`, {
+      headers: { 'X-MBX-APIKEY': apiKey },
+    });
+
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    return data.map((o: { orderId: number; clientOrderId: string }) => ({
+      orderId: o.orderId,
+      clientOrderId: o.clientOrderId,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// 取消订单
+async function cancelOrder(
+  apiKey: string,
+  apiSecret: string,
+  isTestnet: boolean,
+  symbol: string,
+  orderId: number
+): Promise<boolean> {
+  const baseUrl = isTestnet
+    ? 'https://testnet.binancefuture.com'
+    : 'https://fapi.binance.com';
+
+  const timestamp = Date.now();
+  const queryString = `symbol=${symbol}&orderId=${orderId}&timestamp=${timestamp}`;
+  const signature = generateBinanceSignature(queryString, apiSecret);
+
+  try {
+    const response = await fetch(`${baseUrl}/fapi/v1/order`, {
+      method: 'DELETE',
+      headers: {
+        'X-MBX-APIKEY': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: `${queryString}&signature=${signature}`,
+    });
+
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+// 取消所有 liq_grid 订单
+async function cancelLiqGridOrders(
+  apiKey: string,
+  apiSecret: string,
+  isTestnet: boolean,
+  symbol: string
+): Promise<number> {
+  const openOrders = await getOpenOrders(apiKey, apiSecret, isTestnet, symbol);
+  const liqGridOrders = openOrders.filter(o => o.clientOrderId.startsWith('liq_grid'));
+
+  let canceledCount = 0;
+  for (const order of liqGridOrders) {
+    const success = await cancelOrder(apiKey, apiSecret, isTestnet, symbol, order.orderId);
+    if (success) canceledCount++;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+
+  console.log(`[LiqGrid] 取消了 ${canceledCount}/${liqGridOrders.length} 个订单`);
+  return canceledCount;
+}
+
 // 下限价单
 async function placeLimitOrder(
   apiKey: string,
@@ -195,7 +280,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { symbol, leverage, amountPerOrder, orders } = await request.json();
+    const { symbol, leverage, orders, cancelExisting } = await request.json();
 
     // 参数验证
     if (!symbol) {
@@ -204,14 +289,16 @@ export async function POST(request: NextRequest) {
     if (!orders || !Array.isArray(orders) || orders.length === 0) {
       return NextResponse.json({ error: '请提供订单列表' }, { status: 400 });
     }
-    if (!amountPerOrder || amountPerOrder <= 0) {
-      return NextResponse.json({ error: '请指定有效的每单金额' }, { status: 400 });
-    }
 
     // 获取解密后的 API 配置
     const config = await getDecryptedApiConfig(user.userId, 'binance');
     if (!config) {
       return NextResponse.json({ error: '未找到 Binance API 配置' }, { status: 404 });
+    }
+
+    // 取消现有 liq_grid 订单
+    if (cancelExisting) {
+      await cancelLiqGridOrders(config.apiKey, config.apiSecret, config.isTestnet, symbol);
     }
 
     // 设置杠杆
@@ -232,7 +319,7 @@ export async function POST(request: NextRequest) {
 
     // 循环下单
     for (const order of orders) {
-      const { entryPrice, side, tpPrice } = order;
+      const { entryPrice, side, tpPrice, margin } = order;
 
       if (!entryPrice || !side || !tpPrice) {
         results.push({
@@ -244,8 +331,9 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      // 计算数量：金额 / 价格
-      const quantity = amountPerOrder / entryPrice;
+      // 计算数量：保证金 * 杠杆 / 价格
+      const orderMargin = margin || 50;  // 默认 50 USDT
+      const quantity = (orderMargin * (leverage || 10)) / entryPrice;
       const positionSide = side === 'BUY' ? 'LONG' : 'SHORT';
 
       // 生成 clientOrderId
@@ -308,6 +396,42 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: false,
       error: error instanceof Error ? error.message : '批量下单失败',
+    }, { status: 500 });
+  }
+}
+
+// DELETE /api/liquidity-grid - 取消所有 liq_grid 订单
+export async function DELETE(request: NextRequest) {
+  const user = await authenticateUser(request);
+  if (!user) {
+    return NextResponse.json({ error: '未授权' }, { status: 401 });
+  }
+
+  try {
+    const { symbol } = await request.json();
+
+    if (!symbol) {
+      return NextResponse.json({ error: '请指定交易对' }, { status: 400 });
+    }
+
+    // 获取解密后的 API 配置
+    const config = await getDecryptedApiConfig(user.userId, 'binance');
+    if (!config) {
+      return NextResponse.json({ error: '未找到 Binance API 配置' }, { status: 404 });
+    }
+
+    const canceledCount = await cancelLiqGridOrders(config.apiKey, config.apiSecret, config.isTestnet, symbol);
+
+    return NextResponse.json({
+      success: true,
+      message: `已取消 ${canceledCount} 个订单`,
+      canceledCount,
+    });
+  } catch (error) {
+    console.error('[LiqGrid] Cancel error:', error);
+    return NextResponse.json({
+      success: false,
+      error: error instanceof Error ? error.message : '取消订单失败',
     }, { status: 500 });
   }
 }
