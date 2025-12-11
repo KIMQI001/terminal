@@ -18,6 +18,12 @@ const ROLLING_SERVICE_DIR = path.join(process.cwd(), 'rolling-service');
 const CONFIG_FILE = path.join(ROLLING_SERVICE_DIR, 'config.toml');
 const BINARY_PATH = path.join(ROLLING_SERVICE_DIR, 'target/release/rolling-service');
 
+// 支持的交易对精度配置
+const SYMBOL_PRECISION: Record<string, { price: number; quantity: number }> = {
+  'ETHUSDC': { price: 2, quantity: 3 },
+  'BTCUSDC': { price: 2, quantity: 3 },
+};
+
 // 存储运行中的进程（按用户ID）
 const rollingProcesses: Map<number, ChildProcess> = new Map();
 const rollingStatuses: Map<number, {
@@ -122,6 +128,8 @@ function generateConfig(
   apiSecret: string,
   userId: number
 ): string {
+  const precision = SYMBOL_PRECISION[config.symbol] || { price: 2, quantity: 3 };
+
   return `# 滚仓策略配置 - 自动生成 (用户ID: ${userId})
 
 [binance]
@@ -137,8 +145,8 @@ grid_spacing = ${config.gridSpacing}
 grid_count = ${config.gridCount}
 order_size = ${config.orderSize}
 leverage = ${config.leverage}
-price_precision = 2
-quantity_precision = 3
+price_precision = ${precision.price}
+quantity_precision = ${precision.quantity}
 
 [rolling]
 take_profit_percent = ${config.takeProfitPercent}

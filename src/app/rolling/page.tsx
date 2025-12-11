@@ -3,11 +3,17 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { AuthGuard } from "@/components/auth/AuthGuard";
-import { useChartStore } from "@/stores/chartStore";
 import { useUserStore } from "@/stores/userStore";
+
+// 支持的交易对配置
+const SUPPORTED_SYMBOLS = [
+  { symbol: 'ETHUSDC', baseAsset: 'ETH', pricePrecision: 2, quantityPrecision: 3 },
+  { symbol: 'BTCUSDC', baseAsset: 'BTC', pricePrecision: 2, quantityPrecision: 3 },
+];
 
 // localStorage keys
 const STORAGE_KEYS = {
+  SYMBOL: "rolling_symbol",
   LEVERAGE: "rolling_leverage",
   GRID_SPACING: "rolling_grid_spacing",
   GRID_COUNT: "rolling_grid_count",
@@ -34,8 +40,11 @@ interface RollingServiceStatus {
 }
 
 export default function RollingPage() {
-  const { symbol } = useChartStore();
   const { token } = useUserStore();
+
+  // 交易对选择
+  const [selectedSymbol, setSelectedSymbol] = useState('ETHUSDC');
+  const symbolConfig = SUPPORTED_SYMBOLS.find(s => s.symbol === selectedSymbol) || SUPPORTED_SYMBOLS[0];
 
   // 核心参数
   const [leverage, setLeverage] = useState(20);
@@ -92,7 +101,7 @@ export default function RollingPage() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          symbol: symbol || 'ETHUSDC',
+          symbol: selectedSymbol,
           leverage,
           gridSpacing,
           gridCount,
@@ -146,6 +155,12 @@ export default function RollingPage() {
 
   // 加载设置
   useEffect(() => {
+    // 加载交易对
+    const savedSymbol = localStorage.getItem(STORAGE_KEYS.SYMBOL);
+    if (savedSymbol && SUPPORTED_SYMBOLS.some(s => s.symbol === savedSymbol)) {
+      setSelectedSymbol(savedSymbol);
+    }
+
     const load = (key: string, setter: (v: number) => void) => {
       const v = localStorage.getItem(key);
       if (v) setter(Number(v));
@@ -181,9 +196,21 @@ export default function RollingPage() {
             &larr; 返回
           </Link>
           <h1 className="text-lg font-medium text-[var(--text-primary)]">
-            滚仓策略 <span className="text-xs text-[var(--text-tertiary)]">{symbol}</span>
+            滚仓策略
           </h1>
-          <div className="w-12" />
+          <select
+            value={selectedSymbol}
+            onChange={(e) => {
+              setSelectedSymbol(e.target.value);
+              localStorage.setItem(STORAGE_KEYS.SYMBOL, e.target.value);
+            }}
+            disabled={serviceStatus.isRunning}
+            className="px-2 py-1 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-sm text-[var(--text-primary)] focus:outline-none disabled:opacity-50"
+          >
+            {SUPPORTED_SYMBOLS.map(s => (
+              <option key={s.symbol} value={s.symbol}>{s.symbol}</option>
+            ))}
+          </select>
         </header>
 
         <main className="p-4 max-w-lg mx-auto space-y-4">
@@ -261,11 +288,11 @@ export default function RollingPage() {
                 </select>
               </div>
               <div>
-                <label className={labelClass}>每单 (ETH)</label>
+                <label className={labelClass}>每单 ({symbolConfig.baseAsset})</label>
                 <input type="number" value={orderSize} onChange={(e) => { const v = Number(e.target.value); setOrderSize(v); save(STORAGE_KEYS.ORDER_SIZE, v); }} className={inputClass} min={0.001} step={0.001} />
               </div>
               <div>
-                <label className={labelClass}>最大仓位</label>
+                <label className={labelClass}>最大仓位 ({symbolConfig.baseAsset})</label>
                 <input type="number" value={maxPosition} onChange={(e) => { const v = Number(e.target.value); setMaxPosition(v); save(STORAGE_KEYS.MAX_POSITION, v); }} className={inputClass} min={0} step={0.1} />
               </div>
             </div>
