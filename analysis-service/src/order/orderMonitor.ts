@@ -305,9 +305,14 @@ async function handleLiqGridEntryFilled(
     // 流动性网格：每个入场单都需要独立的止盈单，不检查是否已有
     // （与 tower 策略不同，网格可能同时有多个同方向持仓）
     if (pendingOrder.takeProfit > 0) {
-      const tpSuffix = Math.random().toString(36).slice(-4);
-      const tpClientId = `${clientOrderId}_tp${tpSuffix}`;
-      console.log(`[LiqGrid] 下止盈单: ${pendingOrder.takeProfit}`);
+      // 缩短 clientOrderId，避免超过 36 字符限制
+      // 原格式: liq_grid_buy_320600_1765421043817 (34字符) + _tpxxxx = 超过36
+      // 新格式: lg_b_320600_tp (13字符) + 时间戳后6位
+      const side = pendingOrder.side === 'BUY' ? 'b' : 's';
+      const price = Math.round(pendingOrder.entryPrice);
+      const ts = Date.now().toString().slice(-6);
+      const tpClientId = `lg_${side}_${price}_tp${ts}`;
+      console.log(`[LiqGrid] 下止盈单: ${pendingOrder.takeProfit}, clientId=${tpClientId}`);
 
       const tpResult = await placeTakeProfitOrder(apiConfig, {
         symbol: pendingOrder.symbol,
