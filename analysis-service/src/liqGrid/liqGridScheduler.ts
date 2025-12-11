@@ -115,25 +115,26 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
       return;
     }
 
-    // 1. 检查是否有持仓（有持仓时跳过，避免取消止盈单）
-    const positionsResult = await getPositions(apiConfig, management.symbol);
-    if (positionsResult.success && positionsResult.positions && positionsResult.positions.length > 0) {
-      const positions = positionsResult.positions.filter(p => Math.abs(p.positionAmt) >= 0.001);
-      if (positions.length > 0) {
-        console.log(`[LiqGridScheduler] 有持仓，跳过更新: ${positions.map(p => `${p.positionSide} ${p.positionAmt}`).join(', ')}`);
-        addRecord({
-          managementId: management.id,
-          buyCount: 0,
-          sellCount: 0,
-          totalMargin: 0,
-          success: true,
-          skipped: true,
-          errorMessage: undefined,
-        });
-        updateRunTime(management.id);
-        return;
-      }
+    // 1. 检查当前 liq_grid 挂单数量（少于8个才更新）
+    const ordersResult = await getLiqGridOrders(apiConfig, management.symbol);
+    const liqGridOrderCount = ordersResult.success ? ordersResult.orders?.length || 0 : 0;
+
+    if (liqGridOrderCount >= 8) {
+      console.log(`[LiqGridScheduler] 挂单数量充足(${liqGridOrderCount}个)，跳过更新`);
+      addRecord({
+        managementId: management.id,
+        buyCount: 0,
+        sellCount: 0,
+        totalMargin: 0,
+        success: true,
+        skipped: true,
+        errorMessage: undefined,
+      });
+      updateRunTime(management.id);
+      return;
     }
+
+    console.log(`[LiqGridScheduler] 挂单数量不足(${liqGridOrderCount}个)，开始更新...`);
 
     // 2. 获取清算数据
     const baseCoin = management.symbol.replace('USDC', '').replace('USDT', '');
@@ -412,12 +413,12 @@ async function savePendingOrder(params: {
 }
 
 /**
- * 获取持仓
+ * 获取 liq_grid 挂单
  */
-async function getPositions(
+async function getLiqGridOrders(
   apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
   symbol: string
-): Promise<{ success: boolean; positions?: Array<{ positionSide: string; positionAmt: number }> }> {
+): Promise<{ success: boolean; orders?: Array<{ orderId: number; clientOrderId: string }> }> {
   const baseUrl = apiConfig.isTestnet
     ? 'https://testnet.binancefuture.com'
     : 'https://fapi.binance.com';
@@ -428,27 +429,16 @@ async function getPositions(
     const signature = generateSignature(queryString, apiConfig.apiSecret);
 
     const response = await fetch(
-      `${baseUrl}/fapi/v2/positionRisk?${queryString}&signature=${signature}`,
+      `${baseUrl}/fapi/v1/openOrders?${queryString}&signature=${signature}`,
       { headers: { 'X-MBX-APIKEY': apiConfig.apiKey } }
     );
 
     if (!response.ok) return { success: false };
 
-    const positions = await response.json() as Array<{
-      symbol: string;
-      positionSide: string;
-      positionAmt: string;
-    }>;
+    const orders = await response.json() as Array<{ orderId: number; clientOrderId: string }>;
+    const liqGridOrders = orders.filter(o => o.clientOrderId?.startsWith('liq_grid'));
 
-    return {
-      success: true,
-      positions: positions
-        .filter(p => p.symbol === symbol)
-        .map(p => ({
-          positionSide: p.positionSide,
-          positionAmt: parseFloat(p.positionAmt),
-        })),
-    };
+    return { success: true, orders: liqGridOrders };
   } catch {
     return { success: false };
   }
