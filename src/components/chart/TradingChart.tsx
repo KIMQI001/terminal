@@ -1021,14 +1021,22 @@ export function TradingChart() {
         }
         const zoneColor = zone === 'P' ? 'text-red-500' : zone === 'D' ? 'text-green-500' : 'text-blue-500';
         const decimals = symbol.includes('BTC') ? 1 : 2;
+        const pStart = dailyHL.high - quarterRange;  // P区开始 (上1/4最低值)
+        const dStart = dailyHL.low + quarterRange;   // D区开始 (下1/4最高值)
         return (
-          <div className="absolute top-2 left-24 z-10 flex gap-3 bg-white/90 px-3 py-1.5 rounded text-sm font-mono">
-            <span className="text-red-500">H: {dailyHL.high.toFixed(decimals)}</span>
-            <span className="text-green-500">L: {dailyHL.low.toFixed(decimals)}</span>
-            <span className="text-gray-600">
-              R: {(range / dailyHL.low * 100).toFixed(2)}%
-              <span className={`${zoneColor} font-bold ml-1`}>{zone}</span>
-            </span>
+          <div className="absolute top-2 left-24 z-10 flex flex-col bg-white/90 px-3 py-1.5 rounded text-sm font-mono">
+            <div className="flex gap-3">
+              <span className="text-red-500">H: {dailyHL.high.toFixed(decimals)}</span>
+              <span className="text-green-500">L: {dailyHL.low.toFixed(decimals)}</span>
+              <span className="text-gray-600">
+                R: {(range / dailyHL.low * 100).toFixed(2)}%
+                <span className={`${zoneColor} font-bold ml-1`}>{zone}</span>
+              </span>
+            </div>
+            <div className="flex gap-3 text-xs">
+              <span className="text-red-500">P: {pStart.toFixed(decimals)}</span>
+              <span className="text-green-500">D: {dStart.toFixed(decimals)}</span>
+            </div>
           </div>
         );
       })()}
