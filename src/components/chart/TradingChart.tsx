@@ -1008,13 +1008,30 @@ export function TradingChart() {
         containerRef={chartContainerRef}
       />
       {/* 日K前高前低标签 */}
-      {dailyHL && (
-        <div className="absolute top-2 left-2 z-10 flex gap-3 bg-white/90 px-3 py-1.5 rounded text-sm font-mono">
-          <span className="text-red-500">H: {dailyHL.high.toFixed(symbol.includes('BTC') ? 1 : 2)}</span>
-          <span className="text-green-500">L: {dailyHL.low.toFixed(symbol.includes('BTC') ? 1 : 2)}</span>
-          <span className="text-gray-600">R: {((dailyHL.high - dailyHL.low) / dailyHL.low * 100).toFixed(2)}%</span>
-        </div>
-      )}
+      {dailyHL && (() => {
+        const range = dailyHL.high - dailyHL.low;
+        const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
+        const quarterRange = range / 4;
+        // P: 上1/4 (溢价区), D: 下1/4 (折扣区), M: 中间1/2
+        let zone: 'P' | 'M' | 'D' = 'M';
+        if (currentPrice >= dailyHL.high - quarterRange) {
+          zone = 'P';
+        } else if (currentPrice <= dailyHL.low + quarterRange) {
+          zone = 'D';
+        }
+        const zoneColor = zone === 'P' ? 'text-red-500' : zone === 'D' ? 'text-green-500' : 'text-blue-500';
+        const decimals = symbol.includes('BTC') ? 1 : 2;
+        return (
+          <div className="absolute top-2 left-24 z-10 flex gap-3 bg-white/90 px-3 py-1.5 rounded text-sm font-mono">
+            <span className="text-red-500">H: {dailyHL.high.toFixed(decimals)}</span>
+            <span className="text-green-500">L: {dailyHL.low.toFixed(decimals)}</span>
+            <span className="text-gray-600">
+              R: {(range / dailyHL.low * 100).toFixed(2)}%
+              <span className={`${zoneColor} font-bold ml-1`}>{zone}</span>
+            </span>
+          </div>
+        );
+      })()}
       <div className="absolute top-2 right-2 z-10 flex flex-col gap-2">
         <OTEPanel />
         <FVGPanel />
