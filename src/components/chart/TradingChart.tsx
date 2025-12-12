@@ -1007,6 +1007,14 @@ export function TradingChart() {
         seriesRef={candleSeriesRef}
         containerRef={chartContainerRef}
       />
+      {/* 日K前高前低标签 */}
+      {dailyHL && (
+        <div className="absolute top-2 left-2 z-10 flex gap-3 bg-white/90 px-3 py-1.5 rounded text-sm font-mono">
+          <span className="text-red-500">H: {dailyHL.high.toFixed(symbol.includes('BTC') ? 1 : 2)}</span>
+          <span className="text-green-500">L: {dailyHL.low.toFixed(symbol.includes('BTC') ? 1 : 2)}</span>
+          <span className="text-gray-600">R: {((dailyHL.high - dailyHL.low) / dailyHL.low * 100).toFixed(2)}%</span>
+        </div>
+      )}
       <div className="absolute top-2 right-2 z-10 flex flex-col gap-2">
         <OTEPanel />
         <FVGPanel />
