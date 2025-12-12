@@ -856,11 +856,11 @@ export function TradingChart() {
       const pStart = dailyHL.high - quarterRange;
       const dStart = dailyHL.low + quarterRange;
 
-      // H - 前高
+      // H - 前高 (浅红)
       if (dailyHLLines.H) {
         const highLine = candleSeriesRef.current.createPriceLine({
           price: dailyHL.high,
-          color: '#6b7280',  // 灰色
+          color: '#f87171',  // red-400
           lineWidth: 1,
           lineStyle: 2,
           axisLabelVisible: true,
@@ -895,11 +895,11 @@ export function TradingChart() {
         priceLinesRef.current.push(dLine);
       }
 
-      // L - 前低
+      // L - 前低 (浅绿)
       if (dailyHLLines.L) {
         const lowLine = candleSeriesRef.current.createPriceLine({
           price: dailyHL.low,
-          color: '#6b7280',  // 灰色
+          color: '#4ade80',  // green-400
           lineWidth: 1,
           lineStyle: 2,
           axisLabelVisible: true,

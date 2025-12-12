@@ -104,10 +104,10 @@ export function DailyHLPanel() {
         <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-50 min-w-[160px]">
           <div className="text-[10px] text-gray-500 font-medium mb-1 px-1">Daily Range (点击显示价格线)</div>
 
-          <PriceRow label="H" price={dailyHL.high} lineKey="H" />
-          <PriceRow label="P" price={pStart} lineKey="P" labelColor="text-red-500" />
-          <PriceRow label="D" price={dStart} lineKey="D" labelColor="text-green-500" />
-          <PriceRow label="L" price={dailyHL.low} lineKey="L" />
+          <PriceRow label="H" price={dailyHL.high} lineKey="H" labelColor="text-red-400" />
+          <PriceRow label="P" price={pStart} lineKey="P" labelColor="text-red-600" />
+          <PriceRow label="D" price={dStart} lineKey="D" labelColor="text-green-600" />
+          <PriceRow label="L" price={dailyHL.low} lineKey="L" labelColor="text-green-400" />
 
           <div className="border-t border-gray-100 mt-1 pt-1">
             <div className="flex items-center gap-2 py-1 px-1">
