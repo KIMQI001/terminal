@@ -213,7 +213,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 2. 获取用户的 API 配置
-    const apiConfig = await getDecryptedApiConfig(user.userId, 'binance_futures');
+    const apiConfig = await getDecryptedApiConfig(user.userId, 'binance');
     if (!apiConfig) {
       return NextResponse.json(
         { success: false, error: '未配置 Binance API 密钥' },
