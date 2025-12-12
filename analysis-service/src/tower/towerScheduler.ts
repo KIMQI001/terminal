@@ -22,6 +22,14 @@ let isRunning = false;
 const MAX_SL_DISTANCE = 200;
 const MIN_TP_DISTANCE = 1000;
 
+// 日K前高前低接口
+interface DailyHL {
+  high: number;
+  low: number;
+  pStart: number;  // P区开始 (溢价区)
+  dStart: number;  // D区开始 (折扣区)
+}
+
 // 时间周期优先级（同距离时大级别优先）
 const TIMEFRAME_PRIORITY: Record<string, number> = {
   '1d': 5, '4h': 4, '1h': 3, '15m': 2, '5m': 1
@@ -216,8 +224,11 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     // 5. 获取杠杆
     const leverage = await getLeverage(apiConfig, management.symbol);
 
-    // 6. 计算要下的订单
-    const orders = calculateOrders(towerData, management, leverage);
+    // 6. 获取日K前高前低（用于区域过滤）
+    const dailyHL = await getDailyHL(management.symbol, towerData.currentPrice);
+
+    // 7. 计算要下的订单
+    const orders = calculateOrders(towerData, management, leverage, dailyHL);
     if (orders.length === 0) {
       console.log('[TowerScheduler] 没有符合条件的塔块');
       addRecord({
@@ -447,6 +458,59 @@ async function cancelAllTowerOrders(
 }
 
 /**
+ * 获取日K前高前低
+ * 从当前价格向左扫描日K，找到包含当前价格的锚定K线
+ */
+async function getDailyHL(symbol: string, currentPrice: number): Promise<DailyHL | null> {
+  try {
+    // 获取日K数据
+    const response = await fetch(
+      `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1d&limit=100`
+    );
+
+    if (!response.ok) {
+      console.error('[TowerScheduler] 获取日K数据失败');
+      return null;
+    }
+
+    const klines = await response.json() as Array<[number, string, string, string, string, ...unknown[]]>;
+    if (klines.length < 2) return null;
+
+    // 当日K线
+    const todayCandle = {
+      high: parseFloat(klines[klines.length - 1][2]),
+      low: parseFloat(klines[klines.length - 1][3]),
+    };
+
+    // 从倒数第二根向左扫描，找到包含当前价格的K线
+    for (let i = klines.length - 2; i >= 0; i--) {
+      const high = parseFloat(klines[i][2]);
+      const low = parseFloat(klines[i][3]);
+
+      if (currentPrice >= low && currentPrice <= high) {
+        // 找到锚定K线
+        const finalHigh = Math.max(high, todayCandle.high);
+        const finalLow = Math.min(low, todayCandle.low);
+        const range = finalHigh - finalLow;
+        const quarterRange = range / 4;
+
+        return {
+          high: finalHigh,
+          low: finalLow,
+          pStart: finalHigh - quarterRange,  // P区开始 (价格高于此为溢价区)
+          dStart: finalLow + quarterRange,   // D区开始 (价格低于此为折扣区)
+        };
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error('[TowerScheduler] 获取日K异常:', error);
+    return null;
+  }
+}
+
+/**
  * 计算要下的订单
  */
 interface TowerOrder {
@@ -465,7 +529,8 @@ interface TowerOrder {
 function calculateOrders(
   towerData: { currentPrice: number; blocks: Array<{ type: string; entry: number; high: number; low: number; source: string; timeframe: string }> },
   management: TowerManagementConfig,
-  leverage: number
+  leverage: number,
+  dailyHL: DailyHL | null
 ): TowerOrder[] {
   const { currentPrice, blocks } = towerData;
   const { baseMargin, marginIncrement, towerLayers, bullishStartLayer, bearishStartLayer, minSpacingRatio } = management;
@@ -595,15 +660,33 @@ function calculateOrders(
   };
 
   // 筛选塔块
-  const bullishCandidates = sortByDistance(
+  // 添加区域过滤: 多单只在折扣区(D区), 空单只在溢价区(P区)
+  let bullishCandidates = sortByDistance(
     allBullish.filter(b => b.entry < currentPrice && currentPrice - b.entry >= minDistance),
     currentPrice
   );
 
-  const bearishCandidates = sortByDistance(
+  let bearishCandidates = sortByDistance(
     allBearish.filter(b => b.entry > currentPrice && b.entry - currentPrice >= minDistance),
     currentPrice
   );
+
+  // 区域过滤: 只在折扣区开多，只在溢价区开空
+  if (dailyHL) {
+    const originalBullishCount = bullishCandidates.length;
+    const originalBearishCount = bearishCandidates.length;
+
+    // 多单: 入场价必须 <= D区开始 (折扣区)
+    bullishCandidates = bullishCandidates.filter(b => b.entry <= dailyHL.dStart);
+    // 空单: 入场价必须 >= P区开始 (溢价区)
+    bearishCandidates = bearishCandidates.filter(b => b.entry >= dailyHL.pStart);
+
+    console.log(`[TowerScheduler] 区域过滤: H=${dailyHL.high.toFixed(0)} P=${dailyHL.pStart.toFixed(0)} D=${dailyHL.dStart.toFixed(0)} L=${dailyHL.low.toFixed(0)}`);
+    console.log(`[TowerScheduler] 多单: ${originalBullishCount} -> ${bullishCandidates.length} (需 <= D=${dailyHL.dStart.toFixed(0)})`);
+    console.log(`[TowerScheduler] 空单: ${originalBearishCount} -> ${bearishCandidates.length} (需 >= P=${dailyHL.pStart.toFixed(0)})`);
+  } else {
+    console.log(`[TowerScheduler] 未获取到日K数据，跳过区域过滤`);
+  }
 
   const selectedBullish = filterWithSpacing(bullishCandidates, bullishStartLayer, towerLayers);
   const selectedBearish = filterWithSpacing(bearishCandidates, bearishStartLayer, towerLayers);
