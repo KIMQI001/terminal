@@ -1033,7 +1033,7 @@ export function TradingChart() {
                 <span className={`${zoneColor} font-bold ml-1`}>{zone}</span>
               </span>
             </div>
-            <div className="flex gap-3 text-xs">
+            <div className="flex gap-3 text-xs justify-center">
               <span className="text-red-500">P: {pStart.toFixed(decimals)}</span>
               <span className="text-green-500">D: {dStart.toFixed(decimals)}</span>
             </div>
