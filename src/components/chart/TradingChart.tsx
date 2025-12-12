@@ -22,6 +22,7 @@ import { FVGPanel } from "./FVGPanel";
 import { LiquidationPanel } from "./LiquidationPanel";
 import { LiquidityGridPanel } from "./LiquidityGridPanel";
 import { OBPanel } from "./OBPanel";
+import { DailyHLPanel } from "./DailyHLPanel";
 import { OrderCancelOverlay } from "./OrderCancelOverlay";
 import { fetchKlines } from "@/lib/binance/api";
 import { BinanceWebSocket } from "@/lib/binance/websocket";
@@ -1007,39 +1008,10 @@ export function TradingChart() {
         seriesRef={candleSeriesRef}
         containerRef={chartContainerRef}
       />
-      {/* 日K前高前低标签 */}
-      {dailyHL && (() => {
-        const range = dailyHL.high - dailyHL.low;
-        const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
-        const quarterRange = range / 4;
-        // P: 上1/4 (溢价区), D: 下1/4 (折扣区), M: 中间1/2
-        let zone: 'P' | 'M' | 'D' = 'M';
-        if (currentPrice >= dailyHL.high - quarterRange) {
-          zone = 'P';
-        } else if (currentPrice <= dailyHL.low + quarterRange) {
-          zone = 'D';
-        }
-        const zoneColor = zone === 'P' ? 'text-red-500' : zone === 'D' ? 'text-green-500' : 'text-blue-500';
-        const decimals = symbol.includes('BTC') ? 1 : 2;
-        const pStart = dailyHL.high - quarterRange;  // P区开始 (上1/4最低值)
-        const dStart = dailyHL.low + quarterRange;   // D区开始 (下1/4最高值)
-        return (
-          <div className="absolute top-2 left-24 z-10 flex flex-col bg-white/90 px-3 py-1.5 rounded text-sm font-mono text-gray-600">
-            <div className="flex gap-3 justify-center">
-              <span>H: {dailyHL.high.toFixed(decimals)}</span>
-              <span>L: {dailyHL.low.toFixed(decimals)}</span>
-              <span>R: {(range / dailyHL.low * 100).toFixed(2)}%</span>
-            </div>
-            <div className="flex gap-3 text-xs justify-center">
-              <span>P: {pStart.toFixed(decimals)}</span>
-              <span>D: {dStart.toFixed(decimals)}</span>
-            </div>
-            <div className="flex justify-center">
-              <span className={`${zoneColor} font-bold`}>{zone}</span>
-            </div>
-          </div>
-        );
-      })()}
+      {/* 顶部左侧面板 */}
+      <div className="absolute top-2 left-2 z-10">
+        <DailyHLPanel />
+      </div>
       <div className="absolute top-2 right-2 z-10 flex flex-col gap-2">
         <OTEPanel />
         <FVGPanel />
