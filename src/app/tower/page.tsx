@@ -1190,7 +1190,7 @@ export default function TowerPage() {
                         </div>
                         {ictInfo && (
                           <span className={`text-center ${
-                            ictInfo.source === "OTE" ? "text-blue-500" : "text-[var(--text-tertiary)]"
+                            ictInfo.source === "OTE" ? "text-sky-400" : "text-[var(--text-tertiary)]"
                           }`}>
                             {ictInfo.timeframe} {ictInfo.source}
                           </span>
@@ -1307,7 +1307,7 @@ export default function TowerPage() {
                           return ictInfo ? (
                             <span className={`px-1 rounded text-[10px] ${
                               ictInfo.source === "OTE"
-                                ? "bg-blue-500/20 text-blue-500"
+                                ? "bg-sky-400/20 text-sky-400"
                                 : "bg-purple-500/20 text-purple-400"
                             }`}>
                               {ictInfo.timeframe} {ictInfo.source}
