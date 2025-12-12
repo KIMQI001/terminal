@@ -37,7 +37,7 @@ export function TowerCard({ block, onOrder }: TowerCardProps) {
           {block.timeframe.toUpperCase()}
         </span>
         <span className={`text-xs font-semibold ${
-          block.source === "OTE" ? "text-yellow-400" : (isBearish ? "text-red-400" : "text-green-400")
+          block.source === "OTE" ? "text-blue-500" : (isBearish ? "text-red-400" : "text-green-400")
         }`}>
           {block.source}
         </span>
