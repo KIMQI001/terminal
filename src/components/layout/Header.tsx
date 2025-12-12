@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User, Maximize2, Minimize2, BarChart3, Building2 } from "lucide-react";
+import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User, Maximize2, Minimize2, BarChart3, Building2, Layers } from "lucide-react";
 import { MTFPanel } from "@/components/chart/MTFPanel";
 import { DailyHLPanel } from "@/components/chart/DailyHLPanel";
 import Link from "next/link";
@@ -231,8 +231,8 @@ export function Header() {
             size="sm"
             title="滚仓策略"
           >
-            🎢
-            滚
+            <Layers className="w-3 h-3 mr-1.5" />
+            仓
           </Button>
         </Link>
 
