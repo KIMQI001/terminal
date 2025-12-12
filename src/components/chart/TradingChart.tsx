@@ -22,7 +22,6 @@ import { FVGPanel } from "./FVGPanel";
 import { LiquidationPanel } from "./LiquidationPanel";
 import { LiquidityGridPanel } from "./LiquidityGridPanel";
 import { OBPanel } from "./OBPanel";
-import { DailyHLPanel } from "./DailyHLPanel";
 import { OrderCancelOverlay } from "./OrderCancelOverlay";
 import { fetchKlines } from "@/lib/binance/api";
 import { BinanceWebSocket } from "@/lib/binance/websocket";
@@ -1008,10 +1007,6 @@ export function TradingChart() {
         seriesRef={candleSeriesRef}
         containerRef={chartContainerRef}
       />
-      {/* 顶部左侧面板 */}
-      <div className="absolute top-2 left-2 z-10">
-        <DailyHLPanel />
-      </div>
       <div className="absolute top-2 right-2 z-10 flex flex-col gap-2">
         <OTEPanel />
         <FVGPanel />

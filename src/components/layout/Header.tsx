@@ -2,6 +2,7 @@
 
 import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User, Maximize2, Minimize2, BarChart3, Building2 } from "lucide-react";
 import { MTFPanel } from "@/components/chart/MTFPanel";
+import { DailyHLPanel } from "@/components/chart/DailyHLPanel";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -145,6 +146,8 @@ export function Header() {
 
         {/* MTF Panel */}
         <MTFPanel />
+        {/* Daily H/L Panel */}
+        <DailyHLPanel />
       </div>
 
       {/* Tools & Trade & Indicators */}
