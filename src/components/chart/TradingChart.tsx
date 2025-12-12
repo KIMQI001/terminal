@@ -601,7 +601,7 @@ export function TradingChart() {
   }, [symbol, timeframe, setMultiTimeframeTrend]);
 
   // 加载日K计算前高前低 (H/L)
-  const { setDailyHL, dailyHL } = useChartStore();
+  const { setDailyHL, dailyHL, dailyHLLines } = useChartStore();
 
   useEffect(() => {
     let isCancelled = false;
@@ -849,31 +849,66 @@ export function TradingChart() {
       });
     }
 
-    // 5. 显示日K前高前低 (H/L)
+    // 5. 显示日K前高前低价格线 (根据选中状态)
     if (dailyHL) {
-      // 前高 (H) - 红色虚线
-      const highLine = candleSeriesRef.current.createPriceLine({
-        price: dailyHL.high,
-        color: '#ef4444',  // 红色
-        lineWidth: 1,
-        lineStyle: 2,  // 虚线
-        axisLabelVisible: true,
-        title: 'H',
-      });
-      priceLinesRef.current.push(highLine);
+      const range = dailyHL.high - dailyHL.low;
+      const quarterRange = range / 4;
+      const pStart = dailyHL.high - quarterRange;
+      const dStart = dailyHL.low + quarterRange;
 
-      // 前低 (L) - 绿色虚线
-      const lowLine = candleSeriesRef.current.createPriceLine({
-        price: dailyHL.low,
-        color: '#22c55e',  // 绿色
-        lineWidth: 1,
-        lineStyle: 2,  // 虚线
-        axisLabelVisible: true,
-        title: 'L',
-      });
-      priceLinesRef.current.push(lowLine);
+      // H - 前高
+      if (dailyHLLines.H) {
+        const highLine = candleSeriesRef.current.createPriceLine({
+          price: dailyHL.high,
+          color: '#6b7280',  // 灰色
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: 'H',
+        });
+        priceLinesRef.current.push(highLine);
+      }
+
+      // P - 溢价区开始
+      if (dailyHLLines.P) {
+        const pLine = candleSeriesRef.current.createPriceLine({
+          price: pStart,
+          color: '#ef4444',  // 红色
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: 'P',
+        });
+        priceLinesRef.current.push(pLine);
+      }
+
+      // D - 折扣区开始
+      if (dailyHLLines.D) {
+        const dLine = candleSeriesRef.current.createPriceLine({
+          price: dStart,
+          color: '#22c55e',  // 绿色
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: 'D',
+        });
+        priceLinesRef.current.push(dLine);
+      }
+
+      // L - 前低
+      if (dailyHLLines.L) {
+        const lowLine = candleSeriesRef.current.createPriceLine({
+          price: dailyHL.low,
+          color: '#6b7280',  // 灰色
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: 'L',
+        });
+        priceLinesRef.current.push(lowLine);
+      }
     }
-  }, [tradingLines, realOrders, positions, symbol, dailyHL]);
+  }, [tradingLines, realOrders, positions, symbol, dailyHL, dailyHLLines]);
 
   // 测量模式或 Shift 按下时禁用图表拖动
   const shouldDisableChartInteraction = phase === "drawing" || (canStartMeasure && phase === "idle");

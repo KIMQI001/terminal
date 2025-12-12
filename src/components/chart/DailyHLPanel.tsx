@@ -3,14 +3,14 @@
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useChartStore } from "@/stores/chartStore";
+import { useChartStore, DailyHLLines } from "@/stores/chartStore";
 import { cn } from "@/lib/utils";
 
 type ZoneType = 'P' | 'M' | 'D';
 
 export function DailyHLPanel() {
   const [isExpanded, setIsExpanded] = useState(false);
-  const { dailyHL, candles, symbol } = useChartStore();
+  const { dailyHL, candles, symbol, dailyHLLines, toggleDailyHLLine } = useChartStore();
 
   if (!dailyHL) return null;
 
@@ -48,6 +48,41 @@ export function DailyHLPanel() {
     return 'border-blue-500';
   };
 
+  // 价格行组件
+  const PriceRow = ({
+    label,
+    price,
+    lineKey,
+    labelColor = 'text-gray-500'
+  }: {
+    label: string;
+    price: number;
+    lineKey: keyof DailyHLLines;
+    labelColor?: string;
+  }) => {
+    const isSelected = dailyHLLines[lineKey];
+    return (
+      <div
+        className={cn(
+          "flex items-center gap-2 py-1 px-1 rounded cursor-pointer transition-colors",
+          isSelected ? "bg-blue-100" : "hover:bg-gray-50"
+        )}
+        onClick={() => toggleDailyHLLine(lineKey)}
+      >
+        <span className={cn("text-xs w-8", labelColor)}>{label}</span>
+        <span className={cn(
+          "text-xs font-mono flex-1",
+          isSelected ? "text-blue-600 font-semibold" : "text-gray-700"
+        )}>
+          {price.toFixed(decimals)}
+        </span>
+        {isSelected && (
+          <div className="w-2 h-2 rounded-full bg-blue-500" />
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="relative">
       <Button
@@ -67,27 +102,12 @@ export function DailyHLPanel() {
 
       {isExpanded && (
         <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-50 min-w-[160px]">
-          <div className="text-[10px] text-gray-500 font-medium mb-1 px-1">Daily Range</div>
+          <div className="text-[10px] text-gray-500 font-medium mb-1 px-1">Daily Range (点击显示价格线)</div>
 
-          <div className="flex items-center gap-2 py-1 px-1 hover:bg-gray-50 rounded">
-            <span className="text-xs text-gray-500 w-8">H</span>
-            <span className="text-xs font-mono text-gray-700">{dailyHL.high.toFixed(decimals)}</span>
-          </div>
-
-          <div className="flex items-center gap-2 py-1 px-1 hover:bg-gray-50 rounded">
-            <span className="text-xs text-red-500 w-8">P</span>
-            <span className="text-xs font-mono text-gray-700">{pStart.toFixed(decimals)}</span>
-          </div>
-
-          <div className="flex items-center gap-2 py-1 px-1 hover:bg-gray-50 rounded">
-            <span className="text-xs text-green-500 w-8">D</span>
-            <span className="text-xs font-mono text-gray-700">{dStart.toFixed(decimals)}</span>
-          </div>
-
-          <div className="flex items-center gap-2 py-1 px-1 hover:bg-gray-50 rounded">
-            <span className="text-xs text-gray-500 w-8">L</span>
-            <span className="text-xs font-mono text-gray-700">{dailyHL.low.toFixed(decimals)}</span>
-          </div>
+          <PriceRow label="H" price={dailyHL.high} lineKey="H" />
+          <PriceRow label="P" price={pStart} lineKey="P" labelColor="text-red-500" />
+          <PriceRow label="D" price={dStart} lineKey="D" labelColor="text-green-500" />
+          <PriceRow label="L" price={dailyHL.low} lineKey="L" />
 
           <div className="border-t border-gray-100 mt-1 pt-1">
             <div className="flex items-center gap-2 py-1 px-1">

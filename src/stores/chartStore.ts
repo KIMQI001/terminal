@@ -9,6 +9,14 @@ export interface DailyHL {
   anchorTime: number; // 锚定K线时间
 }
 
+// 日K价格线选中状态
+export interface DailyHLLines {
+  H: boolean;  // 前高
+  P: boolean;  // 溢价区开始
+  D: boolean;  // 折扣区开始
+  L: boolean;  // 前低
+}
+
 interface ChartState {
   symbol: string;
   timeframe: Timeframe;
@@ -18,6 +26,7 @@ interface ChartState {
   isConnected: boolean;
   liquidationData: LiquidationHillData | null;
   dailyHL: DailyHL | null;  // 日K前高前低
+  dailyHLLines: DailyHLLines;  // 价格线选中状态
 
   setSymbol: (symbol: string) => void;
   setTimeframe: (timeframe: Timeframe) => void;
@@ -28,6 +37,7 @@ interface ChartState {
   setConnected: (connected: boolean) => void;
   setLiquidationData: (data: LiquidationHillData | null) => void;
   setDailyHL: (data: DailyHL | null) => void;
+  toggleDailyHLLine: (line: keyof DailyHLLines) => void;
 }
 
 export const useChartStore = create<ChartState>((set) => ({
@@ -39,8 +49,9 @@ export const useChartStore = create<ChartState>((set) => ({
   isConnected: false,
   liquidationData: null,
   dailyHL: null,
+  dailyHLLines: { H: false, P: false, D: false, L: false },
 
-  setSymbol: (symbol) => set({ symbol, dailyHL: null }),  // 切换symbol时清空
+  setSymbol: (symbol) => set({ symbol, dailyHL: null, dailyHLLines: { H: false, P: false, D: false, L: false } }),  // 切换symbol时清空
   setTimeframe: (timeframe) => set({ timeframe }),
   setCandles: (candles) => set({ candles }),
   updateCandle: (candle) =>
@@ -62,4 +73,10 @@ export const useChartStore = create<ChartState>((set) => ({
   setConnected: (isConnected) => set({ isConnected }),
   setLiquidationData: (liquidationData) => set({ liquidationData }),
   setDailyHL: (dailyHL) => set({ dailyHL }),
+  toggleDailyHLLine: (line) => set((state) => ({
+    dailyHLLines: {
+      ...state.dailyHLLines,
+      [line]: !state.dailyHLLines[line],
+    },
+  })),
 }));
