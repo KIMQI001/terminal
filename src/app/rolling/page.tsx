@@ -246,7 +246,7 @@ export default function RollingPage() {
               <div>
                 <label className={labelClass}>杠杆</label>
                 <select value={leverage} onChange={(e) => { const v = Number(e.target.value); setLeverage(v); save(STORAGE_KEYS.LEVERAGE, v); }} className={inputClass}>
-                  {[10, 15, 20, 25, 30, 50].map(n => <option key={n} value={n}>{n}x</option>)}
+                  {[10, 15, 20, 25, 30, 50, 100].map(n => <option key={n} value={n}>{n}x</option>)}
                 </select>
               </div>
               <div>
