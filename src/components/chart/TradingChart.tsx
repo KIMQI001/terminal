@@ -600,6 +600,65 @@ export function TradingChart() {
     return () => clearInterval(interval);
   }, [symbol, timeframe, setMultiTimeframeTrend]);
 
+  // 加载日K计算前高前低 (H/L)
+  const { setDailyHL, dailyHL } = useChartStore();
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const calculateDailyHL = async () => {
+      try {
+        // 获取日K数据 (100根足够)
+        const dailyData = await fetchKlines(symbol, '1d', 100);
+        if (isCancelled || dailyData.length < 2) return;
+
+        // 获取当前价格（最新K线收盘价）
+        const currentPrice = dailyData[dailyData.length - 1].close;
+        const todayCandle = dailyData[dailyData.length - 1];
+
+        // 从倒数第二根K线向左扫描，找到包含当前价格的K线
+        for (let i = dailyData.length - 2; i >= 0; i--) {
+          const candle = dailyData[i];
+          // 当前价格在这根K线的高低点范围内
+          if (currentPrice >= candle.low && currentPrice <= candle.high) {
+            // 找到锚定K线，计算 H 和 L
+            const high = Math.max(candle.high, todayCandle.high);
+            const low = Math.min(candle.low, todayCandle.low);
+
+            if (!isCancelled) {
+              setDailyHL({
+                high,
+                low,
+                anchorTime: candle.time,
+              });
+            }
+            return;
+          }
+        }
+
+        // 如果没找到（当前价格已突破所有历史K线范围），清空
+        if (!isCancelled) {
+          setDailyHL(null);
+        }
+      } catch (error) {
+        console.error('Failed to calculate daily H/L:', error);
+        if (!isCancelled) {
+          setDailyHL(null);
+        }
+      }
+    };
+
+    calculateDailyHL();
+
+    // 每分钟刷新一次
+    const interval = setInterval(calculateDailyHL, 60 * 1000);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
+  }, [symbol, setDailyHL]);
+
   // Update ICT Primitives with data
   useEffect(() => {
     // Update Order Blocks Primitive
@@ -789,7 +848,32 @@ export function TradingChart() {
         priceLinesRef.current.push(priceLine);
       });
     }
-  }, [tradingLines, realOrders, positions, symbol]);
+
+    // 5. 显示日K前高前低 (H/L)
+    if (dailyHL) {
+      // 前高 (H) - 红色虚线
+      const highLine = candleSeriesRef.current.createPriceLine({
+        price: dailyHL.high,
+        color: '#ef4444',  // 红色
+        lineWidth: 1,
+        lineStyle: 2,  // 虚线
+        axisLabelVisible: true,
+        title: 'H',
+      });
+      priceLinesRef.current.push(highLine);
+
+      // 前低 (L) - 绿色虚线
+      const lowLine = candleSeriesRef.current.createPriceLine({
+        price: dailyHL.low,
+        color: '#22c55e',  // 绿色
+        lineWidth: 1,
+        lineStyle: 2,  // 虚线
+        axisLabelVisible: true,
+        title: 'L',
+      });
+      priceLinesRef.current.push(lowLine);
+    }
+  }, [tradingLines, realOrders, positions, symbol, dailyHL]);
 
   // 测量模式或 Shift 按下时禁用图表拖动
   const shouldDisableChartInteraction = phase === "drawing" || (canStartMeasure && phase === "idle");
