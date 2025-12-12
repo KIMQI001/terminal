@@ -1189,7 +1189,9 @@ export default function TowerPage() {
                           </span>
                         </div>
                         {ictInfo && (
-                          <span className="text-[var(--text-tertiary)] text-center">
+                          <span className={`text-center ${
+                            ictInfo.source === "OTE" ? "text-yellow-400" : "text-[var(--text-tertiary)]"
+                          }`}>
                             {ictInfo.timeframe} {ictInfo.source}
                           </span>
                         )}
@@ -1303,7 +1305,11 @@ export default function TowerPage() {
                         {(() => {
                           const ictInfo = parseIctInfo(order.clientOrderId);
                           return ictInfo ? (
-                            <span className="px-1 rounded text-[10px] bg-purple-500/20 text-purple-400">
+                            <span className={`px-1 rounded text-[10px] ${
+                              ictInfo.source === "OTE"
+                                ? "bg-yellow-500/20 text-yellow-400"
+                                : "bg-purple-500/20 text-purple-400"
+                            }`}>
                               {ictInfo.timeframe} {ictInfo.source}
                             </span>
                           ) : null;
