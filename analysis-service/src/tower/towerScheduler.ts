@@ -12,7 +12,7 @@ import {
 } from './towerManagementStore';
 import { getBinanceApiConfig } from '../order/apiConfigReader';
 import { fetchTowerBlocks } from './towerBlocksFetcher';
-import { sendDingtalkMarkdown } from '../notification/dingtalk';
+import { sendDingtalkMarkdownToUser } from '../notification/dingtalk';
 
 // 调度器状态
 let schedulerInterval: NodeJS.Timeout | null = null;
@@ -270,7 +270,8 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
 
     // 发送钉钉通知（如果有错误）
     if (result.errors.length > 0) {
-      await sendDingtalkMarkdown(
+      await sendDingtalkMarkdownToUser(
+        management.userId,
         '守塔托管告警',
         `### 守塔托管执行有错误\n\n` +
         `- **交易对**: ${management.symbol}\n` +

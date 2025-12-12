@@ -39,6 +39,18 @@ CREATE TABLE IF NOT EXISTS api_configs (
   UNIQUE(user_id, exchange)
 )`;
 
+export const CREATE_NOTIFICATION_CONFIGS_TABLE = `
+CREATE TABLE IF NOT EXISTS notification_configs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL UNIQUE,
+  dingtalk_webhook TEXT,
+  dingtalk_secret_encrypted TEXT,
+  enabled INTEGER DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+)`;
+
 // 索引
 export const CREATE_INDEXES = [
   `CREATE INDEX IF NOT EXISTS idx_api_configs_user_id ON api_configs(user_id)`,

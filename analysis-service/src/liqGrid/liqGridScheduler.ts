@@ -12,7 +12,7 @@ import {
 } from './liqGridManagementStore';
 import { getBinanceApiConfig } from '../order/apiConfigReader';
 import { fetchLiquidation, LiquidationLevel } from '../data/liquidationClient';
-import { sendDingtalkMarkdown } from '../notification/dingtalk';
+import { sendDingtalkMarkdownToUser } from '../notification/dingtalk';
 import crypto from 'crypto';
 
 // 调度器状态
@@ -249,7 +249,8 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
 
     // 发送钉钉通知（如果有错误）
     if (result.errors.length > 0) {
-      await sendDingtalkMarkdown(
+      await sendDingtalkMarkdownToUser(
+        management.userId,
         '流动性网格告警',
         `### 流动性网格执行有错误\n\n` +
         `- **交易对**: ${management.symbol}\n` +

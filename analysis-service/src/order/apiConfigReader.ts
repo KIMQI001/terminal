@@ -59,6 +59,11 @@ export interface BinanceApiConfig {
   isTestnet: boolean;
 }
 
+export interface DingtalkConfig {
+  webhook: string;
+  secret: string;
+}
+
 // 数据库行格式
 interface ApiConfigRow {
   id: number;
@@ -156,6 +161,40 @@ export function getFirstBinanceApiConfig(): { userId: number; config: BinanceApi
     };
   } catch (error) {
     console.error('[ApiConfigReader] 获取 API 配置失败:', error);
+    return null;
+  }
+}
+
+// 通知配置数据库行格式
+interface NotificationConfigRow {
+  id: number;
+  user_id: number;
+  dingtalk_webhook: string | null;
+  dingtalk_secret_encrypted: string | null;
+  enabled: number;
+}
+
+/**
+ * 获取用户的钉钉配置
+ */
+export function getUserDingtalkConfig(userId: number): DingtalkConfig | null {
+  try {
+    const database = getTerminalDatabase();
+
+    const row = database.prepare(`
+      SELECT * FROM notification_configs WHERE user_id = ? AND enabled = 1
+    `).get(userId) as NotificationConfigRow | undefined;
+
+    if (!row || !row.dingtalk_webhook || !row.dingtalk_secret_encrypted) {
+      return null;
+    }
+
+    return {
+      webhook: row.dingtalk_webhook,
+      secret: decrypt(row.dingtalk_secret_encrypted),
+    };
+  } catch (error) {
+    console.error('[ApiConfigReader] 获取钉钉配置失败:', error);
     return null;
   }
 }

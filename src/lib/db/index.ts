@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import path from 'path';
-import { CREATE_USERS_TABLE, CREATE_INVITE_CODES_TABLE, CREATE_API_CONFIGS_TABLE, CREATE_INDEXES } from './schema';
+import { CREATE_USERS_TABLE, CREATE_INVITE_CODES_TABLE, CREATE_API_CONFIGS_TABLE, CREATE_NOTIFICATION_CONFIGS_TABLE, CREATE_INDEXES } from './schema';
 
 // 数据库文件路径（项目根目录下的 data 文件夹）
 const DB_PATH = path.join(process.cwd(), 'data', 'terminal.db');
@@ -35,6 +35,7 @@ function initializeSchema(database: Database.Database) {
   database.exec(CREATE_USERS_TABLE);
   database.exec(CREATE_INVITE_CODES_TABLE);
   database.exec(CREATE_API_CONFIGS_TABLE);
+  database.exec(CREATE_NOTIFICATION_CONFIGS_TABLE);
 
   for (const indexSql of CREATE_INDEXES) {
     database.exec(indexSql);
@@ -230,5 +231,48 @@ export const apiConfigQueries = {
   delete: (userId: number, exchange: string) => {
     const database = getDatabase();
     return database.prepare('DELETE FROM api_configs WHERE user_id = ? AND exchange = ?').run(userId, exchange);
+  },
+};
+
+// 通知配置相关操作
+export const notificationConfigQueries = {
+  // 获取用户的通知配置
+  findByUserId: (userId: number) => {
+    const database = getDatabase();
+    return database.prepare('SELECT * FROM notification_configs WHERE user_id = ?').get(userId) as {
+      id: number;
+      user_id: number;
+      dingtalk_webhook: string | null;
+      dingtalk_secret_encrypted: string | null;
+      enabled: number;
+      created_at: string;
+      updated_at: string;
+    } | undefined;
+  },
+
+  // 创建或更新通知配置（UPSERT）
+  upsert: (
+    userId: number,
+    dingtalkWebhook: string | null,
+    dingtalkSecretEncrypted: string | null,
+    enabled: boolean
+  ) => {
+    const database = getDatabase();
+    const stmt = database.prepare(`
+      INSERT INTO notification_configs (user_id, dingtalk_webhook, dingtalk_secret_encrypted, enabled, updated_at)
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(user_id) DO UPDATE SET
+        dingtalk_webhook = excluded.dingtalk_webhook,
+        dingtalk_secret_encrypted = excluded.dingtalk_secret_encrypted,
+        enabled = excluded.enabled,
+        updated_at = CURRENT_TIMESTAMP
+    `);
+    return stmt.run(userId, dingtalkWebhook, dingtalkSecretEncrypted, enabled ? 1 : 0);
+  },
+
+  // 删除通知配置
+  delete: (userId: number) => {
+    const database = getDatabase();
+    return database.prepare('DELETE FROM notification_configs WHERE user_id = ?').run(userId);
   },
 };

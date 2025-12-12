@@ -1,10 +1,17 @@
 /**
  * 钉钉机器人推送模块
  * 使用 Webhook + HMAC-SHA256 签名
+ * 支持全局配置和按用户配置
  */
 
 import crypto from 'crypto';
 import { config } from '../config';
+import { getUserDingtalkConfig } from '../order/apiConfigReader';
+
+export interface DingtalkConfig {
+  webhook: string;
+  secret: string;
+}
 
 interface DingtalkMessage {
   msgtype: 'markdown' | 'text';
@@ -133,4 +140,106 @@ export async function sendDingtalkText(content: string): Promise<boolean> {
     console.error('[Dingtalk] 发送失败:', error);
     return false;
   }
+}
+
+/**
+ * 使用指定配置发送 Markdown 消息
+ */
+async function sendMarkdownWithConfig(
+  dingtalkConfig: DingtalkConfig,
+  title: string,
+  content: string
+): Promise<boolean> {
+  const timestamp = Date.now();
+  const sign = generateSign(timestamp, dingtalkConfig.secret);
+  const url = `${dingtalkConfig.webhook}&timestamp=${timestamp}&sign=${sign}`;
+
+  const message: DingtalkMessage = {
+    msgtype: 'markdown',
+    markdown: { title, text: content },
+  };
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(message),
+    });
+
+    if (!response.ok) {
+      console.error(`[Dingtalk] HTTP 错误: ${response.status}`);
+      return false;
+    }
+
+    const result = await response.json() as DingtalkResponse;
+    if (result.errcode !== 0) {
+      console.error(`[Dingtalk] API 错误: ${result.errmsg}`);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('[Dingtalk] 发送失败:', error);
+    return false;
+  }
+}
+
+/**
+ * 按用户发送 Markdown 消息
+ * 优先使用用户自己的钉钉配置，如果没有则使用全局配置
+ */
+export async function sendDingtalkMarkdownToUser(
+  userId: number,
+  title: string,
+  content: string
+): Promise<boolean> {
+  // 1. 尝试获取用户自己的钉钉配置
+  const userConfig = getUserDingtalkConfig(userId);
+
+  if (userConfig) {
+    console.log(`[Dingtalk] 使用用户 ${userId} 的钉钉配置发送`);
+    return sendMarkdownWithConfig(userConfig, title, content);
+  }
+
+  // 2. 用户没有配置，使用全局配置
+  console.log(`[Dingtalk] 用户 ${userId} 未配置钉钉，使用全局配置`);
+  return sendDingtalkMarkdown(title, content);
+}
+
+/**
+ * 按用户发送文本消息
+ */
+export async function sendDingtalkTextToUser(
+  userId: number,
+  content: string
+): Promise<boolean> {
+  const userConfig = getUserDingtalkConfig(userId);
+
+  if (userConfig) {
+    const timestamp = Date.now();
+    const sign = generateSign(timestamp, userConfig.secret);
+    const url = `${userConfig.webhook}&timestamp=${timestamp}&sign=${sign}`;
+
+    const message: DingtalkMessage = {
+      msgtype: 'text',
+      text: { content },
+    };
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(message),
+      });
+
+      if (!response.ok) return false;
+
+      const result = await response.json() as DingtalkResponse;
+      return result.errcode === 0;
+    } catch {
+      return false;
+    }
+  }
+
+  return sendDingtalkText(content);
 }

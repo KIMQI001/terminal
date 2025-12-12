@@ -26,10 +26,11 @@ import {
   cancelAlgoOrder,
   BinanceApiConfig,
 } from './binanceOrderApi';
-import { sendDingtalkMarkdown } from '../notification/dingtalk';
+import { sendDingtalkMarkdownToUser } from '../notification/dingtalk';
 
 // 订单监控器配置
 export interface OrderMonitorConfig {
+  userId: number;
   apiKey: string;
   apiSecret: string;
   isTestnet: boolean;
@@ -258,7 +259,8 @@ async function handleEntryFilled(
     markOrderError(clientOrderId, errorMsg);
 
     // 发送错误通知
-    await sendDingtalkMarkdown(
+    await sendDingtalkMarkdownToUser(
+      config!.userId,
       '止盈止损下单失败',
       `### 止盈止损下单失败 ❌\n\n` +
       `- **订单**: ${clientOrderId}\n` +
@@ -465,7 +467,8 @@ async function handleLiqGridEntryFilled(
     markOrderError(clientOrderId, errorMsg);
 
     // 发送错误通知
-    await sendDingtalkMarkdown(
+    await sendDingtalkMarkdownToUser(
+      config!.userId,
       '流动性网格止盈下单失败',
       `### 流动性网格止盈下单失败 ❌\n\n` +
       `- **订单**: ${clientOrderId}\n` +
@@ -520,7 +523,7 @@ async function sendLiqGridFilledNotification(
     `**状态**: ${statusText}`,
   ].join('\n');
 
-  await sendDingtalkMarkdown(`${symbol} 流动性网格${direction}成交`, content);
+  await sendDingtalkMarkdownToUser(config!.userId, `${symbol} 流动性网格${direction}成交`, content);
 }
 
 /**
@@ -709,7 +712,7 @@ async function sendCloseNotification(
     `- **盈亏比**: ${pnlData.actualRR.toFixed(2)}R`,
   ].join('\n');
 
-  await sendDingtalkMarkdown(`${symbol} ${direction}单${reasonText}`, content);
+  await sendDingtalkMarkdownToUser(config!.userId, `${symbol} ${direction}单${reasonText}`, content);
 }
 
 /**
@@ -763,7 +766,7 @@ async function sendEntryFilledNotification(
     `**状态**: ${statusText}`,
   ].join('\n');
 
-  await sendDingtalkMarkdown(`${symbol} ${direction}成交`, content);
+  await sendDingtalkMarkdownToUser(config!.userId, `${symbol} ${direction}成交`, content);
 }
 
 /**

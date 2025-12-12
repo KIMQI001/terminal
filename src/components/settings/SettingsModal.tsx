@@ -5,9 +5,10 @@ import { useUserStore } from "@/stores/userStore";
 import { ApiKeyForm } from "./ApiKeyForm";
 import { PasswordForm } from "./PasswordForm";
 import { InviteCodeManager } from "./InviteCodeManager";
-import { Key, Lock, X, Users } from "lucide-react";
+import { DingtalkConfigForm } from "./DingtalkConfigForm";
+import { Key, Lock, X, Users, Bell } from "lucide-react";
 
-type SettingsTab = "api" | "password" | "invite";
+type SettingsTab = "api" | "notification" | "password" | "invite";
 
 export function SettingsModal() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("api");
@@ -33,7 +34,8 @@ export function SettingsModal() {
 
   const tabs: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
     { id: "api", label: "API 配置", icon: <Key className="w-4 h-4" /> },
-    { id: "password", label: "修改密码", icon: <Lock className="w-4 h-4" /> },
+    { id: "notification", label: "通知", icon: <Bell className="w-4 h-4" /> },
+    { id: "password", label: "密码", icon: <Lock className="w-4 h-4" /> },
     ...(isAdmin ? [{ id: "invite" as const, label: "邀请码", icon: <Users className="w-4 h-4" /> }] : []),
   ];
 
@@ -98,6 +100,7 @@ export function SettingsModal() {
         {/* 内容区域 */}
         <div className="overflow-y-auto flex-1">
           {activeTab === "api" && <ApiKeyForm />}
+          {activeTab === "notification" && <DingtalkConfigForm />}
           {activeTab === "password" && <PasswordForm />}
           {activeTab === "invite" && isAdmin && <InviteCodeManager />}
         </div>

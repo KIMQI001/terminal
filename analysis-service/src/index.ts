@@ -59,6 +59,7 @@ async function main(): Promise<void> {
   if (apiConfig) {
     console.log(`[OrderMonitor] 找到用户 ${apiConfig.userId} 的 Binance 配置`);
     await startOrderMonitor({
+      userId: apiConfig.userId,
       apiKey: apiConfig.config.apiKey,
       apiSecret: apiConfig.config.apiSecret,
       isTestnet: apiConfig.config.isTestnet,
