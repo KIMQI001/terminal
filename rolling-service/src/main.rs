@@ -84,6 +84,11 @@ async fn main() -> Result<()> {
         config.rolling.target_price * (1.0 + config.rolling.stop_roll_distance / 100.0)
     };
     info!("停止补单价: {:.2} (距目标{}%)", stop_price, config.rolling.stop_roll_distance);
+    if config.rolling.start_roll_distance > 0.0 {
+        info!("开始补单: 需盈利 {}% 后开始", config.rolling.start_roll_distance);
+    } else {
+        info!("开始补单: 立即开始");
+    }
 
     // 创建 WebSocket 订单管理器
     let api = Arc::new(WsOrderManager::new(config.binance.clone()));

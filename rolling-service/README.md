@@ -32,6 +32,7 @@ target_price = 4000       # 止盈目标价 (必填)
 stop_loss_percent = 3     # 止损百分比，0=不设止损
 use_rolling_margin = true # 是否用浮盈滚仓
 roll_profit_ratio = 80    # 滚仓比例 (%)
+start_roll_distance = 1   # 开始补单距离 (%)，盈利达到此%后开始补单
 stop_roll_distance = 1    # 停止补单距离 (%)
 ```
 
@@ -57,6 +58,7 @@ stop_roll_distance = 1    # 停止补单距离 (%)
 | `stop_loss_percent` | 止损百分比 | 3 (即亏损3%止损) |
 | `use_rolling_margin` | 是否滚仓 | true/false |
 | `roll_profit_ratio` | 滚仓比例 | 80 (浮盈的80%用于加仓) |
+| `start_roll_distance` | 开始补单距离 | 1 (盈利1%后才开始补单，0=立即) |
 | `stop_roll_distance` | 停止补单距离 | 1 (距目标价1%时停止补单) |
 
 ## 策略逻辑
@@ -84,7 +86,13 @@ stop_roll_distance = 1    # 停止补单距离 (%)
 - 新补单数量 = 基础数量 + 浮盈分摊数量
 - 达到 `max_margin` 后，只用浮盈加仓
 
-### 停止补单
+### 开始补单条件
+- 当 `start_roll_distance > 0` 时启用
+- 做多：当前盈利% = (现价 - 均价) / 均价 × 100 >= start_roll_distance
+- 做空：当前盈利% = (均价 - 现价) / 均价 × 100 >= start_roll_distance
+- 例如：设置 1%，做多开仓后需上涨 1% 才开始补单
+
+### 停止补单条件
 - 当价格接近目标价时自动停止补单
 - 停止价 = 目标价 × (1 - stop_roll_distance%) [做多]
 - 停止价 = 目标价 × (1 + stop_roll_distance%) [做空]

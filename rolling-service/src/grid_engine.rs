@@ -303,6 +303,28 @@ impl GridEngine {
             }
         }
 
+        // 检查是否达到开始补单的盈利条件
+        let start_distance = self.rolling_config.start_roll_distance;
+        if start_distance > 0.0 {
+            let pos = self.position.read().await;
+            if pos.quantity > 0.0 && pos.entry_price > 0.0 {
+                let is_long = self.is_long();
+                let profit_percent = if is_long {
+                    // 做多: 盈利% = (现价 - 均价) / 均价 * 100
+                    (current_price - pos.entry_price) / pos.entry_price * 100.0
+                } else {
+                    // 做空: 盈利% = (均价 - 现价) / 均价 * 100
+                    (pos.entry_price - current_price) / pos.entry_price * 100.0
+                };
+
+                if profit_percent < start_distance {
+                    debug!("未达开始补单条件: 当前盈利={:.2}%, 需要盈利={:.1}%",
+                           profit_percent, start_distance);
+                    return (new_orders, orders_to_cancel);
+                }
+            }
+        }
+
         let spacing = self.grid_config.grid_spacing;
         let is_long = self.is_long();
 

@@ -22,4 +22,5 @@ target_price = 4000           # 目标止盈价 (必填)
 stop_loss_percent = 3         # 止损百分比 (0=不设止损)
 use_rolling_margin = false    # 是否用浮盈滚仓
 roll_profit_ratio = 80        # 滚仓比例
+start_roll_distance = 0       # 开始补单距离 (%)，盈利达到此比例后开始补单 (0=立即开始)
 stop_roll_distance = 1        # 停止补单距离 (%)，价格接近目标价时停止补单

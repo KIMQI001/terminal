@@ -62,7 +62,8 @@ interface RollingConfig {
   useRollingMargin: boolean;
   rollProfitRatio: number;
   targetPrice: number;    // 目标价位 = 止盈价
-  stopRollDistance: number;
+  startRollDistance: number; // 开始补单距离 (%)
+  stopRollDistance: number;  // 停止补单距离 (%)
 }
 
 interface PositionInfo {
@@ -153,6 +154,7 @@ target_price = ${config.targetPrice}
 stop_loss_percent = ${config.stopLossPercent}
 use_rolling_margin = ${config.useRollingMargin}
 roll_profit_ratio = ${config.rollProfitRatio}
+start_roll_distance = ${config.startRollDistance}
 stop_roll_distance = ${config.stopRollDistance}
 `;
 }
@@ -240,6 +242,7 @@ export async function POST(request: NextRequest) {
       useRollingMargin: body.useRollingMargin ?? true,
       rollProfitRatio: body.rollProfitRatio || 80,
       targetPrice: body.targetPrice,
+      startRollDistance: body.startRollDistance || 0,
       stopRollDistance: body.stopRollDistance || 1,
     };
 

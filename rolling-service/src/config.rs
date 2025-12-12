@@ -63,8 +63,10 @@ pub struct RollingConfig {
     pub use_rolling_margin: bool,   // 是否用浮盈滚仓
     #[serde(default = "default_roll_profit_ratio")]
     pub roll_profit_ratio: f64,     // 滚仓比例 (如 100.0 表示 100% 浮盈用于滚仓)
+    #[serde(default = "default_start_roll_distance")]
+    pub start_roll_distance: f64,   // 开始补单距离 (%)，盈利达到此比例后开始补单
     #[serde(default = "default_stop_roll_distance")]
-    pub stop_roll_distance: f64,    // 停止滚仓距离 (%)，接近目标价时停止补单
+    pub stop_roll_distance: f64,    // 停止补单距离 (%)，接近目标价时停止补单
 }
 
 // 默认值函数
@@ -80,7 +82,8 @@ fn default_qty_precision() -> u32 { 3 }
 fn default_stop_loss_percent() -> f64 { 0.0 }
 fn default_use_rolling_margin() -> bool { false }
 fn default_roll_profit_ratio() -> f64 { 100.0 }
-fn default_stop_roll_distance() -> f64 { 1.0 }  // 默认距离目标价 1% 停止滚仓
+fn default_start_roll_distance() -> f64 { 0.0 }  // 默认立即开始补单
+fn default_stop_roll_distance() -> f64 { 1.0 }   // 默认距离目标价 1% 停止补单
 
 impl Config {
     pub fn load(path: &str) -> Result<Self> {

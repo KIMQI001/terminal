@@ -22,6 +22,7 @@ const STORAGE_KEYS = {
   STOP_LOSS: "rolling_stop_loss",
   ROLL_PROFIT_RATIO: "rolling_profit_ratio",
   TARGET_PRICE: "rolling_target_price",
+  START_ROLL_DISTANCE: "rolling_start_roll_distance",
   STOP_ROLL_DISTANCE: "rolling_stop_roll_distance",
 };
 
@@ -53,7 +54,8 @@ export default function RollingPage() {
   const [stopLoss, setStopLoss] = useState(3);
   const [rollProfitRatio, setRollProfitRatio] = useState(80);
   const [targetPrice, setTargetPrice] = useState(0);   // 目标价位 = 止盈价
-  const [stopRollDistance, setStopRollDistance] = useState(1);
+  const [startRollDistance, setStartRollDistance] = useState(0); // 开始补单距离 (%)
+  const [stopRollDistance, setStopRollDistance] = useState(1);   // 停止补单距离 (%)
 
   // 服务状态
   const [serviceStatus, setServiceStatus] = useState<RollingServiceStatus>({
@@ -108,6 +110,7 @@ export default function RollingPage() {
           useRollingMargin: rollProfitRatio > 0,
           rollProfitRatio,
           targetPrice,
+          startRollDistance,
           stopRollDistance,
         }),
       });
@@ -169,6 +172,7 @@ export default function RollingPage() {
     load(STORAGE_KEYS.STOP_LOSS, setStopLoss);
     load(STORAGE_KEYS.ROLL_PROFIT_RATIO, setRollProfitRatio);
     load(STORAGE_KEYS.TARGET_PRICE, setTargetPrice);
+    load(STORAGE_KEYS.START_ROLL_DISTANCE, setStartRollDistance);
     load(STORAGE_KEYS.STOP_ROLL_DISTANCE, setStopRollDistance);
 
     fetchServiceStatus();
@@ -290,21 +294,27 @@ export default function RollingPage() {
           {/* 目标价位 = 止盈价 */}
           <div className="p-4 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
             <h3 className="text-sm font-medium text-[var(--text-primary)] mb-3">止盈目标价 <span className="text-xs text-[var(--text-tertiary)] font-normal">到达时平仓止盈</span></h3>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className={labelClass}>目标价 (止盈)</label>
                 <input type="number" value={targetPrice} onChange={(e) => { const v = Number(e.target.value); setTargetPrice(v); save(STORAGE_KEYS.TARGET_PRICE, v); }} className={inputClass} placeholder="必填" />
               </div>
               <div>
-                <label className={labelClass}>停止补单距离</label>
+                <label className={labelClass}>开始补单</label>
+                <select value={startRollDistance} onChange={(e) => { const v = Number(e.target.value); setStartRollDistance(v); save(STORAGE_KEYS.START_ROLL_DISTANCE, v); }} className={inputClass}>
+                  {[0, 0.5, 1, 1.5, 2, 3, 5].map(n => <option key={n} value={n}>{n === 0 ? '立即' : `盈${n}%`}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={labelClass}>停止补单</label>
                 <select value={stopRollDistance} onChange={(e) => { const v = Number(e.target.value); setStopRollDistance(v); save(STORAGE_KEYS.STOP_ROLL_DISTANCE, v); }} className={inputClass}>
-                  {[0.5, 1, 1.5, 2, 3, 5].map(n => <option key={n} value={n}>{n}%</option>)}
+                  {[0.5, 1, 1.5, 2, 3, 5].map(n => <option key={n} value={n}>距目标{n}%</option>)}
                 </select>
               </div>
             </div>
             {targetPrice > 0 && (
               <p className="text-xs text-green-400 mt-2">
-                止盈价: {targetPrice} | 停止补单: {(targetPrice * (1 - stopRollDistance / 100)).toFixed(2)} (多) / {(targetPrice * (1 + stopRollDistance / 100)).toFixed(2)} (空)
+                止盈: {targetPrice} | 开始补单: 盈利{startRollDistance}%后 | 停止: {(targetPrice * (1 - stopRollDistance / 100)).toFixed(2)}(多)/{(targetPrice * (1 + stopRollDistance / 100)).toFixed(2)}(空)
               </p>
             )}
           </div>
