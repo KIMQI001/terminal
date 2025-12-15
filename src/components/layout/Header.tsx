@@ -212,29 +212,33 @@ export function Header() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* 守塔策略按钮 */}
-        <Link href="/tower">
-          <Button
-            variant="outline"
-            size="sm"
-            title="守塔策略"
-          >
-            <Building2 className="w-3 h-3 mr-1.5" />
-            塔
-          </Button>
-        </Link>
+        {/* 守塔策略按钮 (仅管理员) */}
+        {user?.role === 'admin' && (
+          <Link href="/tower">
+            <Button
+              variant="outline"
+              size="sm"
+              title="守塔策略"
+            >
+              <Building2 className="w-3 h-3 mr-1.5" />
+              塔
+            </Button>
+          </Link>
+        )}
 
-        {/* 滚仓策略按钮 */}
-        <Link href="/rolling">
-          <Button
-            variant="outline"
-            size="sm"
-            title="滚仓策略"
-          >
-            <Layers className="w-3 h-3 mr-1.5" />
-            仓
-          </Button>
-        </Link>
+        {/* 滚仓策略按钮 (仅管理员) */}
+        {user?.role === 'admin' && (
+          <Link href="/rolling">
+            <Button
+              variant="outline"
+              size="sm"
+              title="滚仓策略"
+            >
+              <Layers className="w-3 h-3 mr-1.5" />
+              仓
+            </Button>
+          </Link>
+        )}
 
         {/* AI 分析按钮 */}
         <Link href="/analysis">
