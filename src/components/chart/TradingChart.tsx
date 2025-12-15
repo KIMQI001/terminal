@@ -15,6 +15,7 @@ import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useMeasurementStore } from "@/stores/measurementStore";
 import { useOrderStore } from "@/stores/orderStore";
 import { usePositionStore } from "@/stores/positionStore";
+import { useUserStore } from "@/stores/userStore";
 import { MeasurementTool } from "./MeasurementTool";
 import { ICTOverlay } from "./ICTOverlay";
 import { OTEPanel } from "./OTEPanel";
@@ -109,6 +110,7 @@ export function TradingChart() {
 
   const { tradingLines, realOrders, fetchOpenOrders } = useOrderStore();
   const { positions, fetchPositions } = usePositionStore();
+  const { user } = useUserStore();
 
   // 监听 Shift 键
   useEffect(() => {
@@ -1047,7 +1049,7 @@ export function TradingChart() {
         <FVGPanel />
         <OBPanel />
         <LiquidationPanel />
-        <LiquidityGridPanel />
+        {user?.role === 'admin' && <LiquidityGridPanel />}
       </div>
       <MeasurementTool />
     </div>
