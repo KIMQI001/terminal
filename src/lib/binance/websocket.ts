@@ -32,10 +32,13 @@ export class BinanceWebSocket {
   private interval: Timeframe;
   private onKline: KlineCallback;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
+  private maxReconnectAttempts = 100; // 最多重连 100 次
   private reconnectDelay = 1000;
   private lastKlineTime: number = 0;
   private pingInterval: NodeJS.Timeout | null = null;
+  private dataTimeout: NodeJS.Timeout | null = null;
+  private lastDataTime: number = 0;
+  private readonly DATA_TIMEOUT_MS = 60000; // 60秒无数据则重连
 
   constructor(
     symbol: string,
@@ -59,6 +62,9 @@ export class BinanceWebSocket {
 
       // 启动心跳
       this.startPing();
+
+      // 启动数据超时检测
+      this.startDataTimeout();
     };
 
     this.ws.onmessage = (event) => {
@@ -91,6 +97,7 @@ export class BinanceWebSocket {
     this.ws.onclose = () => {
       console.log("WebSocket disconnected");
       this.stopPing();
+      this.stopDataTimeout();
       this.attemptReconnect();
     };
   }
@@ -110,6 +117,9 @@ export class BinanceWebSocket {
   }
 
   private handleKlineUpdate(data: KlineUpdateData) {
+    // 更新最后收到数据的时间（用于超时检测）
+    this.lastDataTime = Date.now();
+
     // 判断是否是新K线（收盘）
     const isClosed = data.time > this.lastKlineTime && this.lastKlineTime !== 0;
     if (data.time > this.lastKlineTime) {
@@ -149,6 +159,37 @@ export class BinanceWebSocket {
     }
   }
 
+  private startDataTimeout() {
+    this.lastDataTime = Date.now();
+    this.stopDataTimeout();
+
+    this.dataTimeout = setInterval(() => {
+      const timeSinceLastData = Date.now() - this.lastDataTime;
+      if (timeSinceLastData > this.DATA_TIMEOUT_MS) {
+        console.warn(`WebSocket 数据超时 (${Math.round(timeSinceLastData / 1000)}s)，触发重连...`);
+        this.forceReconnect();
+      }
+    }, 10000); // 每 10 秒检查一次
+  }
+
+  private stopDataTimeout() {
+    if (this.dataTimeout) {
+      clearInterval(this.dataTimeout);
+      this.dataTimeout = null;
+    }
+  }
+
+  private forceReconnect() {
+    this.stopPing();
+    this.stopDataTimeout();
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+    // 立即重连
+    setTimeout(() => this.connect(), 1000);
+  }
+
   private attemptReconnect() {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
@@ -164,6 +205,7 @@ export class BinanceWebSocket {
 
   disconnect() {
     this.stopPing();
+    this.stopDataTimeout();
     if (this.ws) {
       // 发送取消订阅
       if (this.ws.readyState === WebSocket.OPEN) {
