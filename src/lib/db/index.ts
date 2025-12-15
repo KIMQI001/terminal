@@ -129,7 +129,7 @@ export const inviteCodeQueries = {
   isValid: (code: string) => {
     const database = getDatabase();
     const inviteCode = database.prepare(
-      'SELECT * FROM invite_codes WHERE code = ? AND used_by IS NULL AND (expires_at IS NULL OR expires_at > datetime("now"))'
+      "SELECT * FROM invite_codes WHERE code = ? AND used_by IS NULL AND (expires_at IS NULL OR expires_at > datetime('now'))"
     ).get(code);
     return !!inviteCode;
   },
@@ -138,7 +138,7 @@ export const inviteCodeQueries = {
   use: (code: string, userId: number) => {
     const database = getDatabase();
     return database.prepare(
-      'UPDATE invite_codes SET used_by = ?, used_at = datetime("now") WHERE code = ? AND used_by IS NULL'
+      "UPDATE invite_codes SET used_by = ?, used_at = datetime('now') WHERE code = ? AND used_by IS NULL"
     ).run(userId, code);
   },
 
