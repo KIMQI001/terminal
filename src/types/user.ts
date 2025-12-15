@@ -1,5 +1,5 @@
 // 支持的交易所
-export type ExchangeType = 'binance' | 'okx' | 'bitget' | 'hyperliquid';
+export type ExchangeType = 'binance' | 'okx' | 'bitget' | 'hyperliquid' | 'aster';
 
 // 用户角色
 export type UserRole = 'admin' | 'user';

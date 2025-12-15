@@ -6,6 +6,7 @@ import { ExchangeType } from "@/types/user";
 
 const EXCHANGES: { value: ExchangeType; label: string; available: boolean }[] = [
   { value: "binance", label: "Binance", available: true },
+  { value: "aster", label: "Aster DEX", available: true },
   { value: "okx", label: "OKX", available: false },
   { value: "bitget", label: "Bitget", available: false },
   { value: "hyperliquid", label: "Hyperliquid", available: false },

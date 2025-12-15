@@ -59,6 +59,11 @@ export interface BinanceApiConfig {
   isTestnet: boolean;
 }
 
+export interface AsterApiConfig {
+  apiKey: string;
+  apiSecret: string;
+}
+
 export interface DingtalkConfig {
   webhook: string;
   secret: string;
@@ -161,6 +166,61 @@ export function getFirstBinanceApiConfig(): { userId: number; config: BinanceApi
     };
   } catch (error) {
     console.error('[ApiConfigReader] 获取 API 配置失败:', error);
+    return null;
+  }
+}
+
+/**
+ * 获取用户的 Aster DEX API 配置
+ */
+export function getAsterApiConfig(userId: number): AsterApiConfig | null {
+  try {
+    const database = getTerminalDatabase();
+
+    const row = database.prepare(`
+      SELECT * FROM api_configs WHERE user_id = ? AND exchange = 'aster'
+    `).get(userId) as ApiConfigRow | undefined;
+
+    if (!row) {
+      console.warn(`[ApiConfigReader] 用户 ${userId} 没有 Aster API 配置`);
+      return null;
+    }
+
+    return {
+      apiKey: row.api_key,
+      apiSecret: decrypt(row.api_secret_encrypted),
+    };
+  } catch (error) {
+    console.error('[ApiConfigReader] 获取 Aster API 配置失败:', error);
+    return null;
+  }
+}
+
+/**
+ * 获取第一个有 Aster 配置的用户
+ */
+export function getFirstAsterApiConfig(): { userId: number; config: AsterApiConfig } | null {
+  try {
+    const database = getTerminalDatabase();
+
+    const row = database.prepare(`
+      SELECT * FROM api_configs WHERE exchange = 'aster' ORDER BY user_id LIMIT 1
+    `).get() as ApiConfigRow | undefined;
+
+    if (!row) {
+      console.warn('[ApiConfigReader] 没有找到 Aster API 配置');
+      return null;
+    }
+
+    return {
+      userId: row.user_id,
+      config: {
+        apiKey: row.api_key,
+        apiSecret: decrypt(row.api_secret_encrypted),
+      },
+    };
+  } catch (error) {
+    console.error('[ApiConfigReader] 获取 Aster API 配置失败:', error);
     return null;
   }
 }

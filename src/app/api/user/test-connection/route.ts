@@ -50,6 +50,40 @@ async function testBinanceConnection(apiKey: string, apiSecret: string, isTestne
 
   const data = await response.json();
 
+  const balances = data.assets
+    ?.filter((asset: { walletBalance: string }) => parseFloat(asset.walletBalance) > 0)
+    .map((asset: { asset: string; walletBalance: string; availableBalance: string }) => ({
+      asset: asset.asset,
+      free: asset.availableBalance,
+      locked: (parseFloat(asset.walletBalance) - parseFloat(asset.availableBalance)).toFixed(8),
+    })) || [];
+
+  return { success: true, balance: balances };
+}
+
+// 测试 Aster DEX 连接
+async function testAsterConnection(apiKey: string, apiSecret: string) {
+  const baseUrl = 'https://fapi.asterdex.com';
+
+  const timestamp = Date.now();
+  const queryString = `timestamp=${timestamp}`;
+  const signature = generateBinanceSignature(queryString, apiSecret);
+
+  const url = `${baseUrl}/fapi/v2/account?${queryString}&signature=${signature}`;
+
+  const response = await fetch(url, {
+    headers: {
+      'X-MBX-APIKEY': apiKey,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.msg || '连接失败');
+  }
+
+  const data = await response.json();
+
   // 提取余额信息
   const balances = data.assets
     ?.filter((asset: { walletBalance: string }) => parseFloat(asset.walletBalance) > 0)
@@ -87,6 +121,9 @@ export async function POST(request: NextRequest) {
     switch (exchange) {
       case 'binance':
         result = await testBinanceConnection(config.apiKey, config.apiSecret, config.isTestnet);
+        break;
+      case 'aster':
+        result = await testAsterConnection(config.apiKey, config.apiSecret);
         break;
       case 'okx':
       case 'bitget':
