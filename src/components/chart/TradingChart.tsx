@@ -468,139 +468,71 @@ export function TradingChart() {
     };
   }, [symbol, timeframe, setCandles, updateCandle, setLoading, setConnected, calculateIndicators]);
 
-  // 初始化所有周期的 OTE 数据
+  // 合并加载所有周期的 OTE/FVG/OB/Trend 数据（优化：并行请求，避免重复）
   useEffect(() => {
     const allTimeframes = ['5m', '15m', '1h', '4h', '1d'] as const;
+    let isCancelled = false;
 
-    const loadAllTimeframesOTE = async () => {
-      for (const tf of allTimeframes) {
-        // 跳过当前周期（已经由主数据加载处理）
-        if (tf === timeframe) continue;
+    const loadAllMultiTimeframeData = async () => {
+      const limit = (symbol === "BTCUSDC" || symbol === "ETHUSDC") ? 5000 : 1000;
 
-        try {
-          const limit = (symbol === "BTCUSDC" || symbol === "ETHUSDC") ? 5000 : 1000;
-          const data = await fetchKlines(symbol, tf, limit);
+      // 并行请求所有周期的 K 线数据（排除当前周期）
+      const otherTimeframes = allTimeframes.filter(tf => tf !== timeframe);
 
-          if (data.length > 0) {
-            // 检测 swing points
-            const swings = detectSwingPoints(data);
-            // 检测 OTE
-            const lastPrice = data[data.length - 1].close;
-            const otes = detectOTEZones(swings, lastPrice, data);
-            // 保存到 store
-            setMultiTimeframeOTE(tf, otes[0] || null);
+      try {
+        const results = await Promise.all(
+          otherTimeframes.map(tf => fetchKlines(symbol, tf, limit).catch(() => []))
+        );
+
+        if (isCancelled) return;
+
+        // 处理每个周期的数据
+        otherTimeframes.forEach((tf, index) => {
+          const data = results[index];
+          if (data.length === 0) return;
+
+          const lastPrice = data[data.length - 1].close;
+          const swings = detectSwingPoints(data);
+
+          // OTE
+          const otes = detectOTEZones(swings, lastPrice, data);
+          setMultiTimeframeOTE(tf, otes[0] || null);
+
+          // FVG
+          const fvgs = detectFVGs(data);
+          setMultiTimeframeFVG(tf, fvgs[fvgs.length - 1] || null);
+
+          // OB
+          const obs = detectOrderBlocks(data);
+          const sortedObs = [...obs].sort((a, b) => b.startTime - a.startTime);
+          setMultiTimeframeOB(tf, sortedObs[0] || null);
+
+          // Trend
+          const { bos, choch } = detectStructure(swings, lastPrice);
+          let trend: 'bullish' | 'bearish' | 'neutral' = 'neutral';
+          if (choch.length > 0) {
+            trend = choch[choch.length - 1].type;
+          } else if (bos.length > 0) {
+            trend = bos[bos.length - 1].type;
           }
-        } catch (error) {
-          console.error(`Failed to load OTE for ${tf}:`, error);
-        }
-      }
-    };
-
-    // OTE 面板始终需要数据
-    loadAllTimeframesOTE();
-  }, [symbol, timeframe, setMultiTimeframeOTE]);
-
-  // 初始化所有周期的 FVG 数据
-  useEffect(() => {
-    const allTimeframes = ['5m', '15m', '1h', '4h', '1d'] as const;
-
-    const loadAllTimeframesFVG = async () => {
-      for (const tf of allTimeframes) {
-        // 跳过当前周期（已经由主数据加载处理）
-        if (tf === timeframe) continue;
-
-        try {
-          const limit = (symbol === "BTCUSDC" || symbol === "ETHUSDC") ? 5000 : 1000;
-          const data = await fetchKlines(symbol, tf, limit);
-
-          if (data.length > 0) {
-            // 检测 FVG
-            const fvgs = detectFVGs(data);
-            // 保存到 store（只保存最新的一个）
-            setMultiTimeframeFVG(tf, fvgs[fvgs.length - 1] || null);
-          }
-        } catch (error) {
-          console.error(`Failed to load FVG for ${tf}:`, error);
-        }
-      }
-    };
-
-    // FVG 面板始终需要数据
-    loadAllTimeframesFVG();
-  }, [symbol, timeframe, setMultiTimeframeFVG]);
-
-  // 初始化所有周期的 OB 数据
-  useEffect(() => {
-    const allTimeframes = ['5m', '15m', '1h', '4h', '1d'] as const;
-
-    const loadAllTimeframesOB = async () => {
-      for (const tf of allTimeframes) {
-        // 跳过当前周期（已经由主数据加载处理）
-        if (tf === timeframe) continue;
-
-        try {
-          const limit = (symbol === "BTCUSDC" || symbol === "ETHUSDC") ? 5000 : 1000;
-          const data = await fetchKlines(symbol, tf, limit);
-
-          if (data.length > 0) {
-            // 检测 Order Blocks
-            const obs = detectOrderBlocks(data);
-            // 保存到 store（按时间排序取最新的一个）
-            const sortedObs = [...obs].sort((a, b) => b.startTime - a.startTime);
-            setMultiTimeframeOB(tf, sortedObs[0] || null);
-          }
-        } catch (error) {
-          console.error(`Failed to load OB for ${tf}:`, error);
-        }
-      }
-    };
-
-    // OB 面板始终需要数据
-    loadAllTimeframesOB();
-  }, [symbol, timeframe, setMultiTimeframeOB]);
-
-  // 初始化所有周期的 Trend 数据（每 2 分钟刷新）
-  useEffect(() => {
-    const allTimeframes = ['5m', '15m', '1h', '4h', '1d'] as const;
-
-    const loadAllTimeframesTrend = async () => {
-      for (const tf of allTimeframes) {
-        // 跳过当前周期（已经由主数据加载处理）
-        if (tf === timeframe) continue;
-
-        try {
-          const limit = (symbol === "BTCUSDC" || symbol === "ETHUSDC") ? 5000 : 1000;
-          const data = await fetchKlines(symbol, tf, limit);
-
-          if (data.length > 0) {
-            // 检测 swing points
-            const swings = detectSwingPoints(data);
-            // 检测 BOS/CHoCH
-            const lastPrice = data[data.length - 1].close;
-            const { bos, choch } = detectStructure(swings, lastPrice);
-            // 计算趋势
-            let trend: 'bullish' | 'bearish' | 'neutral' = 'neutral';
-            if (choch.length > 0) {
-              trend = choch[choch.length - 1].type;
-            } else if (bos.length > 0) {
-              trend = bos[bos.length - 1].type;
-            }
-            setMultiTimeframeTrend(tf, trend);
-          }
-        } catch (error) {
-          console.error(`Failed to load Trend for ${tf}:`, error);
-        }
+          setMultiTimeframeTrend(tf, trend);
+        });
+      } catch (error) {
+        console.error('Failed to load multi-timeframe data:', error);
       }
     };
 
     // 初始加载
-    loadAllTimeframesTrend();
+    loadAllMultiTimeframeData();
 
     // 每 2 分钟刷新一次
-    const interval = setInterval(loadAllTimeframesTrend, 2 * 60 * 1000);
+    const interval = setInterval(loadAllMultiTimeframeData, 2 * 60 * 1000);
 
-    return () => clearInterval(interval);
-  }, [symbol, timeframe, setMultiTimeframeTrend]);
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
+  }, [symbol, timeframe, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend]);
 
   // 加载日K计算前高前低 (H/L)
   const { setDailyHL, dailyHL, dailyHLLines } = useChartStore();
