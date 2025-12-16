@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { triggerAnalyze, triggerReversalAnalyze, AnalyzeResult, ReversalAnalyzeResult } from "@/lib/analysis/api";
+import { useOrderStore } from "@/stores/orderStore";
+import { usePositionStore } from "@/stores/positionStore";
 
 const TIMEFRAMES = ["5m", "15m", "1h", "4h", "1d"];
 
@@ -14,6 +16,48 @@ export function AIAnalyzer() {
   // 反转分析状态
   const [reversalMode, setReversalMode] = useState<"top" | "bottom" | null>(null);
   const [reversalCache, setReversalCache] = useState<Record<string, ReversalAnalyzeResult>>({});
+
+  // 下单相关
+  const { placeOrder, isPlacingOrder } = useOrderStore();
+  const { currentLeverage } = usePositionStore();
+  const [orderMargin, setOrderMargin] = useState<number>(100); // 默认保证金 100 USDT
+
+  // 计算下单数量
+  const calculateQuantity = useCallback((margin: number, price: number) => {
+    const leverage = currentLeverage || 20;
+    const positionValue = margin * leverage;
+    return Math.floor((positionValue / price) * 1000) / 1000;
+  }, [currentLeverage]);
+
+  // 下单处理
+  const handlePlaceOrder = useCallback(async (
+    direction: 'long' | 'short',
+    entry: number,
+    stopLoss: number,
+    takeProfit: number
+  ) => {
+    const quantity = calculateQuantity(orderMargin, entry);
+    if (quantity <= 0) {
+      alert('数量计算错误');
+      return;
+    }
+
+    const result = await placeOrder({
+      side: direction === 'long' ? 'buy' : 'sell',
+      type: 'limit',
+      quantity,
+      price: entry,
+      stopPrice: stopLoss,
+      takeProfit: takeProfit,
+      clientOrderIdPrefix: `ai_${direction}`,
+    }, 'BTCUSDC');
+
+    if (result.success) {
+      alert(`下单成功！入场价: ${entry}, 数量: ${quantity}`);
+    } else {
+      alert(`下单失败: ${result.error}`);
+    }
+  }, [orderMargin, calculateQuantity, placeOrder]);
 
   // 当前显示的结果
   const currentResult = activeTimeframe ? resultsCache[activeTimeframe] : null;
@@ -277,7 +321,36 @@ export function AIAnalyzer() {
             {/* 交易计划（非观望时显示） */}
             {currentResult.signal.direction !== "neutral" && (
               <div className="p-4 bg-[var(--bg-tertiary)]/50 rounded-lg space-y-3">
-                <h4 className="font-semibold text-[var(--text-primary)]">修炼心法</h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold text-[var(--text-primary)]">修炼心法</h4>
+                  {/* 下单按钮 */}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={orderMargin}
+                      onChange={(e) => setOrderMargin(Number(e.target.value))}
+                      className="w-16 px-2 py-1 text-xs rounded bg-[var(--bg-primary)] border border-[var(--border)] text-[var(--text-primary)]"
+                      placeholder="保证金"
+                    />
+                    <span className="text-xs text-[var(--text-tertiary)]">U</span>
+                    <button
+                      onClick={() => handlePlaceOrder(
+                        currentResult.signal.direction as 'long' | 'short',
+                        currentResult.signal.entry?.price ?? 0,
+                        currentResult.signal.stopLoss?.price ?? 0,
+                        currentResult.signal.takeProfit?.[0]?.price ?? 0
+                      )}
+                      disabled={isPlacingOrder}
+                      className={`px-3 py-1 text-xs rounded font-medium transition-colors ${
+                        currentResult.signal.direction === 'long'
+                          ? 'bg-green-500 hover:bg-green-600 text-white'
+                          : 'bg-red-500 hover:bg-red-600 text-white'
+                      } disabled:opacity-50`}
+                    >
+                      {isPlacingOrder ? '下单中...' : currentResult.signal.direction === 'long' ? '做多' : '做空'}
+                    </button>
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
                   <div>
                     <span className="text-[var(--text-tertiary)]">入道: </span>
@@ -378,9 +451,38 @@ export function AIAnalyzer() {
             {/* 有信号时显示详细交易计划 */}
             {reversalResult.signal && reversalResult.signal.direction !== 'neutral' && (
               <div className="p-4 bg-[var(--bg-tertiary)]/50 rounded-lg space-y-3">
-                <h4 className="font-semibold text-[var(--text-primary)]">
-                  {reversalResult.mode === 'top' ? '做空心法' : '做多心法'}
-                </h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold text-[var(--text-primary)]">
+                    {reversalResult.mode === 'top' ? '做空心法' : '做多心法'}
+                  </h4>
+                  {/* 下单按钮 */}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={orderMargin}
+                      onChange={(e) => setOrderMargin(Number(e.target.value))}
+                      className="w-16 px-2 py-1 text-xs rounded bg-[var(--bg-primary)] border border-[var(--border)] text-[var(--text-primary)]"
+                      placeholder="保证金"
+                    />
+                    <span className="text-xs text-[var(--text-tertiary)]">U</span>
+                    <button
+                      onClick={() => handlePlaceOrder(
+                        reversalResult.signal!.direction as 'long' | 'short',
+                        reversalResult.signal!.entry?.price ?? 0,
+                        reversalResult.signal!.stopLoss?.price ?? 0,
+                        reversalResult.signal!.takeProfit?.[0]?.price ?? 0
+                      )}
+                      disabled={isPlacingOrder}
+                      className={`px-3 py-1 text-xs rounded font-medium transition-colors ${
+                        reversalResult.mode === 'bottom'
+                          ? 'bg-green-500 hover:bg-green-600 text-white'
+                          : 'bg-red-500 hover:bg-red-600 text-white'
+                      } disabled:opacity-50`}
+                    >
+                      {isPlacingOrder ? '下单中...' : reversalResult.mode === 'bottom' ? '做多' : '做空'}
+                    </button>
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                   <div>
                     <span className="text-[var(--text-tertiary)]">道心: </span>
