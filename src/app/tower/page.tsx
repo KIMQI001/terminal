@@ -419,7 +419,7 @@ export default function TowerPage() {
 
   // 止损止盈参数（与 TowerList 一致）
   const MAX_SL_DISTANCE = 200;
-  const MIN_TP_DISTANCE = 1000;
+  const MIN_TP_DISTANCE = 1500;
   const MIN_DISTANCE_RATIO = 0.003; // 最小距离：千分之三
 
   // 检查数据是否过期（超过5分钟）
@@ -484,7 +484,7 @@ export default function TowerPage() {
         block.stopLoss = boundary;
       }
 
-      // 止盈 = 最近的对立塔块，最小 1000 点
+      // 止盈 = 最近的对立塔块，最小 1500 点
       let target: typeof block | undefined;
 
       if (block.type === "bearish") {
@@ -1375,7 +1375,7 @@ export default function TowerPage() {
                 </li>
                 <li>
                   <span className="text-[var(--text-secondary)]">止盈:</span>{" "}
-                  对立塔块，最小 1000 点
+                  对立塔块，最小 1500 点
                 </li>
               </ul>
             </div>

@@ -12,7 +12,7 @@ interface TowerListProps {
 }
 
 const MAX_SL_DISTANCE = 200; // Maximum stop loss distance in points
-const MIN_TP_DISTANCE = 1000; // Minimum take profit distance in points
+const MIN_TP_DISTANCE = 1500; // Minimum take profit distance in points
 
 export function TowerList({ currentPrice, blocks, onOrder }: TowerListProps) {
   const { bearishBlocks, bullishBlocks } = useMemo(() => {
@@ -54,7 +54,7 @@ export function TowerList({ currentPrice, blocks, onOrder }: TowerListProps) {
         block.stopLoss = boundary;
       }
 
-      // Take profit = nearest opposite block, min 1000 points
+      // Take profit = nearest opposite block, min 1500 points
       // For bullish: find the lowest bearish block above it (nearest resistance)
       // For bearish: find the highest bullish block below it (nearest support)
       let target: TowerBlock | undefined;

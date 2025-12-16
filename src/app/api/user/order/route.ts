@@ -569,8 +569,8 @@ async function cancelBinanceAlgoOrder(
   };
 }
 
-// 取消所有 Algo 条件单
-async function cancelAllBinanceAlgoOrders(
+// 获取 Algo 条件单列表
+async function getBinanceAlgoOrders(
   apiKey: string,
   apiSecret: string,
   isTestnet: boolean,
@@ -584,11 +584,9 @@ async function cancelAllBinanceAlgoOrders(
   const queryString = `symbol=${symbol}&timestamp=${timestamp}`;
   const signature = generateBinanceSignature(queryString, apiSecret);
 
-  // 正确的端点是 /fapi/v1/algoOpenOrders（不是 allAlgoOrders）
-  const url = `${baseUrl}/fapi/v1/algoOpenOrders?${queryString}&signature=${signature}`;
+  const url = `${baseUrl}/fapi/v1/openAlgoOrders?${queryString}&signature=${signature}`;
 
   const response = await fetch(url, {
-    method: 'DELETE',
     headers: {
       'X-MBX-APIKEY': apiKey,
     },
@@ -597,13 +595,50 @@ async function cancelAllBinanceAlgoOrders(
   const data = await response.json();
 
   if (!response.ok) {
-    // 可能没有 Algo 订单，忽略错误
-    console.warn('取消全部 Algo 订单警告:', data.msg);
+    console.warn('获取 Algo 订单警告:', data.msg);
+    return [];
   }
 
+  return Array.isArray(data) ? data : (data.orders || []);
+}
+
+// 取消所有 Algo 条件单（先获取列表，再逐个取消）
+async function cancelAllBinanceAlgoOrders(
+  apiKey: string,
+  apiSecret: string,
+  isTestnet: boolean,
+  symbol: string
+) {
+  // 先获取所有 Algo 订单
+  const algoOrders = await getBinanceAlgoOrders(apiKey, apiSecret, isTestnet, symbol);
+
+  if (algoOrders.length === 0) {
+    return {
+      success: true,
+      message: '没有 Algo 订单需要取消',
+      cancelled: 0,
+    };
+  }
+
+  console.log(`[Algo] 发现 ${algoOrders.length} 个 Algo 订单，开始逐个取消...`);
+
+  // 逐个取消
+  const results = await Promise.allSettled(
+    algoOrders.map((order: { algoId: number }) =>
+      cancelBinanceAlgoOrder(apiKey, apiSecret, isTestnet, symbol, order.algoId)
+    )
+  );
+
+  const succeeded = results.filter(r => r.status === 'fulfilled').length;
+  const failed = results.filter(r => r.status === 'rejected').length;
+
+  console.log(`[Algo] 取消完成: 成功 ${succeeded}, 失败 ${failed}`);
+
   return {
-    success: true,
-    message: '全部 Algo 订单已取消',
+    success: failed === 0,
+    message: `Algo 订单取消完成: 成功 ${succeeded}, 失败 ${failed}`,
+    cancelled: succeeded,
+    failed,
   };
 }
 
