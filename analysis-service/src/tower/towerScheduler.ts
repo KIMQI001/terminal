@@ -20,7 +20,7 @@ let isRunning = false;
 
 // 止损止盈参数
 const MAX_SL_DISTANCE = 200;
-const MIN_TP_DISTANCE = 1000;
+const MIN_TP_DISTANCE = 1500;
 
 // 日K前高前低接口
 interface DailyHL {
@@ -571,7 +571,7 @@ function calculateOrders(
       block.stopLoss = boundary;
     }
 
-    // 止盈 = 最近的对立塔块，最小 1000 点
+    // 止盈 = 最近的对立塔块，最小 1500 点
     let target: typeof block | undefined;
 
     if (block.type === 'bearish') {
