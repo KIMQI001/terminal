@@ -18,6 +18,26 @@ const orderTypeLabels: Record<string, string> = {
   "trailing_stop_market": "追踪",
 };
 
+// 根据 side 和 positionSide 判断是开仓还是平仓
+// BUY + LONG = 开多, SELL + LONG = 平多
+// SELL + SHORT = 开空, BUY + SHORT = 平空
+function getOrderDirection(side: string, positionSide: string): { isOpen: boolean; isLong: boolean } {
+  const isLong = positionSide === 'LONG';
+  const isBuy = side.toUpperCase() === 'BUY';
+  // 开仓：BUY+LONG 或 SELL+SHORT
+  const isOpen = (isBuy && isLong) || (!isBuy && !isLong);
+  return { isOpen, isLong };
+}
+
+function getDirectionLabel(side: string, positionSide: string): string {
+  const { isOpen, isLong } = getOrderDirection(side, positionSide);
+  if (isOpen) {
+    return isLong ? '开多' : '开空';
+  } else {
+    return isLong ? '平多' : '平空';
+  }
+}
+
 export function OpenOrderList() {
   const { realOrders, isLoadingOrders, fetchOpenOrders, cancelOrder, cancelAllOrders } = useOrderStore();
   const { symbol } = useChartStore();
@@ -125,11 +145,11 @@ export function OpenOrderList() {
               <div className="flex items-center gap-2">
                 <span className="font-medium">{firstOrder.symbol}</span>
                 <span className={`px-1.5 py-0.5 rounded ${
-                  firstOrder.positionSide === 'LONG'
-                    ? 'bg-blue-100 text-blue-600'
-                    : 'bg-purple-100 text-purple-600'
+                  getOrderDirection(firstOrder.side, firstOrder.positionSide).isLong
+                    ? (getOrderDirection(firstOrder.side, firstOrder.positionSide).isOpen ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600')
+                    : (getOrderDirection(firstOrder.side, firstOrder.positionSide).isOpen ? 'bg-red-100 text-red-600' : 'bg-purple-100 text-purple-600')
                 }`}>
-                  {firstOrder.positionSide === 'LONG' ? '做多' : '做空'}
+                  {getDirectionLabel(firstOrder.side, firstOrder.positionSide)}
                 </span>
                 <span className="text-[var(--text-secondary)]">
                   {firstOrder.quantity} | {new Date(firstOrder.time).toLocaleTimeString()}
