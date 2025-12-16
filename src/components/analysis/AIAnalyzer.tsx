@@ -233,39 +233,41 @@ export function AIAnalyzer() {
           </span>
         </h3>
         <div className="flex items-center gap-2">
-          {/* 托管控制 */}
-          <div className="flex items-center gap-2">
-            {!managementConfig?.isActive && (
-              <>
-                <input
-                  type="number"
-                  value={orderMargin}
-                  onChange={(e) => setOrderMargin(Number(e.target.value))}
-                  className="w-14 px-2 py-1 text-xs rounded bg-[var(--bg-primary)] border border-[var(--border)] text-[var(--text-primary)]"
-                  placeholder="保证金"
-                />
-                <span className="text-xs text-[var(--text-tertiary)]">U</span>
-              </>
-            )}
-            <button
-              onClick={handleToggleManagement}
-              disabled={isTogglingManagement}
-              className={`px-3 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1.5 ${
-                managementConfig?.isActive
-                  ? "bg-green-500/20 text-green-400 border border-green-500/50 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/50"
-                  : "bg-blue-500 hover:bg-blue-600 text-white"
-              } disabled:opacity-50`}
-            >
-              {managementConfig?.isActive && (
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+          {/* 托管控制 - 仅管理员可见 */}
+          {user?.role === 'admin' && (
+            <div className="flex items-center gap-2">
+              {!managementConfig?.isActive && (
+                <>
+                  <input
+                    type="number"
+                    value={orderMargin}
+                    onChange={(e) => setOrderMargin(Number(e.target.value))}
+                    className="w-14 px-2 py-1 text-xs rounded bg-[var(--bg-primary)] border border-[var(--border)] text-[var(--text-primary)]"
+                    placeholder="保证金"
+                  />
+                  <span className="text-xs text-[var(--text-tertiary)]">U</span>
+                </>
               )}
-              {isTogglingManagement
-                ? "处理中..."
-                : managementConfig?.isActive
-                ? "托管中"
-                : "启动托管"}
-            </button>
-          </div>
+              <button
+                onClick={handleToggleManagement}
+                disabled={isTogglingManagement}
+                className={`px-3 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1.5 ${
+                  managementConfig?.isActive
+                    ? "bg-green-500/20 text-green-400 border border-green-500/50 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/50"
+                    : "bg-blue-500 hover:bg-blue-600 text-white"
+                } disabled:opacity-50`}
+              >
+                {managementConfig?.isActive && (
+                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                )}
+                {isTogglingManagement
+                  ? "处理中..."
+                  : managementConfig?.isActive
+                  ? "托管中"
+                  : "启动托管"}
+              </button>
+            </div>
+          )}
 
           {/* 刷新按钮 */}
           {(activeTimeframe || reversalMode) && (
