@@ -708,13 +708,26 @@ export function TradingChart() {
       .filter(o => o.symbol === currentSymbol && o.type.toLowerCase() === 'limit')
       .forEach((order) => {
         if (!candleSeriesRef.current || !order.price) return;
+
+        // 判断是开仓还是平仓（止盈）
+        // BUY + LONG = 开多, SELL + SHORT = 开空 → 开仓限价
+        // SELL + LONG = 平多, BUY + SHORT = 平空 → 平仓限价（止盈）
+        const isLong = order.positionSide === 'LONG';
+        const isBuy = order.side.toUpperCase() === 'BUY';
+        const isOpen = (isBuy && isLong) || (!isBuy && !isLong);
+
+        // 也可以通过 clientOrderId 判断是否为止盈单
+        const isTpOrder = order.clientOrderId?.includes('_tp');
+
         const priceLine = candleSeriesRef.current.createPriceLine({
           price: order.price,
-          color: order.positionSide === 'LONG' ? '#3b82f6' : '#a855f7',
+          color: isOpen
+            ? (isLong ? '#3b82f6' : '#a855f7')  // 开仓：蓝/紫
+            : '#22c55e',  // 平仓（止盈）：绿
           lineWidth: 1,
           lineStyle: 2, // 虚线
           axisLabelVisible: true,
-          title: `限价 ${order.quantity}`,
+          title: (isOpen && !isTpOrder) ? `限价 ${order.quantity}` : 'TP',
         });
         priceLinesRef.current.push(priceLine);
       });
