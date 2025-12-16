@@ -727,7 +727,7 @@ export function TradingChart() {
           lineWidth: 1,
           lineStyle: 2, // 虚线
           axisLabelVisible: true,
-          title: (isOpen && !isTpOrder) ? `限价 ${order.quantity}` : 'TP',
+          title: (isOpen && !isTpOrder) ? `限价 ${order.quantity}` : `TP ${order.quantity}`,
         });
         priceLinesRef.current.push(priceLine);
       });
