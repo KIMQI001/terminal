@@ -1,11 +1,18 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { triggerAnalyze, triggerReversalAnalyze, AnalyzeResult, ReversalAnalyzeResult } from "@/lib/analysis/api";
 import { useOrderStore } from "@/stores/orderStore";
 import { usePositionStore } from "@/stores/positionStore";
+import { useUserStore } from "@/stores/userStore";
 
 const TIMEFRAMES = ["5m", "15m", "1h", "4h", "1d"];
+
+// 托管配置类型
+interface AIManagementConfig {
+  isActive: boolean;
+  baseMargin: number;
+}
 
 export function AIAnalyzer() {
   const [loading, setLoading] = useState<string | null>(null);
@@ -20,7 +27,71 @@ export function AIAnalyzer() {
   // 下单相关
   const { placeOrder, isPlacingOrder } = useOrderStore();
   const { currentLeverage } = usePositionStore();
+  const { user } = useUserStore();
   const [orderMargin, setOrderMargin] = useState<number>(100); // 默认保证金 100 USDT
+
+  // 托管相关
+  const [managementConfig, setManagementConfig] = useState<AIManagementConfig | null>(null);
+  const [isTogglingManagement, setIsTogglingManagement] = useState(false);
+
+  // 获取托管配置
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const fetchConfig = async () => {
+      try {
+        const res = await fetch(`/api/analysis/ai-management?userId=${user.id}&symbol=BTCUSDC`);
+        const json = await res.json();
+        if (json.success && json.data) {
+          setManagementConfig(json.data);
+          if (json.data.baseMargin) {
+            setOrderMargin(json.data.baseMargin);
+          }
+        }
+      } catch (err) {
+        console.error("获取 AI 托管配置失败:", err);
+      }
+    };
+
+    fetchConfig();
+  }, [user?.id]);
+
+  // 启动/停止托管
+  const handleToggleManagement = async () => {
+    if (!user?.id) {
+      alert("请先登录");
+      return;
+    }
+
+    setIsTogglingManagement(true);
+    try {
+      const endpoint = managementConfig?.isActive
+        ? "/api/analysis/ai-management/stop"
+        : "/api/analysis/ai-management/start";
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: user.id,
+          symbol: "BTCUSDC",
+          baseMargin: orderMargin,
+        }),
+      });
+
+      const json = await res.json();
+      if (json.success) {
+        setManagementConfig(json.data);
+        alert(managementConfig?.isActive ? "AI 托管已停止" : "AI 托管已启动");
+      } else {
+        alert(json.error || "操作失败");
+      }
+    } catch (err) {
+      alert("操作失败");
+    } finally {
+      setIsTogglingManagement(false);
+    }
+  };
 
   // 计算下单数量
   const calculateQuantity = useCallback((margin: number, price: number) => {
@@ -49,7 +120,7 @@ export function AIAnalyzer() {
       price: entry,
       stopPrice: stopLoss,
       takeProfit: takeProfit,
-      clientOrderIdPrefix: `ai_${direction}`,
+      clientOrderIdPrefix: `aim_${direction[0]}_${Math.floor(Date.now() / 1000)}`,
     }, 'BTCUSDC');
 
     if (result.success) {
@@ -161,29 +232,65 @@ export function AIAnalyzer() {
             选择时间周期进行 AI 分析
           </span>
         </h3>
-        {/* 刷新按钮 */}
-        {(activeTimeframe || reversalMode) && (
-          <button
-            onClick={handleRefresh}
-            disabled={loading !== null}
-            className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-50"
-            title="重新推演当前周期"
-          >
-            <svg
-              className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+        <div className="flex items-center gap-2">
+          {/* 托管控制 */}
+          <div className="flex items-center gap-2">
+            {!managementConfig?.isActive && (
+              <>
+                <input
+                  type="number"
+                  value={orderMargin}
+                  onChange={(e) => setOrderMargin(Number(e.target.value))}
+                  className="w-14 px-2 py-1 text-xs rounded bg-[var(--bg-primary)] border border-[var(--border)] text-[var(--text-primary)]"
+                  placeholder="保证金"
+                />
+                <span className="text-xs text-[var(--text-tertiary)]">U</span>
+              </>
+            )}
+            <button
+              onClick={handleToggleManagement}
+              disabled={isTogglingManagement}
+              className={`px-3 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1.5 ${
+                managementConfig?.isActive
+                  ? "bg-green-500/20 text-green-400 border border-green-500/50 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/50"
+                  : "bg-blue-500 hover:bg-blue-600 text-white"
+              } disabled:opacity-50`}
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
-            </svg>
-          </button>
-        )}
+              {managementConfig?.isActive && (
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              )}
+              {isTogglingManagement
+                ? "处理中..."
+                : managementConfig?.isActive
+                ? "托管中"
+                : "启动托管"}
+            </button>
+          </div>
+
+          {/* 刷新按钮 */}
+          {(activeTimeframe || reversalMode) && (
+            <button
+              onClick={handleRefresh}
+              disabled={loading !== null}
+              className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-50"
+              title="重新推演当前周期"
+            >
+              <svg
+                className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Content */}

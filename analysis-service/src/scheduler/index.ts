@@ -16,6 +16,8 @@ import { analyzeMultiTimeframe } from '../analysis/mtfAnalyzer';
 import { sendDingtalkMarkdown } from '../notification/dingtalk';
 import { formatSignalMessage, formatMTFSignalMessage, formatReversalSignalMessage } from '../notification/formatter';
 import { saveSignal, hasDuplicatePendingSignal } from '../signals/signalStore';
+import { handleNewSignalForAutoTrade } from '../ai/aiAutoTrader';
+import { initAIManagementTables } from '../ai/aiManagementStore';
 
 // 上次推送的信号缓存（防止重复推送）
 const lastSignals: Map<string, string> = new Map();
@@ -25,6 +27,9 @@ const lastSignals: Map<string, string> = new Map();
  */
 export function startScheduler(): void {
   const mode = config.analysis.mode;
+
+  // 初始化 AI 托管表
+  initAIManagementTables();
 
   console.log('═══════════════════════════════════════');
   console.log('🚀 分析服务调度器启动');
@@ -126,6 +131,9 @@ async function analyzeSymbolMTF(symbol: string): Promise<void> {
             try {
               const signalId = saveSignal(signal, symbol, 'mtf');
               console.log(`[${key}] 信号已保存: ${signalId}`);
+
+              // AI 托管自动下单
+              await handleNewSignalForAutoTrade(signal, symbol, 'mtf');
             } catch (dbError) {
               console.error(`[${key}] 信号保存失败:`, dbError);
             }
@@ -169,6 +177,9 @@ async function analyzeSymbolMTF(symbol: string): Promise<void> {
             try {
               const signalId = saveSignal(reversalSignal, symbol, 'reversal');
               console.log(`[${key}] 反转信号已保存: ${signalId}`);
+
+              // AI 托管自动下单
+              await handleNewSignalForAutoTrade(reversalSignal, symbol, 'reversal');
             } catch (dbError) {
               console.error(`[${key}] 反转信号保存失败:`, dbError);
             }
@@ -255,6 +266,9 @@ async function analyzeSymbolSingle(symbol: string, timeframe: Timeframe): Promis
     try {
       const signalId = saveSignal(signal, symbol, timeframe);
       console.log(`[${key}] 信号已保存: ${signalId}`);
+
+      // AI 托管自动下单
+      await handleNewSignalForAutoTrade(signal, symbol, timeframe);
     } catch (dbError) {
       console.error(`[${key}] 信号保存失败:`, dbError);
     }

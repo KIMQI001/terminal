@@ -12,6 +12,7 @@ import { pendingOrdersRoutes } from './routes/pendingOrders';
 import { towerManagementRoutes } from './routes/towerManagement';
 import { towerPerformanceRoutes } from './routes/towerPerformance';
 import { liqGridManagementRoutes } from './routes/liqGridManagement';
+import aiManagementRoutes from './routes/aiManagement';
 
 /**
  * 启动 HTTP API 服务器
@@ -40,6 +41,7 @@ export function startApiServer(port: number = 3002): void {
   app.use('/api/tower-management', towerManagementRoutes);
   app.use('/api/tower-performance', towerPerformanceRoutes);
   app.use('/api/liq-grid-management', liqGridManagementRoutes);
+  app.use('/api/ai-management', aiManagementRoutes);
 
   // 404 处理
   app.use((_req, res) => {
