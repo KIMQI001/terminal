@@ -112,15 +112,16 @@ export function startAIManagement(
   baseMargin: number
 ): AIManagementConfig {
   const db = getDatabase();
+  const now = new Date().toISOString();
 
   db.prepare(`
-    INSERT INTO ai_management (user_id, symbol, is_active, base_margin, updated_at)
-    VALUES (?, ?, 1, ?, datetime('now'))
+    INSERT INTO ai_management (user_id, symbol, is_active, base_margin, created_at, updated_at)
+    VALUES (?, ?, 1, ?, ?, ?)
     ON CONFLICT(user_id, symbol) DO UPDATE SET
       is_active = 1,
       base_margin = excluded.base_margin,
-      updated_at = datetime('now')
-  `).run(userId, symbol, baseMargin);
+      updated_at = excluded.updated_at
+  `).run(userId, symbol, baseMargin, now, now);
 
   console.log(`[AIManagement] 用户 ${userId} 启动托管: ${symbol}, 保证金=${baseMargin}`);
 
@@ -132,12 +133,13 @@ export function startAIManagement(
  */
 export function stopAIManagement(userId: number, symbol: string): AIManagementConfig | null {
   const db = getDatabase();
+  const now = new Date().toISOString();
 
   const result = db.prepare(`
     UPDATE ai_management
-    SET is_active = 0, updated_at = datetime('now')
+    SET is_active = 0, updated_at = ?
     WHERE user_id = ? AND symbol = ?
-  `).run(userId, symbol);
+  `).run(now, userId, symbol);
 
   if (result.changes === 0) {
     return null;
