@@ -133,7 +133,7 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
 
     if (!longPosition && liqGridOrders.length > 0) {
       // 没有多头仓位，检查多单数量是否过大
-      const buyOrders = liqGridOrders.filter((o: { side: string }) => o.side === 'BUY');
+      const buyOrders = liqGridOrders.filter(o => o.side === 'BUY');
       if (buyOrders.length > 0) {
         const firstBuyQty = parseFloat(buyOrders[0].origQty || '0');
         // 如果第一个多单数量 > 基础数量的 1.5 倍，说明之前有仓位，现在被平了，需要重置
@@ -146,7 +146,7 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
 
     if (!shortPosition && liqGridOrders.length > 0) {
       // 没有空头仓位，检查空单数量是否过大
-      const sellOrders = liqGridOrders.filter((o: { side: string }) => o.side === 'SELL');
+      const sellOrders = liqGridOrders.filter(o => o.side === 'SELL');
       if (sellOrders.length > 0) {
         const firstSellQty = parseFloat(sellOrders[0].origQty || '0');
         if (firstSellQty > baseQuantity * 1.5) {
@@ -560,7 +560,7 @@ async function getPositions(
 async function getLiqGridOrders(
   apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
   symbol: string
-): Promise<{ success: boolean; orders?: Array<{ orderId: number; clientOrderId: string }> }> {
+): Promise<{ success: boolean; orders?: Array<{ orderId: number; clientOrderId: string; side: string; origQty: string }> }> {
   const baseUrl = apiConfig.isTestnet
     ? 'https://testnet.binancefuture.com'
     : 'https://fapi.binance.com';
@@ -577,7 +577,7 @@ async function getLiqGridOrders(
 
     if (!response.ok) return { success: false };
 
-    const orders = await response.json() as Array<{ orderId: number; clientOrderId: string }>;
+    const orders = await response.json() as Array<{ orderId: number; clientOrderId: string; side: string; origQty: string }>;
     const liqGridOrders = orders.filter(o => o.clientOrderId?.startsWith('liq_grid'));
 
     return { success: true, orders: liqGridOrders };
