@@ -13,6 +13,7 @@ import {
   markOrderClosedWithPnL,
   initPendingOrdersTable,
   cleanupOldPendingOrders,
+  cleanupCanceledOrders,
   getOrderStats,
   PendingEntryOrder,
 } from './pendingOrderStore';
@@ -811,7 +812,11 @@ export async function startOrderMonitor(cfg: OrderMonitorConfig): Promise<void> 
   // 定期清理过期订单 (每小时)
   cleanupInterval = setInterval(() => {
     cleanupOldPendingOrders();
+    cleanupCanceledOrders();
   }, 60 * 60 * 1000);
+
+  // 启动时也清理一次已取消订单
+  cleanupCanceledOrders();
 
   // 打印统计信息
   const stats = getOrderStats();
