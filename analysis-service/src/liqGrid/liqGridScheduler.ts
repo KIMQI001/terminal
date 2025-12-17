@@ -115,11 +115,49 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
       return;
     }
 
-    // 1. 检查当前 liq_grid 挂单数量（少于8个才更新）
+    // 1. 获取当前挂单和持仓
     const ordersResult = await getLiqGridOrders(apiConfig, management.symbol);
-    const liqGridOrderCount = ordersResult.success ? ordersResult.orders?.length || 0 : 0;
+    const liqGridOrders = ordersResult.success ? ordersResult.orders || [] : [];
+    const liqGridOrderCount = liqGridOrders.length;
 
-    if (liqGridOrderCount >= 8) {
+    // 获取当前持仓
+    const positionsResult = await getPositions(apiConfig, management.symbol);
+    const positions = positionsResult.success ? positionsResult.positions || [] : [];
+    const longPosition = positions.find(p => p.positionSide === 'LONG' && Math.abs(p.positionAmt) >= 0.001);
+    const shortPosition = positions.find(p => p.positionSide === 'SHORT' && Math.abs(p.positionAmt) >= 0.001);
+
+    // 2. 检查是否需要重置挂单
+    // 当某方向没有仓位时，检查该方向挂单数量是否需要重置
+    let needReset = false;
+    const baseQuantity = (management.baseMargin * management.leverage) / 100000; // 估算基础数量
+
+    if (!longPosition && liqGridOrders.length > 0) {
+      // 没有多头仓位，检查多单数量是否过大
+      const buyOrders = liqGridOrders.filter((o: { side: string }) => o.side === 'BUY');
+      if (buyOrders.length > 0) {
+        const firstBuyQty = parseFloat(buyOrders[0].origQty || '0');
+        // 如果第一个多单数量 > 基础数量的 1.5 倍，说明之前有仓位，现在被平了，需要重置
+        if (firstBuyQty > baseQuantity * 1.5) {
+          console.log(`[LiqGridScheduler] 检测到多头仓位已清零，但挂单数量过大(${firstBuyQty.toFixed(4)} > ${(baseQuantity * 1.5).toFixed(4)})，需要重置`);
+          needReset = true;
+        }
+      }
+    }
+
+    if (!shortPosition && liqGridOrders.length > 0) {
+      // 没有空头仓位，检查空单数量是否过大
+      const sellOrders = liqGridOrders.filter((o: { side: string }) => o.side === 'SELL');
+      if (sellOrders.length > 0) {
+        const firstSellQty = parseFloat(sellOrders[0].origQty || '0');
+        if (firstSellQty > baseQuantity * 1.5) {
+          console.log(`[LiqGridScheduler] 检测到空头仓位已清零，但挂单数量过大(${firstSellQty.toFixed(4)} > ${(baseQuantity * 1.5).toFixed(4)})，需要重置`);
+          needReset = true;
+        }
+      }
+    }
+
+    // 3. 决定是否更新
+    if (liqGridOrderCount >= 8 && !needReset) {
       console.log(`[LiqGridScheduler] 挂单数量充足(${liqGridOrderCount}个)，跳过更新`);
       addRecord({
         managementId: management.id,
@@ -134,7 +172,7 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
       return;
     }
 
-    console.log(`[LiqGridScheduler] 挂单数量不足(${liqGridOrderCount}个)，开始更新...`);
+    console.log(`[LiqGridScheduler] ${needReset ? '仓位已清零需要重置' : `挂单数量不足(${liqGridOrderCount}个)`}，开始更新...`);
 
     // 2. 获取清算数据
     const baseCoin = management.symbol.replace('USDC', '').replace('USDT', '');
@@ -167,13 +205,7 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
     // 4. 设置杠杆
     await setLeverage(apiConfig, management.symbol, management.leverage);
 
-    // 5. 获取当前持仓，用于过滤订单位置和计算起点保证金
-    const positionsResult = await getPositions(apiConfig, management.symbol);
-    const positions = positionsResult.success ? positionsResult.positions || [] : [];
-    const longPosition = positions.find(p => p.positionSide === 'LONG' && Math.abs(p.positionAmt) >= 0.001);
-    const shortPosition = positions.find(p => p.positionSide === 'SHORT' && Math.abs(p.positionAmt) >= 0.001);
-
-    // 获取持仓价值用于计算新订单起点保证金
+    // 5. 使用前面获取的持仓信息计算起点保证金
     const longNotional = longPosition?.notional || 0;
     const shortNotional = shortPosition?.notional || 0;
 
