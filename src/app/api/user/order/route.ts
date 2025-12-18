@@ -235,9 +235,9 @@ async function placeStopOrder(
     timestamp,
   };
 
-  // 添加自定义订单 ID
+  // 添加自定义订单 ID（Algo API 使用 newClientAlgoId）
   if (params.clientOrderId) {
-    queryParams.newClientOrderId = params.clientOrderId;
+    queryParams.newClientAlgoId = params.clientOrderId;
   }
 
   const queryString = Object.entries(queryParams)
