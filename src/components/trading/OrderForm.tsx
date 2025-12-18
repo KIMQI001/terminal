@@ -135,6 +135,10 @@ export function OrderForm() {
   };
 
   const handleSubmit = async (side: OrderSide) => {
+    // 为手动下单生成 clientOrderIdPrefix，格式: manual_{timestamp}
+    // 这样止盈止损单可以通过 _sl, _tp 后缀与主单关联，实现订单分组
+    const clientOrderIdPrefix = `manual_${Date.now()}`;
+
     const orderData = {
       type: orderType,
       side,
@@ -142,6 +146,7 @@ export function OrderForm() {
       stopPrice: stopLoss ? parseFloat(stopLoss) : undefined,
       takeProfit: takeProfit ? parseFloat(takeProfit) : undefined,
       quantity: coinQuantity, // 使用计算出的币数量
+      clientOrderIdPrefix,
     };
 
     const result = await placeOrder(orderData, symbol);
