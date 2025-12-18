@@ -29,6 +29,14 @@ pub struct CalculationConfig {
     pub lookback_days: u32,
     pub price_bucket_size: f64,
     pub symbols: Vec<String>,
+    /// 持仓留存率：成交量中留存为持仓的比例
+    /// 默认 0.4，即假设 40% 的成交量最终形成持仓
+    #[serde(default = "default_retention_rate")]
+    pub retention_rate: f64,
+}
+
+fn default_retention_rate() -> f64 {
+    0.4
 }
 
 #[derive(Debug, Deserialize, Clone)]

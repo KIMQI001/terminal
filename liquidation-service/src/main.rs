@@ -6,13 +6,13 @@ mod liquidation;
 mod storage;
 
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 
 use api::{create_router, AppState};
+use collector::{spawn_collector, spawn_agg_trades_collector};
 use config::Config;
 use kline::BinanceKlineClient;
-use liquidation::LeverageModel;
+use storage::Storage;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -28,23 +28,38 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::load("config.toml")?;
     tracing::info!("Loaded config: {:?}", config.server);
 
-    // 创建杠杆模型
-    let leverage_model = if config.leverage.use_dynamic {
-        // TODO: 从数据库加载学习到的分布
-        LeverageModel::new_default()
-    } else {
-        LeverageModel::from_config(config.leverage.get_parsed_distribution())
-    };
+    // 创建存储
+    let storage = Arc::new(Storage::new(&config.storage.db_path)?);
+    tracing::info!("Database initialized at {}", config.storage.db_path);
 
     // 创建 K线客户端
-    let kline_client = BinanceKlineClient::new(&config.binance.base_url);
+    let kline_client = Arc::new(BinanceKlineClient::new(&config.binance.base_url));
 
-    // 创建应用状态
+    // 创建应用状态（使用固定杠杆档位，无需 leverage_model）
     let state = Arc::new(AppState {
         config: config.clone(),
-        kline_client,
-        leverage_model: RwLock::new(leverage_model),
+        kline_client: kline_client.clone(),
+        storage: storage.clone(),
     });
+
+    // 启动爆仓数据收集器（仍然用于统计分析）
+    if config.leverage.use_dynamic {
+        tracing::info!("Starting force order collector for statistics...");
+        let _collector_handle = spawn_collector(
+            &config.binance.ws_url,
+            kline_client.clone(),
+            storage.clone(),
+            config.calculation.symbols.clone(),
+        );
+    }
+
+    // 启动 aggTrades 收集器（收集真实交易数据用于更精准的清算计算）
+    tracing::info!("Starting aggTrades collector for {:?}...", config.calculation.symbols);
+    let _agg_trades_handle = spawn_agg_trades_collector(
+        &config.binance.ws_url,
+        storage.clone(),
+        config.calculation.symbols.clone(),
+    );
 
     // 创建路由
     let cors = CorsLayer::new()
@@ -57,6 +72,7 @@ async fn main() -> anyhow::Result<()> {
     // 启动服务器
     let addr = format!("{}:{}", config.server.host, config.server.port);
     tracing::info!("Starting liquidation-service on {}", addr);
+    tracing::info!("Using fixed leverage tiers: {:?}", liquidation::LEVERAGE_TIERS);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;

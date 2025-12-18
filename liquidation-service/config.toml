@@ -9,16 +9,20 @@ ws_url = "wss://fstream.binance.com"
 [calculation]
 # K线周期用于计算
 kline_interval = "1h"
-# 回溯天数
-lookback_days = 7
+# 回溯天数（aggTrades 数据量大，建议 1-3 天）
+lookback_days = 1
 # 价格区间大小 (USDT)
 price_bucket_size = 100.0
 # 支持的交易对
 symbols = ["BTCUSDT", "ETHUSDT"]
+# 持仓留存率：成交量中留存为持仓的比例
+# 调整此值来匹配 CoinAnk 的数据量级
+retention_rate = 0.5
 
 [leverage]
 # 是否使用动态分布（基于爆仓数据学习）
-use_dynamic = false
+# true = 启动爆仓数据收集器，从真实数据学习杠杆分布
+use_dynamic = true
 
 # 默认杠杆分布 (杠杆倍数 = 占比)
 # 基于市场经验估算

@@ -15,6 +15,16 @@ pub struct Kline {
     pub trades: u64,
 }
 
+/// 聚合交易数据结构
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AggTrade {
+    pub price: f64,            // 成交价格
+    pub quantity: f64,         // 成交数量
+    pub quote_qty: f64,        // 成交额 (USDT)
+    pub timestamp: i64,        // 时间戳
+    pub is_buyer_maker: bool,  // true=卖单成交(做空开仓), false=买单成交(做多开仓)
+}
+
 /// Binance K线 API 客户端
 pub struct BinanceKlineClient {
     base_url: String,
@@ -77,4 +87,107 @@ impl BinanceKlineClient {
         let data: PriceResponse = response.json().await?;
         Ok(data.price.parse()?)
     }
+
+    /// 获取聚合交易数据
+    /// start_time, end_time: 毫秒时间戳
+    /// limit: 最多 1000
+    pub async fn get_agg_trades(
+        &self,
+        symbol: &str,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<AggTrade>> {
+        let mut url = format!(
+            "{}/fapi/v1/aggTrades?symbol={}&limit={}",
+            self.base_url, symbol, limit.min(1000)
+        );
+
+        if let Some(start) = start_time {
+            url.push_str(&format!("&startTime={}", start));
+        }
+        if let Some(end) = end_time {
+            url.push_str(&format!("&endTime={}", end));
+        }
+
+        let response = self.client.get(&url).send().await?;
+
+        // 检查响应状态
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            anyhow::bail!("Binance API error: status={}, body={}", status, text);
+        }
+
+        // 先获取响应文本以便调试
+        let text = response.text().await?;
+
+        // 尝试解析为数组
+        let data: Vec<AggTradeResponse> = serde_json::from_str(&text)
+            .map_err(|e| anyhow::anyhow!("Failed to parse aggTrades response: {}, body: {}", e, &text[..text.len().min(200)]))?;
+
+        let trades = data
+            .into_iter()
+            .map(|t| AggTrade {
+                price: t.p.parse().unwrap_or(0.0),
+                quantity: t.q.parse().unwrap_or(0.0),
+                quote_qty: t.p.parse::<f64>().unwrap_or(0.0) * t.q.parse::<f64>().unwrap_or(0.0),
+                timestamp: t.T,
+                is_buyer_maker: t.m,
+            })
+            .collect();
+
+        Ok(trades)
+    }
+
+    /// 批量获取一段时间内的所有聚合交易
+    /// 由于单次请求最多 1000 条，需要分批获取
+    pub async fn get_agg_trades_range(
+        &self,
+        symbol: &str,
+        start_time: i64,
+        end_time: i64,
+    ) -> Result<Vec<AggTrade>> {
+        let mut all_trades = Vec::new();
+        let mut current_start = start_time;
+
+        loop {
+            let trades = self
+                .get_agg_trades(symbol, Some(current_start), Some(end_time), 1000)
+                .await?;
+
+            if trades.is_empty() {
+                break;
+            }
+
+            let last_time = trades.last().map(|t| t.timestamp).unwrap_or(end_time);
+            all_trades.extend(trades);
+
+            // 如果最后一条时间等于结束时间，或者返回的数据少于 1000 条，说明已获取完毕
+            if last_time >= end_time || all_trades.len() % 1000 != 0 {
+                break;
+            }
+
+            // 下一批从最后一条时间 +1 开始
+            current_start = last_time + 1;
+
+            // 避免请求过快
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+
+        Ok(all_trades)
+    }
+}
+
+/// Binance aggTrades API 响应结构
+#[derive(Deserialize)]
+struct AggTradeResponse {
+    #[serde(rename = "p")]
+    p: String,     // 价格
+    #[serde(rename = "q")]
+    q: String,     // 数量
+    #[serde(rename = "T")]
+    T: i64,        // 时间戳
+    #[serde(rename = "m")]
+    m: bool,       // 买方是否为做市商 (true=卖单成交, false=买单成交)
 }

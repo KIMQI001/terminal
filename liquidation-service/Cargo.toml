@@ -17,7 +17,11 @@ reqwest = { version = "0.11", features = ["json"] }
 
 # WebSocket
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+tokio-socks = "0.5"
 futures-util = "0.3"
+url = "2"
+native-tls = "0.2"
+tokio-native-tls = "0.3"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -36,6 +40,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Utils
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
+base64 = "0.21"
+rand = "0.8"
 
 [profile.release]
 lto = true
