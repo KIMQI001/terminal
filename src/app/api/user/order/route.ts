@@ -200,7 +200,7 @@ async function placeStopOrderWithRetry(
   };
 }
 
-// 下止盈止损单
+// 下止盈止损单（使用 Algo API）
 async function placeStopOrder(
   apiKey: string,
   apiSecret: string,
@@ -222,13 +222,14 @@ async function placeStopOrder(
   const timestamp = Date.now();
   const precision = getPrecision(params.symbol);
 
+  // 使用 Algo API 端点（Binance 2025-12-09 迁移后必须使用）
   const queryParams: Record<string, string | number> = {
     symbol: params.symbol,
     side: params.side,
     positionSide: params.positionSide,
     type: params.type,
     quantity: formatQuantity(params.quantity, precision.quantity),
-    stopPrice: formatPrice(params.stopPrice, precision.price),
+    triggerPrice: formatPrice(params.stopPrice, precision.price),  // Algo API 使用 triggerPrice
     timestamp,
   };
 
@@ -243,7 +244,8 @@ async function placeStopOrder(
 
   const signature = generateBinanceSignature(queryString, apiSecret);
 
-  const url = `${baseUrl}/fapi/v1/order`;
+  // 使用 Algo Order API 端点
+  const url = `${baseUrl}/fapi/v1/algoOrder`;
 
   const response = await fetch(url, {
     method: 'POST',
