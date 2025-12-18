@@ -454,12 +454,15 @@ impl AggTradesCollector {
         // 批量缓存，每 100 条或 1 秒写入一次
         let mut batch: Vec<AggTradeRecord> = Vec::with_capacity(100);
         let mut last_flush = tokio::time::Instant::now();
+        let mut last_stats_log = tokio::time::Instant::now();
+        let mut trades_since_last_log: u64 = 0;
 
         while let Some(msg) = read.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
                     if let Some(trade) = self.parse_message(&text) {
                         batch.push(trade);
+                        trades_since_last_log += 1;
 
                         // 批量写入条件
                         if batch.len() >= 100 || last_flush.elapsed().as_secs() >= 1 {
@@ -468,6 +471,23 @@ impl AggTradesCollector {
                             }
                             batch.clear();
                             last_flush = tokio::time::Instant::now();
+                        }
+
+                        // 每分钟打印统计日志
+                        if last_stats_log.elapsed().as_secs() >= 60 {
+                            let mut stats: Vec<String> = Vec::new();
+                            for symbol in &self.symbols {
+                                if let Ok(count) = self.storage.get_agg_trades_count(symbol) {
+                                    stats.push(format!("{}={}", symbol, count));
+                                }
+                            }
+                            tracing::info!(
+                                "aggTrades stats: {} (last 60s: +{})",
+                                stats.join(", "),
+                                trades_since_last_log
+                            );
+                            trades_since_last_log = 0;
+                            last_stats_log = tokio::time::Instant::now();
                         }
                     }
                 }
