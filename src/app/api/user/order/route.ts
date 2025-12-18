@@ -222,16 +222,14 @@ async function placeStopOrder(
   const timestamp = Date.now();
   const precision = getPrecision(params.symbol);
 
-  // Algo API 使用 algoType 而不是 type
-  // STOP_MARKET -> STOP_LOSS, TAKE_PROFIT_MARKET -> TAKE_PROFIT
-  const algoType = params.type === 'STOP_MARKET' ? 'STOP_LOSS' : 'TAKE_PROFIT';
-
   // 使用 Algo API 端点（Binance 2025-12-09 迁移后必须使用）
+  // algoType 固定为 CONDITIONAL，type 保持 STOP_MARKET/TAKE_PROFIT_MARKET
   const queryParams: Record<string, string | number> = {
+    algoType: 'CONDITIONAL',
     symbol: params.symbol,
     side: params.side,
     positionSide: params.positionSide,
-    algoType,
+    type: params.type,
     quantity: formatQuantity(params.quantity, precision.quantity),
     triggerPrice: formatPrice(params.stopPrice, precision.price),
     timestamp,
