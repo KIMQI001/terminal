@@ -1,0 +1,33 @@
+[server]
+host = "127.0.0.1"
+port = 3003
+
+[binance]
+base_url = "https://fapi.binance.com"
+ws_url = "wss://fstream.binance.com"
+
+[calculation]
+# K线周期用于计算
+kline_interval = "1h"
+# 回溯天数
+lookback_days = 7
+# 价格区间大小 (USDT)
+price_bucket_size = 100.0
+# 支持的交易对
+symbols = ["BTCUSDT", "ETHUSDT"]
+
+[leverage]
+# 是否使用动态分布（基于爆仓数据学习）
+use_dynamic = false
+
+# 默认杠杆分布 (杠杆倍数 = 占比)
+# 基于市场经验估算
+[leverage.default_distribution]
+lev_10 = 0.15
+lev_20 = 0.35
+lev_50 = 0.30
+lev_100 = 0.15
+lev_125 = 0.05
+
+[storage]
+db_path = "./data/liquidation.db"
