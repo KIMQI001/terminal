@@ -30,8 +30,12 @@ export function LiquidationPanel() {
   const [selectedInterval, setSelectedInterval] = useState<string>("1d");
   const [relayStatus, setRelayStatus] = useState<"connected" | "disconnected" | "unknown">("unknown");
 
-  const { symbol, setLiquidationData } = useChartStore();
+  const { symbol, setLiquidationData, dailyHL } = useChartStore();
   const { setPrefillData, setTradingLines, openModal } = useOrderStore();
+
+  // 计算 P/D 价格（日K前高前低的四分位）
+  const pPrice = dailyHL ? dailyHL.high - (dailyHL.high - dailyHL.low) / 4 : null;  // 溢价区开始
+  const dPrice = dailyHL ? dailyHL.low + (dailyHL.high - dailyHL.low) / 4 : null;   // 折扣区开始
 
   // 点击清算价格开单
   const handleLiqClick = (level: LiquidationLevel) => {
@@ -247,6 +251,16 @@ export function LiquidationPanel() {
   const maxLongVolume = longLevels.length > 0 ? Math.max(...longLevels.map(l => l.volume)) : 0;
   const maxShortVolume = shortLevels.length > 0 ? Math.max(...shortLevels.map(l => l.volume)) : 0;
 
+  // 找出 D 以下最大的多头清算价格（折扣区内）
+  const maxLongBelowD = dPrice
+    ? longLevels.filter(l => l.price < dPrice).reduce((max, l) => l.volume > (max?.volume || 0) ? l : max, null as LiquidationLevel | null)
+    : null;
+
+  // 找出 P 以上最大的空头清算价格（溢价区内）
+  const maxShortAboveP = pPrice
+    ? shortLevels.filter(l => l.price > pPrice).reduce((max, l) => l.volume > (max?.volume || 0) ? l : max, null as LiquidationLevel | null)
+    : null;
+
   // Status indicator color
   const statusColor = {
     connected: "bg-green-500",
@@ -334,18 +348,24 @@ export function LiquidationPanel() {
                   {longLevels.map((level, i) => {
                     const colors = getSideColor(level.side);
                     const isMax = level.volume === maxLongVolume;
+                    const isMaxBelowD = maxLongBelowD && level.price === maxLongBelowD.price;
                     return (
                       <div
                         key={i}
                         onClick={() => handleLiqClick(level)}
-                        className={`flex justify-between text-[9px] px-1.5 py-0.5 rounded border cursor-pointer hover:opacity-80 transition-opacity ${
+                        className={`flex justify-between text-[9px] px-1.5 py-0.5 rounded cursor-pointer hover:opacity-80 transition-opacity ${
                           isMax
-                            ? "bg-blue-500 text-white border-blue-600 font-bold"
-                            : `${colors.bg} ${colors.border}`
+                            ? "bg-blue-500 text-white border-2 border-blue-600 font-bold"
+                            : isMaxBelowD
+                            ? "bg-green-100 border-2 border-dashed border-green-500"
+                            : `${colors.bg} border ${colors.border}`
                         }`}
                       >
-                        <span className="font-mono">${level.price.toFixed(0)}</span>
-                        <span className={isMax ? "font-bold" : `${colors.text} font-semibold`}>
+                        <span className="font-mono">
+                          ${level.price.toFixed(0)}
+                          {isMaxBelowD && !isMax && <span className="ml-1 text-green-600">D</span>}
+                        </span>
+                        <span className={isMax ? "font-bold" : isMaxBelowD ? "text-green-600 font-semibold" : `${colors.text} font-semibold`}>
                           {formatVolume(level.volume)}
                         </span>
                       </div>
@@ -366,18 +386,24 @@ export function LiquidationPanel() {
                   {shortLevels.map((level, i) => {
                     const colors = getSideColor(level.side);
                     const isMax = level.volume === maxShortVolume;
+                    const isMaxAboveP = maxShortAboveP && level.price === maxShortAboveP.price;
                     return (
                       <div
                         key={i}
                         onClick={() => handleLiqClick(level)}
-                        className={`flex justify-between text-[9px] px-1.5 py-0.5 rounded border cursor-pointer hover:opacity-80 transition-opacity ${
+                        className={`flex justify-between text-[9px] px-1.5 py-0.5 rounded cursor-pointer hover:opacity-80 transition-opacity ${
                           isMax
-                            ? "bg-orange-500 text-white border-orange-600 font-bold"
-                            : `${colors.bg} ${colors.border}`
+                            ? "bg-orange-500 text-white border-2 border-orange-600 font-bold"
+                            : isMaxAboveP
+                            ? "bg-red-100 border-2 border-dashed border-red-500"
+                            : `${colors.bg} border ${colors.border}`
                         }`}
                       >
-                        <span className="font-mono">${level.price.toFixed(0)}</span>
-                        <span className={isMax ? "font-bold" : `${colors.text} font-semibold`}>
+                        <span className="font-mono">
+                          ${level.price.toFixed(0)}
+                          {isMaxAboveP && !isMax && <span className="ml-1 text-red-600">P</span>}
+                        </span>
+                        <span className={isMax ? "font-bold" : isMaxAboveP ? "text-red-600 font-semibold" : `${colors.text} font-semibold`}>
                           {formatVolume(level.volume)}
                         </span>
                       </div>
