@@ -135,9 +135,10 @@ export function OrderForm() {
   };
 
   const handleSubmit = async (side: OrderSide) => {
-    // 为手动下单生成 clientOrderIdPrefix，格式: manual_{timestamp}
-    // 这样止盈止损单可以通过 _sl, _tp 后缀与主单关联，实现订单分组
-    const clientOrderIdPrefix = `manual_${Date.now()}`;
+    // 为手动下单生成 clientOrderIdPrefix，格式: m_{timestamp}
+    // 使用短前缀 'm' 保证 clientAlgoId 不超过 36 字符限制
+    // 止盈止损单通过 _sl, _tp 后缀与主单关联，实现订单分组
+    const clientOrderIdPrefix = `m_${Date.now()}`;
 
     const orderData = {
       type: orderType,
