@@ -243,6 +243,10 @@ export function LiquidationPanel() {
   const longLevels = findPeaks(allLongLevels, 5);
   const shortLevels = findPeaks(allShortLevels, 5);
 
+  // 找出清算量最大的价格
+  const maxLongVolume = longLevels.length > 0 ? Math.max(...longLevels.map(l => l.volume)) : 0;
+  const maxShortVolume = shortLevels.length > 0 ? Math.max(...shortLevels.map(l => l.volume)) : 0;
+
   // Status indicator color
   const statusColor = {
     connected: "bg-green-500",
@@ -329,14 +333,19 @@ export function LiquidationPanel() {
                 <div className="space-y-0.5">
                   {longLevels.map((level, i) => {
                     const colors = getSideColor(level.side);
+                    const isMax = level.volume === maxLongVolume;
                     return (
                       <div
                         key={i}
                         onClick={() => handleLiqClick(level)}
-                        className={`flex justify-between text-[9px] ${colors.bg} px-1.5 py-0.5 rounded border ${colors.border} cursor-pointer hover:opacity-80 transition-opacity`}
+                        className={`flex justify-between text-[9px] px-1.5 py-0.5 rounded border cursor-pointer hover:opacity-80 transition-opacity ${
+                          isMax
+                            ? "bg-blue-500 text-white border-blue-600 font-bold"
+                            : `${colors.bg} ${colors.border}`
+                        }`}
                       >
                         <span className="font-mono">${level.price.toFixed(0)}</span>
-                        <span className={`${colors.text} font-semibold`}>
+                        <span className={isMax ? "font-bold" : `${colors.text} font-semibold`}>
                           {formatVolume(level.volume)}
                         </span>
                       </div>
@@ -356,14 +365,19 @@ export function LiquidationPanel() {
                 <div className="space-y-0.5">
                   {shortLevels.map((level, i) => {
                     const colors = getSideColor(level.side);
+                    const isMax = level.volume === maxShortVolume;
                     return (
                       <div
                         key={i}
                         onClick={() => handleLiqClick(level)}
-                        className={`flex justify-between text-[9px] ${colors.bg} px-1.5 py-0.5 rounded border ${colors.border} cursor-pointer hover:opacity-80 transition-opacity`}
+                        className={`flex justify-between text-[9px] px-1.5 py-0.5 rounded border cursor-pointer hover:opacity-80 transition-opacity ${
+                          isMax
+                            ? "bg-orange-500 text-white border-orange-600 font-bold"
+                            : `${colors.bg} ${colors.border}`
+                        }`}
                       >
                         <span className="font-mono">${level.price.toFixed(0)}</span>
-                        <span className={`${colors.text} font-semibold`}>
+                        <span className={isMax ? "font-bold" : `${colors.text} font-semibold`}>
                           {formatVolume(level.volume)}
                         </span>
                       </div>
