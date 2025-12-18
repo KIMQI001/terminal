@@ -39,13 +39,20 @@ export function LiquidationPanel() {
 
   // 点击清算价格开单
   const handleLiqClick = (level: LiquidationLevel) => {
-    const entry = level.price;
+    const liqPrice = level.price;
     const side = level.side === "short" ? "sell" : "buy";
 
-    // 空头清算 → 开空单（止损在上，止盈在下）
-    // 多头清算 → 开多单（止损在下，止盈在上）
-    const stopLoss = level.side === "short" ? entry + 1000 : entry - 1000;
-    const takeProfit = level.side === "short" ? entry - 3000 : entry + 3000;
+    // 空头清算 → 开空单：入场-0.2%，止损+0.1%，止盈-1.5%
+    // 多头清算 → 开多单：入场+0.2%，止损-0.1%，止盈+1.5%
+    const entry = level.side === "short"
+      ? liqPrice * 0.998   // 入场：清算价 - 0.2%
+      : liqPrice * 1.002;  // 入场：清算价 + 0.2%
+    const stopLoss = level.side === "short"
+      ? liqPrice * 1.001   // 止损：清算价 + 0.1%
+      : liqPrice * 0.999;  // 止损：清算价 - 0.1%
+    const takeProfit = level.side === "short"
+      ? liqPrice * 0.985   // 止盈：清算价 - 1.5%
+      : liqPrice * 1.015;  // 止盈：清算价 + 1.5%
 
     const lines: TradingLine[] = [
       { price: entry, type: "entry", side },
