@@ -20,7 +20,7 @@ let isRunning = false;
 
 // 止损止盈参数
 const MAX_SL_DISTANCE = 200;
-const MIN_TP_DISTANCE = 1500;
+const MIN_TP_RATIO = 0.025;  // 止盈最小 2.5%
 
 // 日K前高前低接口
 interface DailyHL {
@@ -605,11 +605,12 @@ function calculateOrders(
     const shortAboveP = cgData.shortTop.filter(s => s.price > dailyHL.pStart);
     if (shortAboveP.length > 0) {
       const maxShort = shortAboveP.reduce((max, s) => s.amount > max.amount ? s : max, shortAboveP[0]);
+      const entry = maxShort.price - 200;
       cgFirstShort = {
         liqPrice: maxShort.price,
-        entry: maxShort.price - 200,
+        entry,
         stopLoss: maxShort.price,
-        takeProfit: maxShort.price - 200 - MIN_TP_DISTANCE,
+        takeProfit: entry * (1 - MIN_TP_RATIO),  // 入场价 - 2.5%
       };
       console.log(`[TowerScheduler] CG 首空单: P=${dailyHL.pStart.toFixed(0)}, 清算价=${maxShort.price}, 入场=${cgFirstShort.entry.toFixed(0)}, 止损=${cgFirstShort.stopLoss.toFixed(0)}`);
     }
@@ -618,11 +619,12 @@ function calculateOrders(
     const longBelowD = cgData.longTop.filter(l => l.price < dailyHL.dStart);
     if (longBelowD.length > 0) {
       const maxLong = longBelowD.reduce((max, l) => l.amount > max.amount ? l : max, longBelowD[0]);
+      const entry = maxLong.price + 200;
       cgFirstLong = {
         liqPrice: maxLong.price,
-        entry: maxLong.price + 200,
+        entry,
         stopLoss: maxLong.price,
-        takeProfit: maxLong.price + 200 + MIN_TP_DISTANCE,
+        takeProfit: entry * (1 + MIN_TP_RATIO),  // 入场价 + 2.5%
       };
       console.log(`[TowerScheduler] CG 首多单: D=${dailyHL.dStart.toFixed(0)}, 清算价=${maxLong.price}, 入场=${cgFirstLong.entry.toFixed(0)}, 止损=${cgFirstLong.stopLoss.toFixed(0)}`);
     }
@@ -661,7 +663,8 @@ function calculateOrders(
       block.stopLoss = boundary;
     }
 
-    // 止盈 = 最近的对立塔块，最小 1500 点
+    // 止盈 = 最近的对立塔块，最小 2.5%
+    const minTpDistance = block.entry * MIN_TP_RATIO;
     let target: typeof block | undefined;
 
     if (block.type === 'bearish') {
@@ -674,17 +677,17 @@ function calculateOrders(
 
     if (target) {
       const tpDistance = Math.abs(target.entry - block.entry);
-      if (tpDistance >= MIN_TP_DISTANCE) {
+      if (tpDistance >= minTpDistance) {
         block.takeProfit = target.entry;
       } else {
         block.takeProfit = block.type === 'bearish'
-          ? block.entry - MIN_TP_DISTANCE
-          : block.entry + MIN_TP_DISTANCE;
+          ? block.entry * (1 - MIN_TP_RATIO)
+          : block.entry * (1 + MIN_TP_RATIO);
       }
     } else {
       block.takeProfit = block.type === 'bearish'
-        ? block.entry - MIN_TP_DISTANCE
-        : block.entry + MIN_TP_DISTANCE;
+        ? block.entry * (1 - MIN_TP_RATIO)
+        : block.entry * (1 + MIN_TP_RATIO);
     }
   }
 
@@ -1185,16 +1188,16 @@ function calculateSlTpForPosition(
   positionSide: 'LONG' | 'SHORT'
 ): { stopLoss: number; takeProfit: number } {
   if (positionSide === 'LONG') {
-    // 多单：止损在下方，止盈在上方
+    // 多单：止损在下方，止盈在上方 (2.5%)
     return {
       stopLoss: entryPrice - MAX_SL_DISTANCE,
-      takeProfit: entryPrice + MIN_TP_DISTANCE,
+      takeProfit: entryPrice * (1 + MIN_TP_RATIO),
     };
   } else {
-    // 空单：止损在上方，止盈在下方
+    // 空单：止损在上方，止盈在下方 (2.5%)
     return {
       stopLoss: entryPrice + MAX_SL_DISTANCE,
-      takeProfit: entryPrice - MIN_TP_DISTANCE,
+      takeProfit: entryPrice * (1 - MIN_TP_RATIO),
     };
   }
 }
