@@ -9,10 +9,9 @@ const { chromium } = require('playwright');
 const app = express();
 const PORT = 3004;
 
-// 内存存储最新数据
+// 内存存储最新数据（目前只支持 BTC）
 const dataStore = {
-    BTC: null,
-    ETH: null
+    BTC: null
 };
 
 // 抓取状态
@@ -103,7 +102,7 @@ async function fetchAll() {
     isFetching = true;
     console.log('\n[Fetch] 开始抓取 ' + new Date().toISOString());
 
-    for (const symbol of ['BTC', 'ETH']) {
+    for (const symbol of ['BTC']) {
         const data = await fetchSymbol(symbol);
         if (data) {
             dataStore[symbol] = data;
@@ -244,7 +243,7 @@ app.get('/chart', (req, res) => {
     </div>
     <div class="stats">
         多头: ${(data.longTotal / 1e9).toFixed(2)}B | 空头: ${(data.shortTotal / 1e9).toFixed(2)}B |
-        <a href="/chart?symbol=BTC">BTC</a> <a href="/chart?symbol=ETH">ETH</a>
+        <a href="/chart?symbol=BTC">BTC</a>
     </div>
 </body>
 </html>`;
