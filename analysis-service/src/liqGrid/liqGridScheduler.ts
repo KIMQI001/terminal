@@ -272,6 +272,39 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
       }
     }
 
+    // 9. 过滤后重新计算保证金（按过滤后的索引，从 baseMargin 开始）
+    {
+      const { baseMargin, marginPerLevel, leverage } = management;
+
+      // 计算起点保证金（与 calculateGridOrders 逻辑一致）
+      const longBaseMargin = longNotional > 0
+        ? Math.max(baseMargin, Math.round(longNotional / leverage / 5) + marginPerLevel)
+        : baseMargin;
+      const shortBaseMargin = shortNotional > 0
+        ? Math.max(baseMargin, Math.round(shortNotional / leverage / 5) + marginPerLevel)
+        : baseMargin;
+
+      // 多单：按价格从高到低排序后重算（离当前价近的保证金小）
+      const buyOrders = orders.filter(o => o.side === 'BUY');
+      buyOrders.sort((a, b) => b.entryPrice - a.entryPrice);
+      for (let i = 0; i < buyOrders.length; i++) {
+        const margin = longBaseMargin + marginPerLevel * i;
+        buyOrders[i].margin = margin;
+        buyOrders[i].quantity = (margin * leverage) / buyOrders[i].entryPrice;
+      }
+
+      // 空单：按价格从低到高排序后重算（离当前价近的保证金小）
+      const sellOrders = orders.filter(o => o.side === 'SELL');
+      sellOrders.sort((a, b) => a.entryPrice - b.entryPrice);
+      for (let i = 0; i < sellOrders.length; i++) {
+        const margin = shortBaseMargin + marginPerLevel * i;
+        sellOrders[i].margin = margin;
+        sellOrders[i].quantity = (margin * leverage) / sellOrders[i].entryPrice;
+      }
+
+      orders = [...buyOrders, ...sellOrders];
+    }
+
     if (orders.length === 0) {
       console.log('[LiqGridScheduler] 没有符合条件的订单（可能被持仓或P/D区域过滤）');
       addRecord({
