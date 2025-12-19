@@ -62,6 +62,13 @@ impl LeverageConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct StorageConfig {
     pub db_path: String,
+    /// 数据保留时长（小时），默认 30 小时
+    #[serde(default = "default_retention_hours")]
+    pub retention_hours: u32,
+}
+
+fn default_retention_hours() -> u32 {
+    30
 }
 
 impl Config {

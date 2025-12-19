@@ -191,3 +191,88 @@ struct AggTradeResponse {
     #[serde(rename = "m")]
     m: bool,       // 买方是否为做市商 (true=卖单成交, false=买单成交)
 }
+
+/// Open Interest 历史数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenInterestHist {
+    pub symbol: String,
+    pub sum_open_interest: f64,        // OI 数量 (BTC)
+    pub sum_open_interest_value: f64,  // OI 价值 (USDT)
+    pub timestamp: i64,
+}
+
+impl BinanceKlineClient {
+    /// 获取 Open Interest 历史数据
+    /// period: 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d
+    /// limit: 最多 500，默认 30 天数据
+    pub async fn get_open_interest_hist(
+        &self,
+        symbol: &str,
+        period: &str,
+        limit: Option<u32>,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+    ) -> Result<Vec<OpenInterestHist>> {
+        let mut url = format!(
+            "{}/futures/data/openInterestHist?symbol={}&period={}",
+            self.base_url, symbol, period
+        );
+
+        if let Some(l) = limit {
+            url.push_str(&format!("&limit={}", l.min(500)));
+        }
+        if let Some(start) = start_time {
+            url.push_str(&format!("&startTime={}", start));
+        }
+        if let Some(end) = end_time {
+            url.push_str(&format!("&endTime={}", end));
+        }
+
+        let response = self.client.get(&url).send().await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            anyhow::bail!("Binance OI API error: status={}, body={}", status, text);
+        }
+
+        #[derive(Deserialize)]
+        struct OIResponse {
+            symbol: String,
+            #[serde(rename = "sumOpenInterest")]
+            sum_open_interest: String,
+            #[serde(rename = "sumOpenInterestValue")]
+            sum_open_interest_value: String,
+            timestamp: i64,
+        }
+
+        let data: Vec<OIResponse> = response.json().await?;
+
+        let result = data
+            .into_iter()
+            .map(|r| OpenInterestHist {
+                symbol: r.symbol,
+                sum_open_interest: r.sum_open_interest.parse().unwrap_or(0.0),
+                sum_open_interest_value: r.sum_open_interest_value.parse().unwrap_or(0.0),
+                timestamp: r.timestamp,
+            })
+            .collect();
+
+        Ok(result)
+    }
+
+    /// 获取当前 Open Interest
+    pub async fn get_open_interest(&self, symbol: &str) -> Result<f64> {
+        let url = format!("{}/fapi/v1/openInterest?symbol={}", self.base_url, symbol);
+        let response = self.client.get(&url).send().await?;
+
+        #[derive(Deserialize)]
+        struct OIResponse {
+            #[serde(rename = "openInterest")]
+            open_interest: String,
+        }
+
+        let data: OIResponse = response.json().await?;
+        Ok(data.open_interest.parse()?)
+    }
+}

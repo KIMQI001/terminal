@@ -61,6 +61,41 @@ async fn main() -> anyhow::Result<()> {
         config.calculation.symbols.clone(),
     );
 
+    // 数据保留时长（小时）- 从配置读取
+    let retention_hours = config.storage.retention_hours;
+    tracing::info!("Data retention: {} hours", retention_hours);
+
+    // 启动时先清理一次旧数据
+    match storage.cleanup_old_agg_trades_hours(retention_hours) {
+        Ok(deleted) => {
+            if deleted > 0 {
+                tracing::info!("Startup cleanup: deleted {} old agg_trades (keeping {}h)", deleted, retention_hours);
+            }
+        }
+        Err(e) => tracing::error!("Startup cleanup failed: {}", e),
+    }
+
+    // 启动定时清理任务（每小时清理一次）
+    let cleanup_storage = storage.clone();
+    tokio::spawn(async move {
+        const CLEANUP_INTERVAL_SECS: u64 = 3600; // 1 小时
+
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(CLEANUP_INTERVAL_SECS)).await;
+
+            match cleanup_storage.cleanup_old_agg_trades_hours(retention_hours) {
+                Ok(deleted) => {
+                    if deleted > 0 {
+                        tracing::info!("Cleanup: deleted {} old agg_trades (keeping {}h)", deleted, retention_hours);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Cleanup failed: {}", e);
+                }
+            }
+        }
+    });
+
     // 创建路由
     let cors = CorsLayer::new()
         .allow_origin(Any)

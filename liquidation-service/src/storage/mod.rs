@@ -413,6 +413,19 @@ impl Storage {
 
         Ok(deleted as u32)
     }
+
+    /// 清理旧的聚合交易（保留最近 N 小时）
+    pub fn cleanup_old_agg_trades_hours(&self, hours: u32) -> Result<u32> {
+        let conn = self.conn.lock().unwrap();
+        let cutoff = chrono::Utc::now().timestamp_millis() - (hours as i64 * 60 * 60 * 1000);
+
+        let deleted = conn.execute(
+            "DELETE FROM agg_trades WHERE timestamp < ?1",
+            params![cutoff],
+        )?;
+
+        Ok(deleted as u32)
+    }
 }
 
 #[cfg(test)]
