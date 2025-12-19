@@ -777,6 +777,20 @@ function calculateOrders(
     console.log(`[TowerScheduler] 未获取到日K数据，跳过区域过滤`);
   }
 
+  // CG 首单位置过滤：ICT 塔块必须在首单的外侧
+  // 多单：ICT 塔块必须在首多单以下
+  // 空单：ICT 塔块必须在首空单以上
+  if (cgFirstLong) {
+    const before = bullishCandidates.length;
+    bullishCandidates = bullishCandidates.filter(b => b.entry < cgFirstLong.entry);
+    console.log(`[TowerScheduler] CG 多单过滤: ${before} -> ${bullishCandidates.length} (需 < 首多单 ${cgFirstLong.entry.toFixed(0)})`);
+  }
+  if (cgFirstShort) {
+    const before = bearishCandidates.length;
+    bearishCandidates = bearishCandidates.filter(b => b.entry > cgFirstShort.entry);
+    console.log(`[TowerScheduler] CG 空单过滤: ${before} -> ${bearishCandidates.length} (需 > 首空单 ${cgFirstShort.entry.toFixed(0)})`);
+  }
+
   // 如果有 CG 首单，ICT 塔块只需要 towerLayers - 1 个
   const bullishLayersNeeded = cgFirstLong ? towerLayers - 1 : towerLayers;
   const bearishLayersNeeded = cgFirstShort ? towerLayers - 1 : towerLayers;
