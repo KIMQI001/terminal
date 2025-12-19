@@ -35,6 +35,17 @@ const AUTO_INTERVALS = [
 // 数据新鲜度阈值（毫秒）- 5分钟
 const DATA_FRESHNESS_THRESHOLD = 5 * 60 * 1000;
 
+// Coinglass 清算数据接口
+interface CGLiqData {
+  symbol: string;
+  lastPrice: number;
+  timestamp: string;
+  longTop: Array<{ price: number; amount: number }>;
+  shortTop: Array<{ price: number; amount: number }>;
+  longTotal: number;
+  shortTotal: number;
+}
+
 // 后端托管状态接口
 interface TowerManagementConfig {
   id: number;
@@ -155,7 +166,7 @@ function parseIctInfo(clientOrderId: string): { timeframe: string; source: strin
 }
 
 export default function TowerPage() {
-  const { symbol } = useChartStore();
+  const { symbol, dailyHL } = useChartStore();
   const { placeOrder, cancelAllOrders } = useOrderStore();
   const { currentLeverage, fetchLeverage } = usePositionStore();
   const { user } = useUserStore();
@@ -227,6 +238,22 @@ export default function TowerPage() {
     },
     refetchInterval: 30000, // 每30秒刷新
   });
+
+  // 从 Coinglass 获取清算数据（用于首单入场）
+  const baseCoin = symbol.replace(/USDC?|USDT?|BUSD?/i, "").replace("/", "");
+  const { data: cgData } = useQuery<{ success: boolean; data: CGLiqData }>({
+    queryKey: ["cg-liqmap", baseCoin],
+    queryFn: async () => {
+      const response = await fetch(`/api/coinglass/liqmap?symbol=${baseCoin}&limit=10`);
+      return response.json();
+    },
+    enabled: baseCoin === "BTC", // 目前只支持 BTC
+    refetchInterval: 3 * 60 * 1000, // 每3分钟刷新
+  });
+
+  // 计算 P/D 价格（日K前高前低的四分位）
+  const pPrice = dailyHL ? dailyHL.high - (dailyHL.high - dailyHL.low) / 4 : null;  // 溢价区开始
+  const dPrice = dailyHL ? dailyHL.low + (dailyHL.high - dailyHL.low) / 4 : null;   // 折扣区开始
 
   // 后端托管状态
   const isAutoManaged = managementData?.management?.isActive ?? false;
@@ -452,119 +479,197 @@ export default function TowerPage() {
     if (!data?.blocks || !data.currentPrice) return;
 
     const currentPrice = data.currentPrice;
-    const rawBlocks = data.blocks;
+    // 最小间距（万分之 N）
+    const minSpacing = currentPrice * (minSpacingRatio / 10000);
 
-    // 转换为带止损止盈的塔块（与 TowerList 逻辑一致）
-    const allRawBlocks = rawBlocks.map((b) => ({
-      ...b,
-      stopLoss: 0,
-      takeProfit: 0,
-    }));
+    // 使用 CG 数据生成塔单（如果有 P/D 和 CG 数据）
+    const cgLiqData = cgData?.success ? cgData.data : null;
+    const useCGData = cgLiqData && pPrice && dPrice;
 
-    // 分离多空
-    const allBearish = allRawBlocks
-      .filter((b) => b.type === "bearish")
-      .sort((a, b) => b.entry - a.entry);
-    const allBullish = allRawBlocks
-      .filter((b) => b.type === "bullish")
-      .sort((a, b) => b.entry - a.entry);
+    interface TowerOrder {
+      type: "bullish" | "bearish";
+      entry: number;
+      stopLoss: number;
+      takeProfit: number;
+      source: string;
+      timeframe: string;
+    }
 
-    // 计算止损止盈
-    for (const block of [...allBearish, ...allBullish]) {
-      // 止损 = 边界，最大 200 点
-      const boundary = block.type === "bearish" ? block.high : block.low;
-      const slDistance = Math.abs(block.entry - boundary);
+    let bullishBlocks: TowerOrder[] = [];
+    let bearishBlocks: TowerOrder[] = [];
 
-      if (slDistance > MAX_SL_DISTANCE) {
-        block.stopLoss =
-          block.type === "bearish"
-            ? block.entry + MAX_SL_DISTANCE
-            : block.entry - MAX_SL_DISTANCE;
-      } else {
-        block.stopLoss = boundary;
+    if (useCGData) {
+      // === 使用 CG 清算数据生成塔单 ===
+      console.log(`[守塔] 使用 CG 数据, P=${pPrice?.toFixed(0)}, D=${dPrice?.toFixed(0)}`);
+
+      // 空单：找 P 以上最大清算值
+      const shortAboveP = cgLiqData.shortTop.filter((s) => s.price > pPrice!);
+      if (shortAboveP.length > 0) {
+        // shortTop 已按 amount 从大到小排序，第一个就是最大的
+        const maxShort = shortAboveP[0];
+        const firstEntry = maxShort.price - 200;
+        const firstSL = maxShort.price;
+        const firstTP = firstEntry - MIN_TP_DISTANCE;
+
+        // 首单
+        bearishBlocks.push({
+          type: "bearish",
+          entry: firstEntry,
+          stopLoss: firstSL,
+          takeProfit: firstTP,
+          source: "CG",
+          timeframe: "liq",
+        });
+
+        // 后续塔单：往上补（按间距递增）
+        for (let i = 1; i < towerLayers; i++) {
+          const nextEntry = firstEntry + i * minSpacing;
+          const nextSL = nextEntry + 200;
+          const nextTP = nextEntry - MIN_TP_DISTANCE;
+          bearishBlocks.push({
+            type: "bearish",
+            entry: nextEntry,
+            stopLoss: nextSL,
+            takeProfit: nextTP,
+            source: "CG",
+            timeframe: `L${i + 1}`,
+          });
+        }
       }
 
-      // 止盈 = 最近的对立塔块，最小 1500 点
-      let target: typeof block | undefined;
+      // 多单：找 D 以下最大清算值
+      const longBelowD = cgLiqData.longTop.filter((l) => l.price < dPrice!);
+      if (longBelowD.length > 0) {
+        // longTop 已按 amount 从大到小排序，第一个就是最大的
+        const maxLong = longBelowD[0];
+        const firstEntry = maxLong.price + 200;
+        const firstSL = maxLong.price;
+        const firstTP = firstEntry + MIN_TP_DISTANCE;
 
-      if (block.type === "bearish") {
-        const candidates = allBullish.filter((b) => b.entry < block.entry);
-        target = candidates[0];
-      } else {
-        const candidates = allBearish.filter((b) => b.entry > block.entry);
-        target = candidates[candidates.length - 1];
+        // 首单
+        bullishBlocks.push({
+          type: "bullish",
+          entry: firstEntry,
+          stopLoss: firstSL,
+          takeProfit: firstTP,
+          source: "CG",
+          timeframe: "liq",
+        });
+
+        // 后续塔单：往下补（按间距递减）
+        for (let i = 1; i < towerLayers; i++) {
+          const nextEntry = firstEntry - i * minSpacing;
+          const nextSL = nextEntry - 200;
+          const nextTP = nextEntry + MIN_TP_DISTANCE;
+          bullishBlocks.push({
+            type: "bullish",
+            entry: nextEntry,
+            stopLoss: nextSL,
+            takeProfit: nextTP,
+            source: "CG",
+            timeframe: `L${i + 1}`,
+          });
+        }
       }
+    } else {
+      // === 回退到 ICT 塔块逻辑 ===
+      const rawBlocks = data.blocks;
+      const allRawBlocks = rawBlocks.map((b) => ({
+        ...b,
+        stopLoss: 0,
+        takeProfit: 0,
+      }));
 
-      if (target) {
-        const tpDistance = Math.abs(target.entry - block.entry);
-        if (tpDistance >= MIN_TP_DISTANCE) {
-          block.takeProfit = target.entry;
+      const allBearish = allRawBlocks
+        .filter((b) => b.type === "bearish")
+        .sort((a, b) => b.entry - a.entry);
+      const allBullish = allRawBlocks
+        .filter((b) => b.type === "bullish")
+        .sort((a, b) => b.entry - a.entry);
+
+      // 计算止损止盈
+      for (const block of [...allBearish, ...allBullish]) {
+        const boundary = block.type === "bearish" ? block.high : block.low;
+        const slDistance = Math.abs(block.entry - boundary);
+
+        if (slDistance > MAX_SL_DISTANCE) {
+          block.stopLoss =
+            block.type === "bearish"
+              ? block.entry + MAX_SL_DISTANCE
+              : block.entry - MAX_SL_DISTANCE;
+        } else {
+          block.stopLoss = boundary;
+        }
+
+        let target: typeof block | undefined;
+        if (block.type === "bearish") {
+          const candidates = allBullish.filter((b) => b.entry < block.entry);
+          target = candidates[0];
+        } else {
+          const candidates = allBearish.filter((b) => b.entry > block.entry);
+          target = candidates[candidates.length - 1];
+        }
+
+        if (target) {
+          const tpDistance = Math.abs(target.entry - block.entry);
+          if (tpDistance >= MIN_TP_DISTANCE) {
+            block.takeProfit = target.entry;
+          } else {
+            block.takeProfit =
+              block.type === "bearish"
+                ? block.entry - MIN_TP_DISTANCE
+                : block.entry + MIN_TP_DISTANCE;
+          }
         } else {
           block.takeProfit =
             block.type === "bearish"
               ? block.entry - MIN_TP_DISTANCE
               : block.entry + MIN_TP_DISTANCE;
         }
-      } else {
-        block.takeProfit =
-          block.type === "bearish"
-            ? block.entry - MIN_TP_DISTANCE
-            : block.entry + MIN_TP_DISTANCE;
       }
-    }
 
-    // 最小距离（千分之三）
-    const minDistance = currentPrice * MIN_DISTANCE_RATIO;
-    // 最小间距（万分之 N）
-    const minSpacing = currentPrice * (minSpacingRatio / 10000);
+      const minDistance = currentPrice * MIN_DISTANCE_RATIO;
 
-    // 筛选函数：保证相邻塔块间距 >= minSpacing
-    const filterWithSpacing = (
-      blocks: typeof allBullish,
-      startLayer: number,
-      count: number
-    ) => {
-      const result: typeof blocks = [];
-      let skipped = 0;
-      let lastEntry: number | null = null;
+      const filterWithSpacing = (
+        blocks: typeof allBullish,
+        startLayer: number,
+        count: number
+      ) => {
+        const result: typeof blocks = [];
+        let skipped = 0;
+        let lastEntry: number | null = null;
 
-      for (const block of blocks) {
-        // 检查与上一个选中塔块的间距
-        if (lastEntry !== null) {
-          const spacing = Math.abs(block.entry - lastEntry);
-          if (spacing < minSpacing) {
-            continue; // 间距不足，跳过
+        for (const block of blocks) {
+          if (lastEntry !== null) {
+            const spacing = Math.abs(block.entry - lastEntry);
+            if (spacing < minSpacing) continue;
           }
+
+          if (skipped < startLayer - 1) {
+            skipped++;
+            continue;
+          }
+
+          result.push(block);
+          lastEntry = block.entry;
+
+          if (result.length >= count) break;
         }
 
-        // 处理起始层跳过
-        if (skipped < startLayer - 1) {
-          skipped++;
-          continue;
-        }
+        return result;
+      };
 
-        result.push(block);
-        lastEntry = block.entry;
+      const bullishCandidates = allBullish
+        .filter((b) => b.entry < currentPrice && currentPrice - b.entry >= minDistance)
+        .sort((a, b) => b.entry - a.entry);
 
-        if (result.length >= count) break;
-      }
+      const bearishCandidates = allBearish
+        .filter((b) => b.entry > currentPrice && b.entry - currentPrice >= minDistance)
+        .sort((a, b) => a.entry - b.entry);
 
-      return result;
-    };
-
-    // 筛选当前价格上下各 N 层的塔块（至少距离当前价格千分之三）
-    // 起始层：跳过前 N-1 层，从第 N 层开始
-    // 间距过滤：相邻塔块间距 >= minSpacing
-    const bullishCandidates = allBullish
-      .filter((b) => b.entry < currentPrice && currentPrice - b.entry >= minDistance)
-      .sort((a, b) => b.entry - a.entry); // 从高到低（离当前价格近的在前）
-
-    const bearishCandidates = allBearish
-      .filter((b) => b.entry > currentPrice && b.entry - currentPrice >= minDistance)
-      .sort((a, b) => a.entry - b.entry); // 从低到高（离当前价格近的在前）
-
-    const bullishBlocks = filterWithSpacing(bullishCandidates, bullishStartLayer, towerLayers);
-    const bearishBlocks = filterWithSpacing(bearishCandidates, bearishStartLayer, towerLayers);
+      bullishBlocks = filterWithSpacing(bullishCandidates, bullishStartLayer, towerLayers);
+      bearishBlocks = filterWithSpacing(bearishCandidates, bearishStartLayer, towerLayers);
+    }
 
     const selectedBlocks = [...bullishBlocks, ...bearishBlocks];
 
@@ -691,7 +796,7 @@ export default function TowerPage() {
     }
 
     setOrderProgress(null);
-  }, [data, towerLayers, bullishStartLayer, bearishStartLayer, minSpacingRatio, baseMargin, marginIncrement, calculateQuantity, placeOrder, symbol]);
+  }, [data, towerLayers, bullishStartLayer, bearishStartLayer, minSpacingRatio, baseMargin, marginIncrement, calculateQuantity, placeOrder, symbol, cgData, pPrice, dPrice]);
 
   // 更新守塔：取消所有订单后重新下单
   const handleRefreshTower = useCallback(async () => {
