@@ -21,6 +21,7 @@ import { ICTOverlay } from "./ICTOverlay";
 import { OTEPanel } from "./OTEPanel";
 import { FVGPanel } from "./FVGPanel";
 import { LiquidationPanel } from "./LiquidationPanel";
+import { LiquidationCGPanel } from "./LiquidationCGPanel";
 import { LiquidityGridPanel } from "./LiquidityGridPanel";
 import { OBPanel } from "./OBPanel";
 import { OrderCancelOverlay } from "./OrderCancelOverlay";
@@ -994,6 +995,7 @@ export function TradingChart() {
         <FVGPanel />
         <OBPanel />
         <LiquidationPanel />
+        <LiquidationCGPanel />
         {user?.role === 'admin' && <LiquidityGridPanel />}
       </div>
       <MeasurementTool />

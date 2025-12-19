@@ -1,0 +1,14 @@
+{
+  "name": "coinglass-service",
+  "version": "1.0.0",
+  "description": "Coinglass 清算地图数据服务",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "playwright": "^1.40.0"
+  }
+}
