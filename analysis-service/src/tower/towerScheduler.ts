@@ -597,8 +597,8 @@ function calculateOrders(
 
   // ===== CG 首单数据 =====
   // 如果有 CG 数据和日K的 P/D 区域，用于计算首单
-  let cgFirstShort: { entry: number; stopLoss: number; takeProfit: number } | null = null;
-  let cgFirstLong: { entry: number; stopLoss: number; takeProfit: number } | null = null;
+  let cgFirstShort: { entry: number; stopLoss: number; takeProfit: number; liqPrice: number } | null = null;
+  let cgFirstLong: { entry: number; stopLoss: number; takeProfit: number; liqPrice: number } | null = null;
 
   if (cgData && dailyHL) {
     // 空单首单：找 P 以上最大清算值
@@ -606,6 +606,7 @@ function calculateOrders(
     if (shortAboveP.length > 0) {
       const maxShort = shortAboveP.reduce((max, s) => s.amount > max.amount ? s : max, shortAboveP[0]);
       cgFirstShort = {
+        liqPrice: maxShort.price,
         entry: maxShort.price - 200,
         stopLoss: maxShort.price,
         takeProfit: maxShort.price - 200 - MIN_TP_DISTANCE,
@@ -618,6 +619,7 @@ function calculateOrders(
     if (longBelowD.length > 0) {
       const maxLong = longBelowD.reduce((max, l) => l.amount > max.amount ? l : max, longBelowD[0]);
       cgFirstLong = {
+        liqPrice: maxLong.price,
         entry: maxLong.price + 200,
         stopLoss: maxLong.price,
         takeProfit: maxLong.price + 200 + MIN_TP_DISTANCE,
@@ -777,18 +779,18 @@ function calculateOrders(
     console.log(`[TowerScheduler] 未获取到日K数据，跳过区域过滤`);
   }
 
-  // CG 首单位置过滤：ICT 塔块必须在首单的外侧
-  // 多单：ICT 塔块必须在首多单以下
-  // 空单：ICT 塔块必须在首空单以上
+  // CG 清算价位置过滤：ICT 塔块必须在清算价的外侧
+  // 多单：ICT 塔块必须在最大多头清算价以下
+  // 空单：ICT 塔块必须在最大空头清算价以上
   if (cgFirstLong) {
     const before = bullishCandidates.length;
-    bullishCandidates = bullishCandidates.filter(b => b.entry < cgFirstLong.entry);
-    console.log(`[TowerScheduler] CG 多单过滤: ${before} -> ${bullishCandidates.length} (需 < 首多单 ${cgFirstLong.entry.toFixed(0)})`);
+    bullishCandidates = bullishCandidates.filter(b => b.entry < cgFirstLong.liqPrice);
+    console.log(`[TowerScheduler] CG 多单过滤: ${before} -> ${bullishCandidates.length} (需 < 清算价 ${cgFirstLong.liqPrice.toFixed(0)})`);
   }
   if (cgFirstShort) {
     const before = bearishCandidates.length;
-    bearishCandidates = bearishCandidates.filter(b => b.entry > cgFirstShort.entry);
-    console.log(`[TowerScheduler] CG 空单过滤: ${before} -> ${bearishCandidates.length} (需 > 首空单 ${cgFirstShort.entry.toFixed(0)})`);
+    bearishCandidates = bearishCandidates.filter(b => b.entry > cgFirstShort.liqPrice);
+    console.log(`[TowerScheduler] CG 空单过滤: ${before} -> ${bearishCandidates.length} (需 > 清算价 ${cgFirstShort.liqPrice.toFixed(0)})`);
   }
 
   // 如果有 CG 首单，ICT 塔块只需要 towerLayers - 1 个
