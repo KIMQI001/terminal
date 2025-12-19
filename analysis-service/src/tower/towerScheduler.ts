@@ -595,98 +595,36 @@ function calculateOrders(
 
   console.log(`[TowerScheduler] 计算订单: 基础保证金=${baseMargin}, 递增=${marginIncrement}, 杠杆=${leverage}x`);
 
-  // ===== CG 清算数据模式 =====
-  // 如果有 CG 数据和日K的 P/D 区域，使用清算数据计算首单
+  // ===== CG 首单数据 =====
+  // 如果有 CG 数据和日K的 P/D 区域，用于计算首单
+  let cgFirstShort: { entry: number; stopLoss: number; takeProfit: number } | null = null;
+  let cgFirstLong: { entry: number; stopLoss: number; takeProfit: number } | null = null;
+
   if (cgData && dailyHL) {
-    console.log('[TowerScheduler] 使用 CG 清算数据计算订单');
-
-    const orders: TowerOrder[] = [];
-
-    // 塔单间距（使用现有的 minSpacingRatio，万分之 N）
-    const spacing = currentPrice * (minSpacingRatio / 10000);
-    console.log(`[TowerScheduler] 塔单间距: ${spacing.toFixed(0)} 点`);
-
-    // ===== 空单：找 P 以上最大清算值 =====
+    // 空单首单：找 P 以上最大清算值
     const shortAboveP = cgData.shortTop.filter(s => s.price > dailyHL.pStart);
     if (shortAboveP.length > 0) {
-      // 找最大清算值
       const maxShort = shortAboveP.reduce((max, s) => s.amount > max.amount ? s : max, shortAboveP[0]);
-      console.log(`[TowerScheduler] 空单 CG: P=${dailyHL.pStart.toFixed(0)}, 最大清算价=${maxShort.price}, 金额=${(maxShort.amount / 1e6).toFixed(0)}M`);
-
-      // 首单入场 = 清算价 - 200
-      const firstEntry = maxShort.price - 200;
-      const firstTP = firstEntry - MIN_TP_DISTANCE;  // 止盈 = 入场 - 1500
-
-      // 生成塔单（首单 + 后续塔单）
-      for (let i = 0; i < towerLayers; i++) {
-        const entry = firstEntry + i * spacing;  // 空单往上补
-        const margin = baseMargin + i * marginIncrement;
-        const positionValue = margin * leverage;
-        const quantity = Math.floor((positionValue / entry) * 1000) / 1000;
-
-        // 首单止损 = 清算价，后续单止损 = 入场 + 200
-        const stopLoss = i === 0 ? maxShort.price : entry + MAX_SL_DISTANCE;
-
-        orders.push({
-          side: 'SELL',
-          positionSide: 'SHORT',
-          price: entry,
-          quantity,
-          stopLoss,
-          takeProfit: i === 0 ? firstTP : entry - MIN_TP_DISTANCE,
-          margin,
-          timeframe: 'CG',
-          source: 'LIQ',
-        });
-      }
-      console.log(`[TowerScheduler] 空单塔块: ${orders.filter(o => o.side === 'SELL').map(o => o.price.toFixed(0)).join(' | ')}`);
-    } else {
-      console.log(`[TowerScheduler] 空单 CG: P=${dailyHL.pStart.toFixed(0)} 以上无清算数据`);
+      cgFirstShort = {
+        entry: maxShort.price - 200,
+        stopLoss: maxShort.price,
+        takeProfit: maxShort.price - 200 - MIN_TP_DISTANCE,
+      };
+      console.log(`[TowerScheduler] CG 首空单: P=${dailyHL.pStart.toFixed(0)}, 清算价=${maxShort.price}, 入场=${cgFirstShort.entry.toFixed(0)}, 止损=${cgFirstShort.stopLoss.toFixed(0)}`);
     }
 
-    // ===== 多单：找 D 以下最大清算值 =====
+    // 多单首单：找 D 以下最大清算值
     const longBelowD = cgData.longTop.filter(l => l.price < dailyHL.dStart);
     if (longBelowD.length > 0) {
-      // 找最大清算值
       const maxLong = longBelowD.reduce((max, l) => l.amount > max.amount ? l : max, longBelowD[0]);
-      console.log(`[TowerScheduler] 多单 CG: D=${dailyHL.dStart.toFixed(0)}, 最大清算价=${maxLong.price}, 金额=${(maxLong.amount / 1e6).toFixed(0)}M`);
-
-      // 首单入场 = 清算价 + 200
-      const firstEntry = maxLong.price + 200;
-      const firstTP = firstEntry + MIN_TP_DISTANCE;  // 止盈 = 入场 + 1500
-
-      // 生成塔单（首单 + 后续塔单）
-      for (let i = 0; i < towerLayers; i++) {
-        const entry = firstEntry - i * spacing;  // 多单往下补
-        const margin = baseMargin + i * marginIncrement;
-        const positionValue = margin * leverage;
-        const quantity = Math.floor((positionValue / entry) * 1000) / 1000;
-
-        // 首单止损 = 清算价，后续单止损 = 入场 - 200
-        const stopLoss = i === 0 ? maxLong.price : entry - MAX_SL_DISTANCE;
-
-        orders.push({
-          side: 'BUY',
-          positionSide: 'LONG',
-          price: entry,
-          quantity,
-          stopLoss,
-          takeProfit: i === 0 ? firstTP : entry + MIN_TP_DISTANCE,
-          margin,
-          timeframe: 'CG',
-          source: 'LIQ',
-        });
-      }
-      console.log(`[TowerScheduler] 多单塔块: ${orders.filter(o => o.side === 'BUY').map(o => o.price.toFixed(0)).join(' | ')}`);
-    } else {
-      console.log(`[TowerScheduler] 多单 CG: D=${dailyHL.dStart.toFixed(0)} 以下无清算数据`);
+      cgFirstLong = {
+        entry: maxLong.price + 200,
+        stopLoss: maxLong.price,
+        takeProfit: maxLong.price + 200 + MIN_TP_DISTANCE,
+      };
+      console.log(`[TowerScheduler] CG 首多单: D=${dailyHL.dStart.toFixed(0)}, 清算价=${maxLong.price}, 入场=${cgFirstLong.entry.toFixed(0)}, 止损=${cgFirstLong.stopLoss.toFixed(0)}`);
     }
-
-    return orders;
   }
-
-  // ===== ICT 塔块模式（无 CG 数据时的备用逻辑）=====
-  console.log('[TowerScheduler] 使用 ICT 塔块数据计算订单');
 
   // 分离多空并添加止损止盈
   const allBearish = blocks
@@ -839,8 +777,12 @@ function calculateOrders(
     console.log(`[TowerScheduler] 未获取到日K数据，跳过区域过滤`);
   }
 
-  const selectedBullish = filterWithSpacing(bullishCandidates, bullishStartLayer, towerLayers);
-  const selectedBearish = filterWithSpacing(bearishCandidates, bearishStartLayer, towerLayers);
+  // 如果有 CG 首单，ICT 塔块只需要 towerLayers - 1 个
+  const bullishLayersNeeded = cgFirstLong ? towerLayers - 1 : towerLayers;
+  const bearishLayersNeeded = cgFirstShort ? towerLayers - 1 : towerLayers;
+
+  const selectedBullish = filterWithSpacing(bullishCandidates, bullishStartLayer, bullishLayersNeeded);
+  const selectedBearish = filterWithSpacing(bearishCandidates, bearishStartLayer, bearishLayersNeeded);
 
   // 日志：显示选中的塔块
   if (selectedBullish.length > 0) {
@@ -859,9 +801,33 @@ function calculateOrders(
   // 转换为订单
   const orders: TowerOrder[] = [];
 
+  // ===== 多单：首单用 CG，后续用 ICT =====
+  let bullishIndex = 0;
+
+  // 1. CG 首多单
+  if (cgFirstLong) {
+    const margin = baseMargin + bullishIndex * marginIncrement;
+    const positionValue = margin * leverage;
+    const quantity = Math.floor((positionValue / cgFirstLong.entry) * 1000) / 1000;
+
+    orders.push({
+      side: 'BUY',
+      positionSide: 'LONG',
+      price: cgFirstLong.entry,
+      quantity,
+      stopLoss: cgFirstLong.stopLoss,
+      takeProfit: cgFirstLong.takeProfit,
+      margin,
+      timeframe: 'CG',
+      source: 'LIQ',
+    });
+    bullishIndex++;
+  }
+
+  // 2. ICT 塔块多单
   for (let i = 0; i < orderedBullish.length; i++) {
     const block = orderedBullish[i];
-    const margin = baseMargin + i * marginIncrement;
+    const margin = baseMargin + bullishIndex * marginIncrement;
     const positionValue = margin * leverage;
     const quantity = Math.floor((positionValue / block.entry) * 1000) / 1000;
 
@@ -876,11 +842,36 @@ function calculateOrders(
       timeframe: block.timeframe,
       source: block.source,
     });
+    bullishIndex++;
   }
 
+  // ===== 空单：首单用 CG，后续用 ICT =====
+  let bearishIndex = 0;
+
+  // 1. CG 首空单
+  if (cgFirstShort) {
+    const margin = baseMargin + bearishIndex * marginIncrement;
+    const positionValue = margin * leverage;
+    const quantity = Math.floor((positionValue / cgFirstShort.entry) * 1000) / 1000;
+
+    orders.push({
+      side: 'SELL',
+      positionSide: 'SHORT',
+      price: cgFirstShort.entry,
+      quantity,
+      stopLoss: cgFirstShort.stopLoss,
+      takeProfit: cgFirstShort.takeProfit,
+      margin,
+      timeframe: 'CG',
+      source: 'LIQ',
+    });
+    bearishIndex++;
+  }
+
+  // 2. ICT 塔块空单
   for (let i = 0; i < orderedBearish.length; i++) {
     const block = orderedBearish[i];
-    const margin = baseMargin + i * marginIncrement;
+    const margin = baseMargin + bearishIndex * marginIncrement;
     const positionValue = margin * leverage;
     const quantity = Math.floor((positionValue / block.entry) * 1000) / 1000;
 
@@ -895,6 +886,7 @@ function calculateOrders(
       timeframe: block.timeframe,
       source: block.source,
     });
+    bearishIndex++;
   }
 
   return orders;
