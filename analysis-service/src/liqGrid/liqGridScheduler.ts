@@ -19,6 +19,14 @@ import crypto from 'crypto';
 let schedulerInterval: NodeJS.Timeout | null = null;
 let isRunning = false;
 
+// 日K高低点数据
+interface DailyHL {
+  high: number;
+  low: number;
+  pStart: number;  // P区开始 (溢价区)
+  dStart: number;  // D区开始 (折扣区)
+}
+
 // 交易对精度配置
 const SYMBOL_PRECISION: Record<string, { quantity: number; price: number }> = {
   'BTCUSDT': { quantity: 3, price: 1 },
@@ -193,6 +201,12 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
       return;
     }
 
+    // 2.5 获取日K P/D 区域数据
+    const dailyHL = await getDailyHL(management.symbol, liqData.currentPrice);
+    if (dailyHL) {
+      console.log(`[LiqGridScheduler] P/D区域: H=${dailyHL.high.toFixed(0)} P=${dailyHL.pStart.toFixed(0)} D=${dailyHL.dStart.toFixed(0)} L=${dailyHL.low.toFixed(0)}`);
+    }
+
     // 3. 取消现有 liq_grid 订单
     const cancelResult = await cancelLiqGridOrders(apiConfig, management.symbol);
     if (!cancelResult.success) {
@@ -240,8 +254,26 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
       }
     }
 
+    // 8. P/D 区域过滤：多单必须在 D 以下，空单必须在 P 以上
+    if (dailyHL) {
+      const buyBeforePD = orders.filter(o => o.side === 'BUY').length;
+      const sellBeforePD = orders.filter(o => o.side === 'SELL').length;
+
+      // 多单入场价必须 <= D（折扣区）
+      orders = orders.filter(o => o.side !== 'BUY' || o.entryPrice <= dailyHL.dStart);
+      // 空单入场价必须 >= P（溢价区）
+      orders = orders.filter(o => o.side !== 'SELL' || o.entryPrice >= dailyHL.pStart);
+
+      const buyAfterPD = orders.filter(o => o.side === 'BUY').length;
+      const sellAfterPD = orders.filter(o => o.side === 'SELL').length;
+
+      if (buyBeforePD !== buyAfterPD || sellBeforePD !== sellAfterPD) {
+        console.log(`[LiqGridScheduler] P/D过滤: 多单 ${buyBeforePD} -> ${buyAfterPD} (需 <= D=${dailyHL.dStart.toFixed(0)}), 空单 ${sellBeforePD} -> ${sellAfterPD} (需 >= P=${dailyHL.pStart.toFixed(0)})`);
+      }
+    }
+
     if (orders.length === 0) {
-      console.log('[LiqGridScheduler] 没有符合条件的订单（可能被持仓过滤）');
+      console.log('[LiqGridScheduler] 没有符合条件的订单（可能被持仓或P/D区域过滤）');
       addRecord({
         managementId: management.id,
         buyCount: 0,
@@ -249,7 +281,7 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
         totalMargin: 0,
         success: true,
         skipped: true,
-        errorMessage: '没有符合条件的订单',
+        errorMessage: '没有符合条件的订单（P/D过滤）',
       });
       updateRunTime(management.id);
       return;
@@ -697,6 +729,56 @@ function generateSignature(queryString: string, apiSecret: string): string {
  */
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * 获取日K前高前低（用于 P/D 区域计算）
+ */
+async function getDailyHL(symbol: string, currentPrice: number): Promise<DailyHL | null> {
+  try {
+    const response = await fetch(
+      `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1d&limit=100`
+    );
+
+    if (!response.ok) {
+      console.error('[LiqGridScheduler] 获取日K数据失败');
+      return null;
+    }
+
+    const klines = await response.json() as Array<[number, string, string, string, string, ...unknown[]]>;
+    if (klines.length < 2) return null;
+
+    // 当日K线
+    const todayCandle = {
+      high: parseFloat(klines[klines.length - 1][2]),
+      low: parseFloat(klines[klines.length - 1][3]),
+    };
+
+    // 从倒数第二根向左扫描，找到包含当前价格的K线
+    for (let i = klines.length - 2; i >= 0; i--) {
+      const high = parseFloat(klines[i][2]);
+      const low = parseFloat(klines[i][3]);
+
+      if (currentPrice >= low && currentPrice <= high) {
+        const finalHigh = Math.max(high, todayCandle.high);
+        const finalLow = Math.min(low, todayCandle.low);
+        const range = finalHigh - finalLow;
+        const quarterRange = range / 4;
+
+        return {
+          high: finalHigh,
+          low: finalLow,
+          pStart: finalHigh - quarterRange,  // P区开始
+          dStart: finalLow + quarterRange,   // D区开始
+        };
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error('[LiqGridScheduler] 获取日K异常:', error);
+    return null;
+  }
 }
 
 /**
