@@ -41,7 +41,7 @@ export function LiquidationCGPanel() {
 
     try {
       const res = await fetch(
-        `http://127.0.0.1:3004/api/liqmap/top?symbol=${baseCoin}&limit=5`
+        `/api/coinglass/liqmap?symbol=${baseCoin}&limit=5`
       );
       const result = await res.json();
 
