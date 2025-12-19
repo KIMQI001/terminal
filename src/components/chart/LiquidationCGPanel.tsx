@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useChartStore } from "@/stores/chartStore";
+import { useOrderStore, TradingLine } from "@/stores/orderStore";
 
 interface CGLiqData {
   symbol: string;
@@ -21,12 +22,41 @@ export function LiquidationCGPanel() {
   const [status, setStatus] = useState<"connected" | "disconnected" | "unknown">("unknown");
 
   const { symbol } = useChartStore();
+  const { setPrefillData, setTradingLines, openModal } = useOrderStore();
 
   // Extract base coin from symbol (e.g., "BTCUSDC" -> "BTC")
   const baseCoin = symbol.replace(/USDC?|USDT?|BUSD?/i, "");
 
   // 目前只支持 BTC
   const isSupported = baseCoin === "BTC";
+
+  // 点击清算价格开单
+  const handleLiqClick = (price: number, side: "long" | "short") => {
+    const liqPrice = price;
+    const orderSide = side === "short" ? "sell" : "buy";
+
+    // 空头清算 → 开空单：入场-0.2%，止损+0.1%，止盈-1.5%
+    // 多头清算 → 开多单：入场+0.2%，止损-0.1%，止盈+1.5%
+    const entry = side === "short"
+      ? liqPrice * 0.998   // 入场：清算价 - 0.2%
+      : liqPrice * 1.002;  // 入场：清算价 + 0.2%
+    const stopLoss = side === "short"
+      ? liqPrice * 1.001   // 止损：清算价 + 0.1%
+      : liqPrice * 0.999;  // 止损：清算价 - 0.1%
+    const takeProfit = side === "short"
+      ? liqPrice * 0.985   // 止盈：清算价 - 1.5%
+      : liqPrice * 1.015;  // 止盈：清算价 + 1.5%
+
+    const lines: TradingLine[] = [
+      { price: entry, type: "entry", side: orderSide },
+      { price: stopLoss, type: "stopLoss", side: orderSide },
+      { price: takeProfit, type: "takeProfit", side: orderSide },
+    ];
+
+    setTradingLines(lines);
+    setPrefillData({ side: orderSide, entry, stopLoss, takeProfit });
+    openModal();
+  };
 
   // Fetch data from Coinglass service
   const fetchData = useCallback(async () => {
@@ -143,7 +173,8 @@ export function LiquidationCGPanel() {
                   {data.longTop.map((level, i) => (
                     <div
                       key={i}
-                      className={`flex justify-between text-[9px] px-1.5 py-0.5 rounded ${
+                      onClick={() => handleLiqClick(level.price, "long")}
+                      className={`flex justify-between text-[9px] px-1.5 py-0.5 rounded cursor-pointer hover:opacity-80 transition-opacity ${
                         i === 0
                           ? "bg-blue-500 text-white font-bold"
                           : "bg-blue-50 border border-blue-200"
@@ -170,7 +201,8 @@ export function LiquidationCGPanel() {
                   {data.shortTop.map((level, i) => (
                     <div
                       key={i}
-                      className={`flex justify-between text-[9px] px-1.5 py-0.5 rounded ${
+                      onClick={() => handleLiqClick(level.price, "short")}
+                      className={`flex justify-between text-[9px] px-1.5 py-0.5 rounded cursor-pointer hover:opacity-80 transition-opacity ${
                         i === 0
                           ? "bg-orange-500 text-white font-bold"
                           : "bg-orange-50 border border-orange-200"
