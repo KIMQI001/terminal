@@ -80,6 +80,7 @@ liqGridManagementRoutes.post('/', (req: Request, res: Response) => {
     const {
       userId,
       symbol,
+      exchange,
       isActive = false,
       intervalMinutes = 60,
       baseMargin = 50,
@@ -98,6 +99,7 @@ liqGridManagementRoutes.post('/', (req: Request, res: Response) => {
     const config = upsertManagement({
       userId,
       symbol,
+      exchange,
       isActive,
       intervalMinutes,
       baseMargin,
@@ -105,7 +107,7 @@ liqGridManagementRoutes.post('/', (req: Request, res: Response) => {
       leverage,
     });
 
-    console.log(`[LiqGridManagement API] 更新配置: userId=${userId}, symbol=${symbol}, active=${isActive}`);
+    console.log(`[LiqGridManagement API] 更新配置: userId=${userId}, symbol=${symbol}, exchange=${exchange || 'binance'}, active=${isActive}`);
 
     res.json({
       success: true,
@@ -130,6 +132,7 @@ liqGridManagementRoutes.post('/start', (req: Request, res: Response) => {
     const {
       userId,
       symbol,
+      exchange,
       intervalMinutes = 60,
       baseMargin = 50,
       marginPerLevel = 10,
@@ -148,6 +151,7 @@ liqGridManagementRoutes.post('/start', (req: Request, res: Response) => {
     const config = upsertManagement({
       userId,
       symbol,
+      exchange,
       isActive: true,
       intervalMinutes,
       baseMargin,
@@ -155,7 +159,7 @@ liqGridManagementRoutes.post('/start', (req: Request, res: Response) => {
       leverage,
     });
 
-    console.log(`[LiqGridManagement API] 启动托管: userId=${userId}, symbol=${symbol}, baseMargin=${baseMargin}+${marginPerLevel}/层, leverage=${leverage}x, interval=${intervalMinutes}分钟`);
+    console.log(`[LiqGridManagement API] 启动托管: userId=${userId}, symbol=${symbol}, exchange=${exchange || 'binance'}, baseMargin=${baseMargin}+${marginPerLevel}/层, leverage=${leverage}x, interval=${intervalMinutes}分钟`);
 
     res.json({
       success: true,

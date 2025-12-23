@@ -5,11 +5,15 @@
 
 import { getDatabase } from '../db';
 
+// 交易所类型
+export type ExchangeType = 'binance' | 'aster';
+
 // 托管配置
 export interface LiqGridManagementConfig {
   id: number;
   userId: number;
   symbol: string;                // 交易对 (ETHUSDC)
+  exchange: ExchangeType;        // 交易所 (binance/aster)
   isActive: boolean;             // 是否启用
   intervalMinutes: number;       // 托管间隔（分钟）
   baseMargin: number;            // 基础保证金
@@ -39,6 +43,7 @@ interface ManagementRow {
   id: number;
   user_id: number;
   symbol: string;
+  exchange: string;
   is_active: number;
   interval_minutes: number;
   base_margin: number;
@@ -105,6 +110,12 @@ export function initLiqGridManagementTables(): void {
     CREATE INDEX IF NOT EXISTS idx_liq_grid_records_management ON liq_grid_management_records(management_id);
   `);
 
+  // 迁移：添加 exchange 字段
+  try {
+    db.exec(`ALTER TABLE liq_grid_management ADD COLUMN exchange TEXT NOT NULL DEFAULT 'binance'`);
+    console.log('[LiqGridManagement] 添加 exchange 字段');
+  } catch { /* 列已存在 */ }
+
   console.log('[LiqGridManagement] 表初始化完成');
 }
 
@@ -141,12 +152,14 @@ export function getActiveManagements(): LiqGridManagementConfig[] {
 export function upsertManagement(config: {
   userId: number;
   symbol: string;
+  exchange?: ExchangeType;
   isActive: boolean;
   intervalMinutes: number;
   baseMargin: number;
   marginPerLevel: number;
   leverage: number;
 }): LiqGridManagementConfig {
+  const exchange = config.exchange || 'binance';
   const db = getDatabase();
   const now = new Date().toISOString();
 
@@ -159,6 +172,7 @@ export function upsertManagement(config: {
     // 更新
     db.prepare(`
       UPDATE liq_grid_management SET
+        exchange = ?,
         is_active = ?,
         interval_minutes = ?,
         base_margin = ?,
@@ -168,6 +182,7 @@ export function upsertManagement(config: {
         updated_at = ?
       WHERE user_id = ? AND symbol = ?
     `).run(
+      exchange,
       config.isActive ? 1 : 0,
       config.intervalMinutes,
       config.baseMargin,
@@ -179,17 +194,18 @@ export function upsertManagement(config: {
       config.symbol
     );
 
-    console.log(`[LiqGridManagement] 更新托管配置: userId=${config.userId}, symbol=${config.symbol}, active=${config.isActive}`);
+    console.log(`[LiqGridManagement] 更新托管配置: userId=${config.userId}, symbol=${config.symbol}, exchange=${exchange}, active=${config.isActive}`);
   } else {
     // 创建
     db.prepare(`
       INSERT INTO liq_grid_management (
-        user_id, symbol, is_active, interval_minutes, base_margin, margin_per_level,
+        user_id, symbol, exchange, is_active, interval_minutes, base_margin, margin_per_level,
         leverage, next_run_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       config.userId,
       config.symbol,
+      exchange,
       config.isActive ? 1 : 0,
       config.intervalMinutes,
       config.baseMargin,
@@ -200,7 +216,7 @@ export function upsertManagement(config: {
       now
     );
 
-    console.log(`[LiqGridManagement] 创建托管配置: userId=${config.userId}, symbol=${config.symbol}`);
+    console.log(`[LiqGridManagement] 创建托管配置: userId=${config.userId}, symbol=${config.symbol}, exchange=${exchange}`);
   }
 
   return getManagement(config.userId, config.symbol)!;
@@ -370,6 +386,7 @@ function rowToConfig(row: ManagementRow): LiqGridManagementConfig {
     id: row.id,
     userId: row.user_id,
     symbol: row.symbol,
+    exchange: (row.exchange || 'binance') as ExchangeType,
     isActive: row.is_active === 1,
     intervalMinutes: row.interval_minutes,
     baseMargin: row.base_margin,

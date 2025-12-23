@@ -9,11 +9,12 @@ import {
   addRecord,
   LiqGridManagementConfig,
   initLiqGridManagementTables,
+  ExchangeType,
 } from './liqGridManagementStore';
-import { getBinanceApiConfig } from '../order/apiConfigReader';
+import { getBinanceApiConfig, getAsterApiConfig } from '../order/apiConfigReader';
 import { fetchLiquidation, LiquidationLevel } from '../data/liquidationClient';
 import { sendDingtalkMarkdownToUser } from '../notification/dingtalk';
-import crypto from 'crypto';
+import * as exchangeAdapter from '../order/exchangeAdapter';
 
 // 调度器状态
 let schedulerInterval: NodeJS.Timeout | null = null;
@@ -106,10 +107,14 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
   const startTime = Date.now();
 
   try {
-    // 获取用户 API 配置
-    const apiConfig = getBinanceApiConfig(management.userId);
+    // 获取用户 API 配置（根据交易所类型选择）
+    const exchange = management.exchange || 'binance';
+    const apiConfig = exchange === 'aster'
+      ? getAsterApiConfig(management.userId)
+      : getBinanceApiConfig(management.userId);
+
     if (!apiConfig) {
-      console.error(`[LiqGridScheduler] 用户 ${management.userId} 没有 API 配置`);
+      console.error(`[LiqGridScheduler] 用户 ${management.userId} 没有 ${exchange} API 配置`);
       addRecord({
         managementId: management.id,
         buyCount: 0,
@@ -117,19 +122,26 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
         totalMargin: 0,
         success: false,
         skipped: false,
-        errorMessage: '没有 API 配置',
+        errorMessage: `没有 ${exchange} API 配置`,
       });
       updateRunTime(management.id);
       return;
     }
 
+    // 统一的 API 配置格式
+    const exchangeConfig: exchangeAdapter.ExchangeApiConfig = {
+      apiKey: apiConfig.apiKey,
+      apiSecret: apiConfig.apiSecret,
+      isTestnet: 'isTestnet' in apiConfig ? (apiConfig as { isTestnet?: boolean }).isTestnet : false,
+    };
+
     // 1. 获取当前挂单和持仓
-    const ordersResult = await getLiqGridOrders(apiConfig, management.symbol);
+    const ordersResult = await getLiqGridOrders(exchange, exchangeConfig, management.symbol);
     const liqGridOrders = ordersResult.success ? ordersResult.orders || [] : [];
     const liqGridOrderCount = liqGridOrders.length;
 
     // 获取当前持仓
-    const positionsResult = await getPositions(apiConfig, management.symbol);
+    const positionsResult = await getPositions(exchange, exchangeConfig, management.symbol);
     const positions = positionsResult.success ? positionsResult.positions || [] : [];
     const longPosition = positions.find(p => p.positionSide === 'LONG' && Math.abs(p.positionAmt) >= 0.001);
     const shortPosition = positions.find(p => p.positionSide === 'SHORT' && Math.abs(p.positionAmt) >= 0.001);
@@ -208,7 +220,7 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
     }
 
     // 3. 取消现有 liq_grid 订单
-    const cancelResult = await cancelLiqGridOrders(apiConfig, management.symbol);
+    const cancelResult = await cancelLiqGridOrders(exchange, exchangeConfig, management.symbol);
     if (!cancelResult.success) {
       console.error(`[LiqGridScheduler] 取消订单失败: ${cancelResult.error}`);
     }
@@ -217,7 +229,7 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
     await delay(500);
 
     // 4. 设置杠杆
-    await setLeverage(apiConfig, management.symbol, management.leverage);
+    await setLeverage(exchange, exchangeConfig, management.symbol, management.leverage);
 
     // 5. 使用前面获取的持仓信息计算起点保证金
     const longNotional = longPosition?.notional || 0;
@@ -321,7 +333,7 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
     }
 
     // 8. 下单
-    const result = await placeOrders(apiConfig, management.symbol, orders);
+    const result = await placeOrders(exchange, exchangeConfig, management.symbol, orders);
 
     // 7. 记录结果
     const buyCount = orders.filter(o => o.side === 'BUY').length;
@@ -472,23 +484,17 @@ function calculateGridOrders(
 }
 
 /**
- * 下单
+ * 下单（使用统一适配器）
  */
 async function placeOrders(
-  apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
+  exchange: ExchangeType,
+  config: exchangeAdapter.ExchangeApiConfig,
   symbol: string,
   orders: GridOrder[]
 ): Promise<{ success: number; errors: string[] }> {
-  const baseUrl = apiConfig.isTestnet
-    ? 'https://testnet.binancefuture.com'
-    : 'https://fapi.binance.com';
-
-  let success = 0;
+  let successCount = 0;
   const errors: string[] = [];
   const precision = getPrecision(symbol);
-
-  // analysis-service 地址
-  const ANALYSIS_SERVICE_URL = process.env.ANALYSIS_SERVICE_URL || 'http://127.0.0.1:3002';
 
   for (const order of orders) {
     try {
@@ -497,35 +503,17 @@ async function placeOrders(
       const clientOrderId = `liq_grid_${order.side.toLowerCase()}_${priceStr}_${timestamp}`;
 
       // 下限价单
-      const entryParams: Record<string, string | number> = {
+      const result = await exchangeAdapter.placeLimitOrder(exchange, config, {
         symbol,
         side: order.side,
         positionSide: order.positionSide,
-        type: 'LIMIT',
-        quantity: order.quantity.toFixed(precision.quantity),
-        price: order.entryPrice.toFixed(precision.price),
-        timeInForce: 'GTC',
-        newClientOrderId: clientOrderId,
-        timestamp,
-      };
-
-      const entryQueryString = Object.entries(entryParams)
-        .map(([k, v]) => `${k}=${v}`)
-        .join('&');
-      const entrySignature = generateSignature(entryQueryString, apiConfig.apiSecret);
-
-      const entryResponse = await fetch(`${baseUrl}/fapi/v1/order`, {
-        method: 'POST',
-        headers: {
-          'X-MBX-APIKEY': apiConfig.apiKey,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: `${entryQueryString}&signature=${entrySignature}`,
+        quantity: order.quantity,
+        price: order.entryPrice,
+        clientOrderId,
       });
 
-      if (!entryResponse.ok) {
-        const data = await entryResponse.json() as { msg?: string };
-        errors.push(`${order.side} @ ${order.entryPrice}: ${data.msg || entryResponse.status}`);
+      if (!result.success) {
+        errors.push(`${order.side} @ ${order.entryPrice}: ${result.error || 'Unknown error'}`);
         continue;
       }
 
@@ -535,6 +523,7 @@ async function placeOrders(
       await savePendingOrder({
         clientOrderId,
         symbol,
+        exchange,
         side: order.side,
         positionSide: order.positionSide,
         quantity: order.quantity,
@@ -543,7 +532,7 @@ async function placeOrders(
         takeProfit: order.tpPrice,
       });
 
-      success++;
+      successCount++;
 
       // 延迟避免请求过快
       await delay(100);
@@ -552,7 +541,7 @@ async function placeOrders(
     }
   }
 
-  return { success, errors };
+  return { success: successCount, errors };
 }
 
 /**
@@ -561,6 +550,7 @@ async function placeOrders(
 async function savePendingOrder(params: {
   clientOrderId: string;
   symbol: string;
+  exchange: ExchangeType;
   side: 'BUY' | 'SELL';
   positionSide: 'LONG' | 'SHORT';
   quantity: number;
@@ -573,188 +563,81 @@ async function savePendingOrder(params: {
 }
 
 /**
- * 获取持仓
+ * 获取持仓（使用统一适配器）
  */
 async function getPositions(
-  apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
+  exchange: ExchangeType,
+  config: exchangeAdapter.ExchangeApiConfig,
   symbol: string
 ): Promise<{ success: boolean; positions?: Array<{ positionSide: string; positionAmt: number; entryPrice: number; notional: number }> }> {
-  const baseUrl = apiConfig.isTestnet
-    ? 'https://testnet.binancefuture.com'
-    : 'https://fapi.binance.com';
-
-  try {
-    const timestamp = Date.now();
-    const queryString = `symbol=${symbol}&timestamp=${timestamp}`;
-    const signature = generateSignature(queryString, apiConfig.apiSecret);
-
-    const response = await fetch(
-      `${baseUrl}/fapi/v2/positionRisk?${queryString}&signature=${signature}`,
-      { headers: { 'X-MBX-APIKEY': apiConfig.apiKey } }
-    );
-
-    if (!response.ok) return { success: false };
-
-    const positions = await response.json() as Array<{
-      symbol: string;
-      positionSide: string;
-      positionAmt: string;
-      entryPrice: string;
-      notional: string;
-    }>;
-
-    return {
-      success: true,
-      positions: positions
-        .filter(p => p.symbol === symbol)
-        .map(p => ({
-          positionSide: p.positionSide,
-          positionAmt: parseFloat(p.positionAmt),
-          entryPrice: parseFloat(p.entryPrice),
-          notional: Math.abs(parseFloat(p.notional)),
-        })),
-    };
-  } catch {
+  const result = await exchangeAdapter.getPositions(exchange, config, symbol);
+  if (!result.success || !result.positions) {
     return { success: false };
   }
+  return {
+    success: true,
+    positions: result.positions.map(p => ({
+      positionSide: p.positionSide,
+      positionAmt: p.positionAmt,
+      entryPrice: p.entryPrice,
+      notional: p.notional,
+    })),
+  };
 }
 
 /**
- * 获取 liq_grid 挂单
+ * 获取 liq_grid 挂单（使用统一适配器）
  */
 async function getLiqGridOrders(
-  apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
+  exchange: ExchangeType,
+  config: exchangeAdapter.ExchangeApiConfig,
   symbol: string
 ): Promise<{ success: boolean; orders?: Array<{ orderId: number; clientOrderId: string; side: string; origQty: string }> }> {
-  const baseUrl = apiConfig.isTestnet
-    ? 'https://testnet.binancefuture.com'
-    : 'https://fapi.binance.com';
-
-  try {
-    const timestamp = Date.now();
-    const queryString = `symbol=${symbol}&timestamp=${timestamp}`;
-    const signature = generateSignature(queryString, apiConfig.apiSecret);
-
-    const response = await fetch(
-      `${baseUrl}/fapi/v1/openOrders?${queryString}&signature=${signature}`,
-      { headers: { 'X-MBX-APIKEY': apiConfig.apiKey } }
-    );
-
-    if (!response.ok) return { success: false };
-
-    const orders = await response.json() as Array<{ orderId: number; clientOrderId: string; side: string; origQty: string }>;
-    const liqGridOrders = orders.filter(o => o.clientOrderId?.startsWith('liq_grid'));
-
-    return { success: true, orders: liqGridOrders };
-  } catch {
+  const result = await exchangeAdapter.getOpenOrders(exchange, config, symbol);
+  if (!result.success || !result.orders) {
     return { success: false };
   }
+  // 过滤出 liq_grid 订单
+  const liqGridOrders = result.orders
+    .filter(o => o.clientOrderId?.startsWith('liq_grid'))
+    .map(o => ({
+      orderId: o.orderId,
+      clientOrderId: o.clientOrderId,
+      side: o.side,
+      origQty: o.origQty,
+    }));
+  return { success: true, orders: liqGridOrders };
 }
 
 /**
- * 取消所有 liq_grid 订单
+ * 取消所有 liq_grid 订单（使用统一适配器）
  */
 async function cancelLiqGridOrders(
-  apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
+  exchange: ExchangeType,
+  config: exchangeAdapter.ExchangeApiConfig,
   symbol: string
 ): Promise<{ success: boolean; error?: string }> {
-  const baseUrl = apiConfig.isTestnet
-    ? 'https://testnet.binancefuture.com'
-    : 'https://fapi.binance.com';
-
-  try {
-    // 获取当前挂单
-    const timestamp = Date.now();
-    const queryString = `symbol=${symbol}&timestamp=${timestamp}`;
-    const signature = generateSignature(queryString, apiConfig.apiSecret);
-
-    const response = await fetch(
-      `${baseUrl}/fapi/v1/openOrders?${queryString}&signature=${signature}`,
-      { headers: { 'X-MBX-APIKEY': apiConfig.apiKey } }
-    );
-
-    if (!response.ok) {
-      return { success: false, error: `HTTP ${response.status}` };
-    }
-
-    const orders = await response.json() as Array<{ orderId: number; clientOrderId: string }>;
-    const liqGridOrders = orders.filter(o => o.clientOrderId?.startsWith('liq_grid'));
-
-    if (liqGridOrders.length === 0) {
-      return { success: true };
-    }
-
-    // 逐个取消
-    let canceledCount = 0;
-    for (const order of liqGridOrders) {
-      const cancelTimestamp = Date.now();
-      const cancelQueryString = `symbol=${symbol}&orderId=${order.orderId}&timestamp=${cancelTimestamp}`;
-      const cancelSignature = generateSignature(cancelQueryString, apiConfig.apiSecret);
-
-      const cancelResponse = await fetch(`${baseUrl}/fapi/v1/order`, {
-        method: 'DELETE',
-        headers: {
-          'X-MBX-APIKEY': apiConfig.apiKey,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: `${cancelQueryString}&signature=${cancelSignature}`,
-      });
-
-      if (cancelResponse.ok) canceledCount++;
-      await delay(50);
-    }
-
-    console.log(`[LiqGridScheduler] 取消了 ${canceledCount}/${liqGridOrders.length} 个订单`);
-    return { success: true };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : '网络错误',
-    };
+  const result = await exchangeAdapter.cancelOrdersByPrefix(exchange, config, symbol, 'liq_grid');
+  if (result.canceledCount > 0) {
+    console.log(`[LiqGridScheduler] 取消了 ${result.canceledCount} 个订单`);
   }
+  return { success: result.success, error: result.error };
 }
 
 /**
- * 设置杠杆
+ * 设置杠杆（使用统一适配器）
  */
 async function setLeverage(
-  apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
+  exchange: ExchangeType,
+  config: exchangeAdapter.ExchangeApiConfig,
   symbol: string,
   leverage: number
 ): Promise<boolean> {
-  const baseUrl = apiConfig.isTestnet
-    ? 'https://testnet.binancefuture.com'
-    : 'https://fapi.binance.com';
-
-  try {
-    const timestamp = Date.now();
-    const queryString = `symbol=${symbol}&leverage=${leverage}&timestamp=${timestamp}`;
-    const signature = generateSignature(queryString, apiConfig.apiSecret);
-
-    const response = await fetch(`${baseUrl}/fapi/v1/leverage`, {
-      method: 'POST',
-      headers: {
-        'X-MBX-APIKEY': apiConfig.apiKey,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: `${queryString}&signature=${signature}`,
-    });
-
-    if (response.ok) {
-      console.log(`[LiqGridScheduler] 杠杆设置成功: ${symbol} ${leverage}x`);
-      return true;
-    }
-    return false;
-  } catch {
-    return false;
+  const result = await exchangeAdapter.setLeverage(exchange, config, symbol, leverage);
+  if (result.success) {
+    console.log(`[LiqGridScheduler] 杠杆设置成功: ${symbol} ${leverage}x`);
   }
-}
-
-/**
- * 生成签名
- */
-function generateSignature(queryString: string, apiSecret: string): string {
-  return crypto.createHmac('sha256', apiSecret).update(queryString).digest('hex');
+  return result.success;
 }
 
 /**

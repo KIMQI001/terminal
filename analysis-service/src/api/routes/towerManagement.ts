@@ -82,6 +82,7 @@ towerManagementRoutes.post('/', (req: Request, res: Response) => {
     const {
       userId,
       symbol,
+      exchange,
       isActive = false,
       intervalMinutes = 5,
       baseMargin = 100,
@@ -104,6 +105,7 @@ towerManagementRoutes.post('/', (req: Request, res: Response) => {
     const config = upsertManagement({
       userId,
       symbol,
+      exchange,
       isActive,
       intervalMinutes,
       baseMargin,
@@ -115,7 +117,7 @@ towerManagementRoutes.post('/', (req: Request, res: Response) => {
       minEntryDistance,
     });
 
-    console.log(`[TowerManagement API] 更新配置: userId=${userId}, symbol=${symbol}, active=${isActive}`);
+    console.log(`[TowerManagement API] 更新配置: userId=${userId}, symbol=${symbol}, exchange=${exchange || 'binance'}, active=${isActive}`);
 
     res.json({
       success: true,
@@ -140,6 +142,7 @@ towerManagementRoutes.post('/start', (req: Request, res: Response) => {
     const {
       userId,
       symbol,
+      exchange,
       intervalMinutes = 5,
       baseMargin = 100,
       marginIncrement = 0,
@@ -162,6 +165,7 @@ towerManagementRoutes.post('/start', (req: Request, res: Response) => {
     const config = upsertManagement({
       userId,
       symbol,
+      exchange,
       isActive: true,
       intervalMinutes,
       baseMargin,
@@ -173,7 +177,7 @@ towerManagementRoutes.post('/start', (req: Request, res: Response) => {
       minEntryDistance,
     });
 
-    console.log(`[TowerManagement API] 启动托管: userId=${userId}, symbol=${symbol}, baseMargin=${baseMargin}, layers=${towerLayers}, 启动间距=${minEntryDistance}‰`);
+    console.log(`[TowerManagement API] 启动托管: userId=${userId}, symbol=${symbol}, exchange=${exchange || 'binance'}, baseMargin=${baseMargin}, layers=${towerLayers}, 启动间距=${minEntryDistance}‰`);
 
     res.json({
       success: true,

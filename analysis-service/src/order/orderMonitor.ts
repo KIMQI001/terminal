@@ -4,6 +4,7 @@
  */
 
 import { UserDataStreamManager, OrderTradeUpdateEvent } from './userDataStream';
+import { AsterUserDataStreamManager } from './asterUserDataStream';
 import {
   getPendingOrderByClientId,
   markOrderFilled,
@@ -16,6 +17,7 @@ import {
   cleanupCanceledOrders,
   getOrderStats,
   PendingEntryOrder,
+  ExchangeType,
 } from './pendingOrderStore';
 import {
   placeStopLossOrder,
@@ -27,6 +29,7 @@ import {
   cancelAlgoOrder,
   BinanceApiConfig,
 } from './binanceOrderApi';
+import * as exchangeAdapter from './exchangeAdapter';
 import { sendDingtalkMarkdownToUser } from '../notification/dingtalk';
 
 // 订单监控器配置
@@ -35,11 +38,40 @@ export interface OrderMonitorConfig {
   apiKey: string;
   apiSecret: string;
   isTestnet: boolean;
+  // Aster 配置（可选）
+  asterApiKey?: string;
+  asterApiSecret?: string;
 }
 
 let streamManager: UserDataStreamManager | null = null;
+let asterStreamManager: AsterUserDataStreamManager | null = null;
 let config: OrderMonitorConfig | null = null;
 let cleanupInterval: NodeJS.Timeout | null = null;
+
+/**
+ * 获取指定交易所的 API 配置
+ */
+function getExchangeConfig(exchange: ExchangeType): exchangeAdapter.ExchangeApiConfig | null {
+  if (!config) return null;
+
+  if (exchange === 'aster') {
+    if (!config.asterApiKey || !config.asterApiSecret) {
+      return null;
+    }
+    return {
+      apiKey: config.asterApiKey,
+      apiSecret: config.asterApiSecret,
+      isTestnet: false,
+    };
+  }
+
+  // Binance
+  return {
+    apiKey: config.apiKey,
+    apiSecret: config.apiSecret,
+    isTestnet: config.isTestnet,
+  };
+}
 
 /**
  * 处理订单成交事件
@@ -789,25 +821,45 @@ export async function startOrderMonitor(cfg: OrderMonitorConfig): Promise<void> 
   // 清理过期订单
   cleanupOldPendingOrders();
 
-  // 创建 User Data Stream 管理器
+  // 创建 Binance User Data Stream 管理器
   streamManager = new UserDataStreamManager({
     apiKey: cfg.apiKey,
     apiSecret: cfg.apiSecret,
     isTestnet: cfg.isTestnet,
     onOrderUpdate: handleOrderFilled,
     onConnected: () => {
-      console.log('[OrderMonitor] WebSocket 已连接');
+      console.log('[OrderMonitor] Binance WebSocket 已连接');
     },
     onDisconnected: () => {
-      console.log('[OrderMonitor] WebSocket 已断开');
+      console.log('[OrderMonitor] Binance WebSocket 已断开');
     },
     onError: (error) => {
-      console.error('[OrderMonitor] WebSocket 错误:', error);
+      console.error('[OrderMonitor] Binance WebSocket 错误:', error);
     },
   });
 
-  // 启动 WebSocket 连接
+  // 启动 Binance WebSocket 连接
   await streamManager.start();
+
+  // 如果有 Aster 配置，也启动 Aster 监听
+  if (cfg.asterApiKey && cfg.asterApiSecret) {
+    console.log('[OrderMonitor] 启动 Aster 监听...');
+    asterStreamManager = new AsterUserDataStreamManager({
+      apiKey: cfg.asterApiKey,
+      apiSecret: cfg.asterApiSecret,
+      onOrderUpdate: handleOrderFilled,
+      onConnected: () => {
+        console.log('[OrderMonitor] Aster WebSocket 已连接');
+      },
+      onDisconnected: () => {
+        console.log('[OrderMonitor] Aster WebSocket 已断开');
+      },
+      onError: (error) => {
+        console.error('[OrderMonitor] Aster WebSocket 错误:', error);
+      },
+    });
+    await asterStreamManager.start();
+  }
 
   // 定期清理过期订单 (每小时)
   cleanupInterval = setInterval(() => {
@@ -832,6 +884,11 @@ export function stopOrderMonitor(): void {
   if (streamManager) {
     streamManager.stop();
     streamManager = null;
+  }
+
+  if (asterStreamManager) {
+    asterStreamManager.stop();
+    asterStreamManager = null;
   }
 
   if (cleanupInterval) {

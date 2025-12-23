@@ -9,10 +9,12 @@ import {
   addRecord,
   TowerManagementConfig,
   initTowerManagementTables,
+  ExchangeType,
 } from './towerManagementStore';
-import { getBinanceApiConfig } from '../order/apiConfigReader';
+import { getBinanceApiConfig, getAsterApiConfig } from '../order/apiConfigReader';
 import { fetchTowerBlocks } from './towerBlocksFetcher';
 import { sendDingtalkMarkdownToUser } from '../notification/dingtalk';
+import * as exchangeAdapter from '../order/exchangeAdapter';
 
 // 调度器状态
 let schedulerInterval: NodeJS.Timeout | null = null;
@@ -137,10 +139,14 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
   const startTime = Date.now();
 
   try {
-    // 获取用户 API 配置
-    const apiConfig = getBinanceApiConfig(management.userId);
+    // 获取用户 API 配置（根据交易所类型选择）
+    const exchange = management.exchange || 'binance';
+    const apiConfig = exchange === 'aster'
+      ? getAsterApiConfig(management.userId)
+      : getBinanceApiConfig(management.userId);
+
     if (!apiConfig) {
-      console.error(`[TowerScheduler] 用户 ${management.userId} 没有 API 配置`);
+      console.error(`[TowerScheduler] 用户 ${management.userId} 没有 ${exchange} API 配置`);
       addRecord({
         managementId: management.id,
         bullishCount: 0,
@@ -148,15 +154,21 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
         totalMargin: 0,
         success: false,
         skipped: false,
-        errorMessage: '没有 API 配置',
+        errorMessage: `没有 ${exchange} API 配置`,
       });
       updateRunTime(management.id);
       return;
     }
 
+    // 统一的 API 配置格式
+    const exchangeConfig: exchangeAdapter.ExchangeApiConfig = {
+      apiKey: apiConfig.apiKey,
+      apiSecret: apiConfig.apiSecret,
+      isTestnet: 'isTestnet' in apiConfig ? (apiConfig as { isTestnet?: boolean }).isTestnet : false,
+    };
+
     // 1. 检查是否有持仓（有持仓时跳过，避免取消止盈止损单）
-    const { getPositions } = await import('../order/binanceOrderApi');
-    const positionsResult = await getPositions(apiConfig, management.symbol);
+    const positionsResult = await exchangeAdapter.getPositions(exchange, exchangeConfig, management.symbol);
     if (positionsResult.success && positionsResult.positions && positionsResult.positions.length > 0) {
       const positions = positionsResult.positions.filter(p => Math.abs(p.positionAmt) >= 0.001);
       if (positions.length > 0) {
@@ -176,7 +188,7 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     }
 
     // 2. 检查当前订单数量和位置
-    const orderCheck = await checkOrdersCount(apiConfig, management.symbol, management.towerLayers);
+    const orderCheck = await checkOrdersCount(exchange, exchangeConfig, management.symbol, management.towerLayers);
     if (orderCheck.sufficient || orderCheck.hasNearOrder) {
       const reason = orderCheck.hasNearOrder ? '有订单在当前价附近' : `订单充足 多${orderCheck.bullish}空${orderCheck.bearish}`;
       console.log(`[TowerScheduler] 跳过更新: ${reason}`);
@@ -211,7 +223,7 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     }
 
     // 4. 取消现有订单
-    const cancelResult = await cancelAllTowerOrders(apiConfig, management.symbol);
+    const cancelResult = await cancelAllTowerOrders(exchange, exchangeConfig, management.symbol);
     if (!cancelResult.success) {
       console.error(`[TowerScheduler] 取消订单失败: ${cancelResult.error}`);
       addRecord({
@@ -231,7 +243,7 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     await delay(500);
 
     // 5. 获取杠杆
-    const leverage = await getLeverage(apiConfig, management.symbol);
+    const leverage = await getLeverage(exchange, exchangeConfig, management.symbol);
 
     // 6. 获取日K前高前低（用于区域过滤）
     const dailyHL = await getDailyHL(management.symbol, towerData.currentPrice);
@@ -257,7 +269,7 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     }
 
     // 9. 下单
-    const result = await placeOrders(apiConfig, management.symbol, orders);
+    const result = await placeOrders(exchange, exchangeConfig, management.symbol, orders);
 
     // 10. 记录结果
     const bullishCount = orders.filter(o => o.side === 'BUY').length;
@@ -318,40 +330,23 @@ const NEAR_PRICE_RATIO = 1 / 100;
  * 检查订单数量
  */
 async function checkOrdersCount(
-  apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
+  exchange: ExchangeType,
+  exchangeConfig: exchangeAdapter.ExchangeApiConfig,
   symbol: string,
   requiredLayers: number
 ): Promise<{ bullish: number; bearish: number; sufficient: boolean; hasNearOrder: boolean }> {
-  const baseUrl = apiConfig.isTestnet
-    ? 'https://testnet.binancefuture.com'
-    : 'https://fapi.binance.com';
-
   try {
-    const timestamp = Date.now();
-    const queryString = `symbol=${symbol}&timestamp=${timestamp}`;
-    const signature = generateSignature(queryString, apiConfig.apiSecret);
-
-    // 并行获取订单和当前价格
-    const [ordersResponse, priceResponse] = await Promise.all([
-      fetch(
-        `${baseUrl}/fapi/v1/openOrders?${queryString}&signature=${signature}`,
-        { headers: { 'X-MBX-APIKEY': apiConfig.apiKey } }
-      ),
-      fetch(`${baseUrl}/fapi/v1/ticker/price?symbol=${symbol}`)
-    ]);
-
-    if (!ordersResponse.ok) {
+    // 获取挂单
+    const ordersResult = await exchangeAdapter.getOpenOrders(exchange, exchangeConfig, symbol);
+    if (!ordersResult.success || !ordersResult.orders) {
       return { bullish: 0, bearish: 0, sufficient: false, hasNearOrder: false };
     }
 
-    const orders = await ordersResponse.json() as Array<{
-      clientOrderId: string;
-      side: string;
-      type: string;
-      price: string;
-    }>;
-
     // 获取当前价格
+    const baseUrl = exchange === 'aster'
+      ? 'https://fapi.asterdex.com'
+      : (exchangeConfig.isTestnet ? 'https://testnet.binancefuture.com' : 'https://fapi.binance.com');
+    const priceResponse = await fetch(`${baseUrl}/fapi/v1/ticker/price?symbol=${symbol}`);
     let currentPrice = 0;
     if (priceResponse.ok) {
       const priceData = await priceResponse.json() as { price: string };
@@ -359,7 +354,7 @@ async function checkOrdersCount(
     }
 
     // 只统计 ict_tower 前缀的限价单
-    const towerOrders = orders.filter(
+    const towerOrders = ordersResult.orders.filter(
       o => o.clientOrderId?.startsWith('ict_tower') && o.type === 'LIMIT'
     );
 
@@ -372,8 +367,7 @@ async function checkOrdersCount(
     if (currentPrice > 0) {
       const nearDistance = currentPrice * NEAR_PRICE_RATIO;
       hasNearOrder = towerOrders.some(o => {
-        const orderPrice = parseFloat(o.price);
-        return Math.abs(orderPrice - currentPrice) <= nearDistance;
+        return Math.abs(o.price - currentPrice) <= nearDistance;
       });
       if (hasNearOrder) {
         console.log(`[TowerScheduler] 有订单在当前价 ${currentPrice.toFixed(1)} 附近（±${nearDistance.toFixed(0)}）`);
@@ -391,40 +385,22 @@ async function checkOrdersCount(
  * 获取杠杆倍数
  */
 async function getLeverage(
-  apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
+  exchange: ExchangeType,
+  exchangeConfig: exchangeAdapter.ExchangeApiConfig,
   symbol: string
 ): Promise<number> {
-  const baseUrl = apiConfig.isTestnet
-    ? 'https://testnet.binancefuture.com'
-    : 'https://fapi.binance.com';
-
   try {
-    const timestamp = Date.now();
-    const queryString = `symbol=${symbol}&timestamp=${timestamp}`;
-    const signature = generateSignature(queryString, apiConfig.apiSecret);
-
-    const response = await fetch(
-      `${baseUrl}/fapi/v2/positionRisk?${queryString}&signature=${signature}`,
-      { headers: { 'X-MBX-APIKEY': apiConfig.apiKey } }
-    );
-
-    if (!response.ok) {
-      console.warn('[TowerScheduler] 获取杠杆失败，使用默认值 20x');
-      return 20;
+    // 通过获取持仓来获取杠杆
+    const positionsResult = await exchangeAdapter.getPositions(exchange, exchangeConfig, symbol);
+    if (positionsResult.success && positionsResult.positions && positionsResult.positions.length > 0) {
+      const position = positionsResult.positions[0];
+      if (position.leverage) {
+        console.log(`[TowerScheduler] 获取杠杆: ${symbol} = ${position.leverage}x`);
+        return position.leverage;
+      }
     }
 
-    const positions = await response.json() as Array<{
-      symbol: string;
-      leverage: string;
-    }>;
-
-    const position = positions.find(p => p.symbol === symbol);
-    if (position) {
-      const leverage = parseInt(position.leverage, 10);
-      console.log(`[TowerScheduler] 获取杠杆: ${symbol} = ${leverage}x`);
-      return leverage;
-    }
-
+    console.warn('[TowerScheduler] 获取杠杆失败，使用默认值 20x');
     return 20;
   } catch (error) {
     console.error('[TowerScheduler] 获取杠杆异常:', error);
@@ -436,32 +412,17 @@ async function getLeverage(
  * 取消所有守塔订单
  */
 async function cancelAllTowerOrders(
-  apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
+  exchange: ExchangeType,
+  exchangeConfig: exchangeAdapter.ExchangeApiConfig,
   symbol: string
 ): Promise<{ success: boolean; error?: string }> {
-  const baseUrl = apiConfig.isTestnet
-    ? 'https://testnet.binancefuture.com'
-    : 'https://fapi.binance.com';
-
   try {
-    const timestamp = Date.now();
-    const queryString = `symbol=${symbol}&timestamp=${timestamp}`;
-    const signature = generateSignature(queryString, apiConfig.apiSecret);
-
-    const response = await fetch(
-      `${baseUrl}/fapi/v1/allOpenOrders?${queryString}&signature=${signature}`,
-      {
-        method: 'DELETE',
-        headers: { 'X-MBX-APIKEY': apiConfig.apiKey },
-      }
-    );
-
-    if (!response.ok) {
-      const data = await response.json() as { msg?: string };
-      return { success: false, error: data.msg || `HTTP ${response.status}` };
+    // 使用适配器取消所有 ict_tower 前缀的订单
+    const result = await exchangeAdapter.cancelOrdersByPrefix(exchange, exchangeConfig, symbol, 'ict_tower');
+    if (result.canceledCount > 0) {
+      console.log(`[TowerScheduler] 取消了 ${result.canceledCount} 个订单`);
     }
-
-    return { success: true };
+    return { success: result.success, error: result.error };
   } catch (error) {
     return {
       success: false,
@@ -915,55 +876,33 @@ function calculateOrders(
  * 下单（入场单 + 止盈止损单）
  */
 async function placeOrders(
-  apiConfig: { apiKey: string; apiSecret: string; isTestnet: boolean },
+  exchange: ExchangeType,
+  exchangeConfig: exchangeAdapter.ExchangeApiConfig,
   symbol: string,
   orders: TowerOrder[]
 ): Promise<{ success: number; errors: string[] }> {
-  const baseUrl = apiConfig.isTestnet
-    ? 'https://testnet.binancefuture.com'
-    : 'https://fapi.binance.com';
-
   let success = 0;
   const errors: string[] = [];
 
   for (const order of orders) {
     try {
-      const timestamp = Date.now();
       // 格式: ict_tower_{级别}_{ICT种类}_{点位}
       // 例如: ict_tower_4h_OB_95000 (21字符,Binance限制<36)
       const priceStr = Math.round(order.price).toString();
       const clientOrderId = `ict_tower_${order.timeframe}_${order.source}_${priceStr}`;
 
       // 1. 下入场单（限价单）
-      const entryParams: Record<string, string | number> = {
+      const entryResult = await exchangeAdapter.placeLimitOrder(exchange, exchangeConfig, {
         symbol,
         side: order.side,
         positionSide: order.positionSide,
-        type: 'LIMIT',
-        quantity: order.quantity.toFixed(3),
-        price: order.price.toFixed(1),
-        timeInForce: 'GTC',
-        newClientOrderId: clientOrderId,
-        timestamp,
-      };
-
-      const entryQueryString = Object.entries(entryParams)
-        .map(([k, v]) => `${k}=${v}`)
-        .join('&');
-      const entrySignature = generateSignature(entryQueryString, apiConfig.apiSecret);
-
-      const entryResponse = await fetch(`${baseUrl}/fapi/v1/order`, {
-        method: 'POST',
-        headers: {
-          'X-MBX-APIKEY': apiConfig.apiKey,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: `${entryQueryString}&signature=${entrySignature}`,
+        quantity: order.quantity,
+        price: order.price,
+        clientOrderId,
       });
 
-      if (!entryResponse.ok) {
-        const data = await entryResponse.json() as { msg?: string };
-        errors.push(`入场 ${order.side} @ ${order.price}: ${data.msg || entryResponse.status}`);
+      if (!entryResult.success) {
+        errors.push(`入场 ${order.side} @ ${order.price}: ${entryResult.error}`);
         continue;
       }
 
@@ -972,38 +911,19 @@ async function placeOrders(
       // 平仓方向
       const closeSide = order.side === 'BUY' ? 'SELL' : 'BUY';
 
-      // 2. 下止损单（STOP_MARKET）- 使用 Algo Order API
+      // 2. 下止损单（STOP_MARKET）
       await delay(100);
-      const slTimestamp = Date.now();
-      const slParams: Record<string, string | number> = {
-        algoType: 'CONDITIONAL',
+      const slResult = await exchangeAdapter.placeStopLossOrder(exchange, exchangeConfig, {
         symbol,
         side: closeSide,
         positionSide: order.positionSide,
-        type: 'STOP_MARKET',
-        quantity: order.quantity.toFixed(3),
-        triggerPrice: order.stopLoss.toFixed(1),
-        clientAlgoId: `${clientOrderId}_sl`,
-        timestamp: slTimestamp,
-      };
-
-      const slQueryString = Object.entries(slParams)
-        .map(([k, v]) => `${k}=${v}`)
-        .join('&');
-      const slSignature = generateSignature(slQueryString, apiConfig.apiSecret);
-
-      const slResponse = await fetch(`${baseUrl}/fapi/v1/algoOrder`, {
-        method: 'POST',
-        headers: {
-          'X-MBX-APIKEY': apiConfig.apiKey,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: `${slQueryString}&signature=${slSignature}`,
+        quantity: order.quantity,
+        stopPrice: order.stopLoss,
+        clientOrderId: `${clientOrderId}_sl`,
       });
 
-      if (!slResponse.ok) {
-        const data = await slResponse.json() as { msg?: string };
-        console.warn(`[TowerScheduler] 止损单失败: ${data.msg || slResponse.status}`);
+      if (!slResult.success) {
+        console.warn(`[TowerScheduler] 止损单失败: ${slResult.error}`);
       } else {
         console.log(`[TowerScheduler] 止损单下单成功: ${clientOrderId}_sl`);
       }
@@ -1016,6 +936,7 @@ async function placeOrders(
       await savePendingOrder({
         clientOrderId,
         symbol,
+        exchange,
         side: order.side,
         positionSide: order.positionSide,
         quantity: order.quantity,
@@ -1040,6 +961,7 @@ async function placeOrders(
 async function savePendingOrder(params: {
   clientOrderId: string;
   symbol: string;
+  exchange: ExchangeType;
   side: 'BUY' | 'SELL';
   positionSide: 'LONG' | 'SHORT';
   quantity: number;

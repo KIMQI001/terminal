@@ -5,11 +5,15 @@
 
 import { getDatabase } from '../db';
 
+// 交易所类型
+export type ExchangeType = 'binance' | 'aster';
+
 // 托管配置
 export interface TowerManagementConfig {
   id: number;
   userId: number;
   symbol: string;                // 交易对 (BTCUSDC)
+  exchange: ExchangeType;        // 交易所 (binance/aster)
   isActive: boolean;             // 是否启用
   intervalMinutes: number;       // 托管间隔（分钟）
   baseMargin: number;            // 基础保证金
@@ -43,6 +47,7 @@ interface ManagementRow {
   id: number;
   user_id: number;
   symbol: string;
+  exchange: string;
   is_active: number;
   interval_minutes: number;
   base_margin: number;
@@ -122,6 +127,12 @@ export function initTowerManagementTables(): void {
     console.log('[TowerManagement] 添加 min_entry_distance 字段');
   } catch { /* 列已存在 */ }
 
+  // 迁移：添加 exchange 字段
+  try {
+    db.exec(`ALTER TABLE tower_management ADD COLUMN exchange TEXT NOT NULL DEFAULT 'binance'`);
+    console.log('[TowerManagement] 添加 exchange 字段');
+  } catch { /* 列已存在 */ }
+
   console.log('[TowerManagement] 表初始化完成');
 }
 
@@ -158,6 +169,7 @@ export function getActiveManagements(): TowerManagementConfig[] {
 export function upsertManagement(config: {
   userId: number;
   symbol: string;
+  exchange?: ExchangeType;
   isActive: boolean;
   intervalMinutes: number;
   baseMargin: number;
@@ -168,6 +180,7 @@ export function upsertManagement(config: {
   minSpacingRatio: number;
   minEntryDistance: number;
 }): TowerManagementConfig {
+  const exchange = config.exchange || 'binance';
   const db = getDatabase();
   const now = new Date().toISOString();
 
@@ -180,6 +193,7 @@ export function upsertManagement(config: {
     // 更新
     db.prepare(`
       UPDATE tower_management SET
+        exchange = ?,
         is_active = ?,
         interval_minutes = ?,
         base_margin = ?,
@@ -193,6 +207,7 @@ export function upsertManagement(config: {
         updated_at = ?
       WHERE user_id = ? AND symbol = ?
     `).run(
+      exchange,
       config.isActive ? 1 : 0,
       config.intervalMinutes,
       config.baseMargin,
@@ -208,18 +223,19 @@ export function upsertManagement(config: {
       config.symbol
     );
 
-    console.log(`[TowerManagement] 更新托管配置: userId=${config.userId}, symbol=${config.symbol}, active=${config.isActive}`);
+    console.log(`[TowerManagement] 更新托管配置: userId=${config.userId}, symbol=${config.symbol}, exchange=${exchange}, active=${config.isActive}`);
   } else {
     // 创建
     db.prepare(`
       INSERT INTO tower_management (
-        user_id, symbol, is_active, interval_minutes, base_margin, margin_increment,
+        user_id, symbol, exchange, is_active, interval_minutes, base_margin, margin_increment,
         tower_layers, bullish_start_layer, bearish_start_layer, min_spacing_ratio, min_entry_distance,
         next_run_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       config.userId,
       config.symbol,
+      exchange,
       config.isActive ? 1 : 0,
       config.intervalMinutes,
       config.baseMargin,
@@ -234,7 +250,7 @@ export function upsertManagement(config: {
       now
     );
 
-    console.log(`[TowerManagement] 创建托管配置: userId=${config.userId}, symbol=${config.symbol}`);
+    console.log(`[TowerManagement] 创建托管配置: userId=${config.userId}, symbol=${config.symbol}, exchange=${exchange}`);
   }
 
   return getManagement(config.userId, config.symbol)!;
@@ -429,6 +445,7 @@ function rowToConfig(row: ManagementRow): TowerManagementConfig {
     id: row.id,
     userId: row.user_id,
     symbol: row.symbol,
+    exchange: (row.exchange || 'binance') as ExchangeType,
     isActive: row.is_active === 1,
     intervalMinutes: row.interval_minutes,
     baseMargin: row.base_margin,

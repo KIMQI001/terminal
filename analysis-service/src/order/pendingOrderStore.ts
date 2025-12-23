@@ -5,11 +5,15 @@
 
 import { getDatabase } from '../db';
 
+// 交易所类型
+export type ExchangeType = 'binance' | 'aster';
+
 // 待处理入场订单
 export interface PendingEntryOrder {
   id: number;
   clientOrderId: string;      // ict_tower_4h_OB_95000
   symbol: string;             // BTCUSDC
+  exchange: ExchangeType;     // 交易所 (binance/aster)
   side: 'BUY' | 'SELL';
   positionSide: 'LONG' | 'SHORT';
   quantity: number;
@@ -41,6 +45,7 @@ interface PendingOrderRow {
   id: number;
   client_order_id: string;
   symbol: string;
+  exchange: string;
   side: string;
   position_side: string;
   quantity: number;
@@ -100,6 +105,12 @@ export function initPendingOrdersTable(): void {
     CREATE INDEX IF NOT EXISTS idx_pending_orders_client_id ON pending_entry_orders(client_order_id);
     CREATE INDEX IF NOT EXISTS idx_pending_orders_symbol ON pending_entry_orders(symbol);
   `);
+
+  // 迁移：添加 exchange 字段
+  try {
+    db.exec(`ALTER TABLE pending_entry_orders ADD COLUMN exchange TEXT NOT NULL DEFAULT 'binance'`);
+    console.log('[PendingOrderStore] 添加 exchange 字段');
+  } catch { /* 列已存在 */ }
 
   // 迁移：为旧表添加追踪止盈字段
   try {
@@ -221,6 +232,7 @@ function migrateStatusConstraint(db: ReturnType<typeof getDatabase>): void {
 export function addPendingOrder(order: {
   clientOrderId: string;
   symbol: string;
+  exchange?: ExchangeType;
   side: 'BUY' | 'SELL';
   positionSide: 'LONG' | 'SHORT';
   quantity: number;
@@ -229,17 +241,19 @@ export function addPendingOrder(order: {
   takeProfit: number;
 }): number {
   const db = getDatabase();
+  const exchange = order.exchange || 'binance';
 
   // 使用 INSERT OR REPLACE 覆盖同一 clientOrderId 的旧记录
   const stmt = db.prepare(`
     INSERT OR REPLACE INTO pending_entry_orders
-    (client_order_id, symbol, side, position_side, quantity, entry_price, stop_loss, take_profit, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+    (client_order_id, symbol, exchange, side, position_side, quantity, entry_price, stop_loss, take_profit, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
   `);
 
   const result = stmt.run(
     order.clientOrderId,
     order.symbol,
+    exchange,
     order.side,
     order.positionSide,
     order.quantity,
@@ -249,7 +263,7 @@ export function addPendingOrder(order: {
     new Date().toISOString()
   );
 
-  console.log(`[PendingOrderStore] 添加待处理订单: ${order.clientOrderId}`);
+  console.log(`[PendingOrderStore] 添加待处理订单: ${order.clientOrderId} (${exchange})`);
   return result.lastInsertRowid as number;
 }
 
@@ -491,6 +505,7 @@ function rowToOrder(row: PendingOrderRow): PendingEntryOrder {
     id: row.id,
     clientOrderId: row.client_order_id,
     symbol: row.symbol,
+    exchange: (row.exchange || 'binance') as ExchangeType,
     side: row.side as 'BUY' | 'SELL',
     positionSide: row.position_side as 'LONG' | 'SHORT',
     quantity: row.quantity,
