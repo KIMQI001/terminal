@@ -95,7 +95,9 @@ async fn get_heatmap(
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
         })?;
 
-    let generator = HeatmapGenerator::new(state.config.calculation.price_bucket_size);
+    // 动态 bucket 大小：当前价格的 0.1%，确保足够的价格精度
+    let dynamic_bucket_size = (current_price * 0.001).max(1.0);
+    let generator = HeatmapGenerator::new(dynamic_bucket_size);
 
     // 检查 aggTrades 数据是否足够
     let now = chrono::Utc::now().timestamp_millis();
@@ -264,7 +266,9 @@ async fn get_top_liquidations(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let generator = HeatmapGenerator::new(state.config.calculation.price_bucket_size);
+    // 动态 bucket 大小：当前价格的 0.1%，确保足够的价格精度
+    let dynamic_bucket_size = (current_price * 0.001).max(1.0);
+    let generator = HeatmapGenerator::new(dynamic_bucket_size);
 
     // 检查 aggTrades 数据是否足够
     let now = chrono::Utc::now().timestamp_millis();
@@ -525,7 +529,9 @@ async fn get_chart_page(
     };
 
     let current_price = state.kline_client.get_price(&symbol).await.unwrap_or(0.0);
-    let generator = HeatmapGenerator::new(state.config.calculation.price_bucket_size);
+    // 动态 bucket 大小：当前价格的 0.1%，确保足够的价格精度
+    let dynamic_bucket_size = (current_price * 0.001).max(1.0);
+    let generator = HeatmapGenerator::new(dynamic_bucket_size);
 
     let now = chrono::Utc::now().timestamp_millis();
     let start_time = now - interval_ms;
