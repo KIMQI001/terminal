@@ -2,26 +2,38 @@ use crate::kline::{AggTrade, Kline, OpenInterestHist};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// 固定的杠杆档位
-pub const LEVERAGE_TIERS: [u32; 4] = [10, 25, 50, 100];
+/// 固定的杠杆档位（增加 125x 让清算价更接近当前价格）
+pub const LEVERAGE_TIERS: [u32; 5] = [10, 25, 50, 100, 125];
 
-/// 杠杆分布权重（基于市场经验和 forceOrder 数据统计）
-/// 大部分交易者使用 20-50x 杠杆
-const LEVERAGE_WEIGHTS: [(u32, f64); 4] = [
+/// 杠杆分布权重（基于 Coinglass 数据校准）
+/// 高杠杆交易者更容易被清算，需要给高杠杆更高权重
+/// 根据真实 forceOrder 数据，大多数清算发生在高杠杆
+const LEVERAGE_WEIGHTS: [(u32, f64); 5] = [
     (10, 0.10),   // 10x 占 10%
-    (25, 0.30),   // 25x 占 30%
-    (50, 0.40),   // 50x 占 40%
-    (100, 0.20),  // 100x 占 20%
+    (25, 0.20),   // 25x 占 20%
+    (50, 0.25),   // 50x 占 25%
+    (100, 0.30),  // 100x 占 30%
+    (125, 0.15),  // 125x 占 15% - 高杠杆让清算价更接近当前价
 ];
 
 /// 时间衰减半衰期（小时）
 /// 仓位每过这么久，存活概率减半
-const DECAY_HALF_LIFE_HOURS: f64 = 8.0;
+/// Coinglass 数据显示约 12h 衰减更符合实际
+const DECAY_HALF_LIFE_HOURS: f64 = 12.0;
 
 /// 新开仓比例
 /// 不是所有交易都是新开仓，很多是平仓或换手
-/// 根据 CG 数据对比校准
-const NEW_POSITION_RATIO: f64 = 0.50;
+/// 根据 Coinglass 数据对比校准（17.8h 数据）：
+/// CG: 多头 0.83B, 空头 0.92B
+/// 我们: 0.37B (约 44%)
+/// 调整: 0.12 * (0.83/0.37) ≈ 0.27
+const NEW_POSITION_RATIO: f64 = 0.27;
+
+/// 空头加成因子
+/// Coinglass 显示空头仓位比多头多约 12%
+/// 可能原因：空头持仓时间更长、或市场结构性空头偏多
+/// CG 空头/多头 = 0.92/0.82 = 1.12
+const SHORT_BIAS_FACTOR: f64 = 1.12;
 
 /// 计算时间衰减因子
 /// 基于指数衰减模型：decay = 0.5^(hours / half_life)
@@ -33,13 +45,75 @@ fn calc_time_decay(trade_timestamp: i64, current_timestamp: i64) -> f64 {
     0.5_f64.powf(hours_elapsed / DECAY_HALF_LIFE_HOURS)
 }
 
-/// 获取杠杆权重
-fn get_leverage_weight(leverage: u32) -> f64 {
+/// 获取默认杠杆权重
+fn get_default_leverage_weight(leverage: u32) -> f64 {
     LEVERAGE_WEIGHTS
         .iter()
         .find(|(lev, _)| *lev == leverage)
         .map(|(_, weight)| *weight)
         .unwrap_or(0.25)
+}
+
+/// 动态杠杆权重（从真实清算数据学习）
+#[derive(Debug, Clone)]
+pub struct DynamicLeverageWeights {
+    weights: HashMap<u32, f64>,
+    sample_count: u32,
+}
+
+impl DynamicLeverageWeights {
+    /// 从清算数据分布创建动态权重
+    /// distribution: (杠杆, 比例) 列表
+    pub fn from_distribution(distribution: Vec<(u32, f64)>) -> Option<Self> {
+        if distribution.is_empty() {
+            return None;
+        }
+
+        let total: f64 = distribution.iter().map(|(_, r)| r).sum();
+        if total == 0.0 {
+            return None;
+        }
+
+        // 映射到标准杠杆档位 [10, 25, 50, 100]
+        let mut weights: HashMap<u32, f64> = HashMap::new();
+        for tier in LEVERAGE_TIERS {
+            weights.insert(tier, 0.0);
+        }
+
+        for (lev, ratio) in &distribution {
+            // 将非标准杠杆映射到最近的标准档位
+            let nearest_tier = LEVERAGE_TIERS
+                .iter()
+                .min_by_key(|&&t| (t as i32 - *lev as i32).abs())
+                .copied()
+                .unwrap_or(25);
+
+            *weights.entry(nearest_tier).or_insert(0.0) += ratio;
+        }
+
+        // 重新归一化
+        let sum: f64 = weights.values().sum();
+        if sum > 0.0 {
+            for v in weights.values_mut() {
+                *v /= sum;
+            }
+        }
+
+        Some(Self {
+            weights,
+            sample_count: distribution.len() as u32,
+        })
+    }
+
+    /// 获取指定杠杆的权重
+    pub fn get_weight(&self, leverage: u32) -> f64 {
+        self.weights.get(&leverage).copied().unwrap_or_else(|| get_default_leverage_weight(leverage))
+    }
+
+    /// 获取样本数量
+    pub fn sample_count(&self) -> u32 {
+        self.sample_count
+    }
 }
 
 /// 热力图数据（按杠杆分层）
@@ -93,6 +167,7 @@ impl HeatmapGenerator {
     /// * `trades` - 聚合交易数据
     /// * `current_price` - 当前价格
     /// * `current_timestamp` - 当前时间戳（毫秒），用于计算时间衰减
+    /// * `dynamic_weights` - 可选的动态杠杆权重（从真实清算数据学习）
     ///
     /// # Returns
     /// 热力图数据（按杠杆分层）
@@ -102,6 +177,18 @@ impl HeatmapGenerator {
         trades: &[AggTrade],
         current_price: f64,
         current_timestamp: i64,
+    ) -> HeatmapData {
+        self.generate_from_trades_with_dynamic_weights(symbol, trades, current_price, current_timestamp, None)
+    }
+
+    /// 从 aggTrades 数据生成热力图（带动态杠杆权重）
+    pub fn generate_from_trades_with_dynamic_weights(
+        &self,
+        symbol: &str,
+        trades: &[AggTrade],
+        current_price: f64,
+        current_timestamp: i64,
+        dynamic_weights: Option<&DynamicLeverageWeights>,
     ) -> HeatmapData {
         // 确定价格范围（当前价 ±30%）
         let price_min = current_price * 0.7;
@@ -137,8 +224,11 @@ impl HeatmapGenerator {
                 let leverage_key = format!("{}x", leverage);
 
                 // 应用杠杆权重、时间衰减和新开仓比例
-                let weight = get_leverage_weight(leverage);
-                let position_value = base_value * weight * decay_factor * NEW_POSITION_RATIO;
+                // 优先使用动态权重（从真实清算数据学习），否则用默认权重
+                let weight = dynamic_weights
+                    .map(|w| w.get_weight(leverage))
+                    .unwrap_or_else(|| get_default_leverage_weight(leverage));
+                let base_position_value = base_value * weight * decay_factor * NEW_POSITION_RATIO;
 
                 if is_long {
                     // 做多清算：清算价 < 当前价格才有意义（价格下跌触发）
@@ -146,11 +236,13 @@ impl HeatmapGenerator {
                         let bucket = ((liq_price - price_min) / self.bucket_size) as usize;
                         if bucket < bucket_count {
                             let map = long_by_leverage.get_mut(&leverage_key).unwrap();
-                            *map.entry(bucket).or_insert(0.0) += position_value;
+                            *map.entry(bucket).or_insert(0.0) += base_position_value;
                         }
                     }
                 } else {
                     // 做空清算：清算价 > 当前价格才有意义（价格上涨触发）
+                    // 应用空头加成因子
+                    let position_value = base_position_value * SHORT_BIAS_FACTOR;
                     if liq_price > current_price && liq_price <= price_max {
                         let bucket = ((liq_price - price_min) / self.bucket_size) as usize;
                         if bucket < bucket_count {
@@ -272,6 +364,18 @@ impl HeatmapGenerator {
         current_price: f64,
         current_timestamp: i64,
     ) -> HeatmapData {
+        self.generate_from_klines_with_dynamic_weights(symbol, klines, current_price, current_timestamp, None)
+    }
+
+    /// 从 K线数据生成热力图（带动态杠杆权重）
+    pub fn generate_from_klines_with_dynamic_weights(
+        &self,
+        symbol: &str,
+        klines: &[Kline],
+        current_price: f64,
+        current_timestamp: i64,
+        dynamic_weights: Option<&DynamicLeverageWeights>,
+    ) -> HeatmapData {
         // 确定价格范围（当前价 ±30%）
         let price_min = current_price * 0.7;
         let price_max = current_price * 1.3;
@@ -301,8 +405,11 @@ impl HeatmapGenerator {
             // 对每个杠杆档位按权重计算清算价
             for leverage in LEVERAGE_TIERS {
                 let leverage_key = format!("{}x", leverage);
-                let weight = get_leverage_weight(leverage);
-                let weighted_value = base_value * weight * decay_factor * NEW_POSITION_RATIO;
+                // 优先使用动态权重（从真实清算数据学习），否则用默认权重
+                let weight = dynamic_weights
+                    .map(|w| w.get_weight(leverage))
+                    .unwrap_or_else(|| get_default_leverage_weight(leverage));
+                let base_weighted_value = base_value * weight * decay_factor * NEW_POSITION_RATIO;
 
                 // 做多清算
                 let long_liq_price = Self::calc_liquidation_price(entry_price, leverage, true);
@@ -310,17 +417,18 @@ impl HeatmapGenerator {
                     let bucket = ((long_liq_price - price_min) / self.bucket_size) as usize;
                     if bucket < bucket_count {
                         let map = long_by_leverage.get_mut(&leverage_key).unwrap();
-                        *map.entry(bucket).or_insert(0.0) += weighted_value;
+                        *map.entry(bucket).or_insert(0.0) += base_weighted_value;
                     }
                 }
 
-                // 做空清算
+                // 做空清算（应用空头加成因子）
+                let short_weighted_value = base_weighted_value * SHORT_BIAS_FACTOR;
                 let short_liq_price = Self::calc_liquidation_price(entry_price, leverage, false);
                 if short_liq_price > current_price && short_liq_price <= price_max {
                     let bucket = ((short_liq_price - price_min) / self.bucket_size) as usize;
                     if bucket < bucket_count {
                         let map = short_by_leverage.get_mut(&leverage_key).unwrap();
-                        *map.entry(bucket).or_insert(0.0) += weighted_value;
+                        *map.entry(bucket).or_insert(0.0) += short_weighted_value;
                     }
                 }
             }
@@ -405,6 +513,7 @@ impl HeatmapGenerator {
     /// * `oi_data` - Open Interest 历史数据（按时间排序）
     /// * `current_price` - 当前价格
     /// * `current_timestamp` - 当前时间戳
+    /// * `dynamic_weights` - 可选的动态杠杆权重
     pub fn generate_from_trades_with_oi(
         &self,
         symbol: &str,
@@ -412,6 +521,7 @@ impl HeatmapGenerator {
         oi_data: &[OpenInterestHist],
         current_price: f64,
         current_timestamp: i64,
+        dynamic_weights: Option<&DynamicLeverageWeights>,
     ) -> HeatmapData {
         // 确定价格范围（当前价 ±30%）
         let price_min = current_price * 0.7;
@@ -483,7 +593,10 @@ impl HeatmapGenerator {
                 let leverage_key = format!("{}x", leverage);
 
                 // 应用杠杆权重、时间衰减和 OI 因子
-                let weight = get_leverage_weight(leverage);
+                // 优先使用动态权重（从真实清算数据学习），否则用默认权重
+                let weight = dynamic_weights
+                    .map(|w| w.get_weight(leverage))
+                    .unwrap_or_else(|| get_default_leverage_weight(leverage));
                 let position_value = base_value * weight * decay_factor * oi_factor;
 
                 if is_long {

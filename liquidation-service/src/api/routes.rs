@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::config::Config;
-use crate::kline::{AggTrade, BinanceKlineClient};
-use crate::liquidation::{HeatmapData, HeatmapGenerator};
+use crate::kline::{AggTrade, BinanceKlineClient, OpenInterestHist};
+use crate::liquidation::{DynamicLeverageWeights, HeatmapData, HeatmapGenerator};
 use crate::storage::Storage;
 
 /// 应用状态
@@ -101,8 +101,35 @@ async fn get_heatmap(
     let now = chrono::Utc::now().timestamp_millis();
     let start_time = now - interval_ms;
 
+    // 尝试从真实清算数据获取动态杠杆权重（最近 7 天的数据）
+    let dynamic_weights = if state.config.leverage.use_dynamic {
+        state.storage.get_leverage_distribution(&symbol, 7)
+            .ok()
+            .and_then(|dist| DynamicLeverageWeights::from_distribution(dist))
+    } else {
+        None
+    };
+
+    if let Some(ref weights) = dynamic_weights {
+        tracing::debug!("Using dynamic leverage weights from {} samples", weights.sample_count());
+    }
+
     let oldest_time = state.storage.get_agg_trades_min_time(&symbol).unwrap_or(None);
     let use_agg_trades = oldest_time.map(|t| t <= start_time).unwrap_or(false);
+
+    // 获取 OI 历史数据（5分钟粒度，覆盖查询时间范围）
+    let oi_limit = match interval.as_str() {
+        "1w" => 2016,  // 7天 * 24小时 * 12（每小时12个5分钟）
+        _ => 288,       // 1天 * 24小时 * 12
+    };
+    let oi_data = state
+        .kline_client
+        .get_open_interest_hist(&symbol, "5m", Some(oi_limit), Some(start_time), Some(now))
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("Failed to fetch OI data: {}, using without OI", e);
+            vec![]
+        });
 
     let (heatmap, data_source) = if use_agg_trades {
         // 使用 aggTrades 数据（更精确）
@@ -126,8 +153,30 @@ async fn get_heatmap(
             })
             .collect();
 
-        let heatmap = generator.generate_from_trades(&symbol, &trades, current_price);
-        (heatmap, format!("aggTrades({})", trades.len()))
+        // 使用 OI 数据来区分开仓/平仓
+        let heatmap = if !oi_data.is_empty() {
+            tracing::debug!("Using OI data with {} records", oi_data.len());
+            generator.generate_from_trades_with_oi(
+                &symbol,
+                &trades,
+                &oi_data,
+                current_price,
+                now,
+                dynamic_weights.as_ref(),
+            )
+        } else {
+            generator.generate_from_trades_with_dynamic_weights(
+                &symbol,
+                &trades,
+                current_price,
+                now,
+                dynamic_weights.as_ref(),
+            )
+        };
+        (heatmap, format!("aggTrades({}){}",
+            trades.len(),
+            if !oi_data.is_empty() { format!("+oi({})", oi_data.len()) } else { String::new() }
+        ))
     } else {
         // 回退到 K 线估算
         let kline_count = match interval.as_str() {
@@ -144,7 +193,13 @@ async fn get_heatmap(
                 (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
             })?;
 
-        let heatmap = generator.generate_from_klines(&symbol, &klines, current_price);
+        let heatmap = generator.generate_from_klines_with_dynamic_weights(
+            &symbol,
+            &klines,
+            current_price,
+            now,
+            dynamic_weights.as_ref(),
+        );
         (heatmap, format!("klines({})", klines.len()))
     };
 
@@ -583,6 +638,7 @@ async fn get_chart_page(
 <html>
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="refresh" content="120">
     <title>Liquidation Chart - {symbol}</title>
     <style>
         body {{ font-family: monospace; background: #1a1a1a; color: #fff; padding: 8px; margin: 0; }}
@@ -611,7 +667,7 @@ async fn get_chart_page(
 <body>
     <h1>{symbol} 清算地图 ({interval})</h1>
     <div class="info">
-        当前价: {current_price:.2} | 数据源: {data_source} | 刷新: <a href="/chart?symbol={symbol}&interval={interval}" style="color:#4fc3f7;">点击刷新</a>
+        当前价: {current_price:.2} | 数据源: {data_source} | 自动刷新: 2min
     </div>
     <div class="legend">
         <span class="short-label">◀ 空头清算 (价格上涨触发)</span>

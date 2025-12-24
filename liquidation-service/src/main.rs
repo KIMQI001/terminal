@@ -79,6 +79,7 @@ async fn main() -> anyhow::Result<()> {
     let cleanup_storage = storage.clone();
     tokio::spawn(async move {
         const CLEANUP_INTERVAL_SECS: u64 = 3600; // 1 小时
+        const VACUUM_THRESHOLD: u32 = 100000; // 删除超过 10 万条时执行 VACUUM
 
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(CLEANUP_INTERVAL_SECS)).await;
@@ -87,6 +88,15 @@ async fn main() -> anyhow::Result<()> {
                 Ok(deleted) => {
                     if deleted > 0 {
                         tracing::info!("Cleanup: deleted {} old agg_trades (keeping {}h)", deleted, retention_hours);
+
+                        // 删除大量数据后执行 VACUUM 回收空间
+                        if deleted >= VACUUM_THRESHOLD {
+                            if let Err(e) = cleanup_storage.vacuum() {
+                                tracing::error!("VACUUM failed: {}", e);
+                            } else {
+                                tracing::info!("VACUUM completed, database space reclaimed");
+                            }
+                        }
                     }
                 }
                 Err(e) => {

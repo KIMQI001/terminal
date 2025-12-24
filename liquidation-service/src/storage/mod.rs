@@ -426,6 +426,13 @@ impl Storage {
 
         Ok(deleted as u32)
     }
+
+    /// 压缩数据库，回收删除数据后的空间
+    pub fn vacuum(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("VACUUM", [])?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
