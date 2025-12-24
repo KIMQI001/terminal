@@ -597,7 +597,7 @@ async fn get_chart_page(
 
     // 生成柱状图 HTML（从高到低）
     let mut bars_html = String::new();
-    let bucket_size = state.config.calculation.price_bucket_size;
+    let bucket_size = dynamic_bucket_size;
 
     // 收集需要显示的价格索引，然后反转（从高到低）
     let visible_indices: Vec<usize> = heatmap.prices.iter().enumerate()
