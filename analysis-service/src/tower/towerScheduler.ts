@@ -190,19 +190,27 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     // 2. 检查当前订单数量和位置
     const orderCheck = await checkOrdersCount(exchange, exchangeConfig, management.symbol, management.towerLayers);
     if (orderCheck.sufficient || orderCheck.hasNearOrder) {
-      const reason = orderCheck.hasNearOrder ? '有订单在当前价附近' : `订单充足 多${orderCheck.bullish}空${orderCheck.bearish}`;
-      console.log(`[TowerScheduler] 跳过更新: ${reason}`);
-      addRecord({
-        managementId: management.id,
-        bullishCount: orderCheck.bullish,
-        bearishCount: orderCheck.bearish,
-        totalMargin: 0,
-        success: true,
-        skipped: true,
-        errorMessage: undefined,
-      });
-      updateRunTime(management.id);
-      return;
+      // 订单充足或有近距离订单时，检查是否有更优的 CG 首单机会
+      const cgOpportunity = await checkCGUpdateOpportunity(exchange, exchangeConfig, management.symbol);
+
+      if (!cgOpportunity.shouldUpdate) {
+        const reason = orderCheck.hasNearOrder ? '有订单在当前价附近' : `订单充足 多${orderCheck.bullish}空${orderCheck.bearish}`;
+        console.log(`[TowerScheduler] 跳过更新: ${reason}`);
+        addRecord({
+          managementId: management.id,
+          bullishCount: orderCheck.bullish,
+          bearishCount: orderCheck.bearish,
+          totalMargin: 0,
+          success: true,
+          skipped: true,
+          errorMessage: undefined,
+        });
+        updateRunTime(management.id);
+        return;
+      }
+
+      // 有 CG 机会，继续更新
+      console.log(`[TowerScheduler] CG机会触发更新: ${cgOpportunity.reason}`);
     }
 
     // 3. 获取塔块数据
@@ -326,6 +334,9 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
 // 当前价格附近订单检查阈值（百分之一 = 1%）
 const NEAR_PRICE_RATIO = 1 / 100;
 
+// CG 首单更新参数
+const CG_TOP_RATIO_THRESHOLD = 1.2;  // top1 需要比 top2 大 20%
+
 /**
  * 检查订单数量
  */
@@ -378,6 +389,109 @@ async function checkOrdersCount(
   } catch (error) {
     console.error('[TowerScheduler] 检查订单失败:', error);
     return { bullish: 0, bearish: 0, sufficient: false, hasNearOrder: false };
+  }
+}
+
+/**
+ * 检查 CG 首单更新机会
+ * 条件：
+ * 1. 新首单价格更优（多单更低，空单更高）
+ * 2. top1 爆仓量比 top2 大 20% 以上
+ * 3. 当前价格 1% 距离内没有订单
+ */
+async function checkCGUpdateOpportunity(
+  exchange: ExchangeType,
+  exchangeConfig: exchangeAdapter.ExchangeApiConfig,
+  symbol: string
+): Promise<{ shouldUpdate: boolean; reason?: string }> {
+  try {
+    // 1. 获取当前价格
+    const baseUrl = exchange === 'aster'
+      ? 'https://fapi.asterdex.com'
+      : (exchangeConfig.isTestnet ? 'https://testnet.binancefuture.com' : 'https://fapi.binance.com');
+    const priceResponse = await fetch(`${baseUrl}/fapi/v1/ticker/price?symbol=${symbol}`);
+    if (!priceResponse.ok) return { shouldUpdate: false };
+    const priceData = await priceResponse.json() as { price: string };
+    const currentPrice = parseFloat(priceData.price);
+
+    // 2. 获取当前挂单
+    const ordersResult = await exchangeAdapter.getOpenOrders(exchange, exchangeConfig, symbol);
+    if (!ordersResult.success || !ordersResult.orders) {
+      return { shouldUpdate: false };
+    }
+
+    const towerOrders = ordersResult.orders.filter(
+      o => o.clientOrderId?.startsWith('ict_tower') && o.type === 'LIMIT'
+    );
+
+    // 3. 检查 1% 距离内是否有订单（有则不更新）
+    const nearDistance = currentPrice * NEAR_PRICE_RATIO;
+    const hasNearOrder = towerOrders.some(o => Math.abs(o.price - currentPrice) <= nearDistance);
+    if (hasNearOrder) {
+      return { shouldUpdate: false, reason: '1%距离内有订单' };
+    }
+
+    // 4. 获取 CG 数据
+    const cgData = await fetchCGLiqData(symbol);
+    if (!cgData) {
+      return { shouldUpdate: false, reason: '无CG数据' };
+    }
+
+    // 5. 获取日K数据
+    const dailyHL = await getDailyHL(symbol, currentPrice);
+    if (!dailyHL) {
+      return { shouldUpdate: false, reason: '无日K数据' };
+    }
+
+    // 6. 检查多单机会
+    const longBelowD = cgData.longTop.filter(l => l.price < dailyHL.dStart);
+    if (longBelowD.length >= 2) {
+      // 按爆仓量排序
+      const sorted = [...longBelowD].sort((a, b) => b.amount - a.amount);
+      const top1 = sorted[0];
+      const top2 = sorted[1];
+
+      // top1 比 top2 大 20% 以上
+      if (top1.amount >= top2.amount * CG_TOP_RATIO_THRESHOLD) {
+        const newEntry = top1.price + 200;
+        // 检查是否比现有多单更优（入场价更低）
+        const existingLongs = towerOrders.filter(o => o.side === 'BUY');
+        const lowestLong = existingLongs.length > 0
+          ? Math.min(...existingLongs.map(o => o.price))
+          : Infinity;
+
+        if (newEntry < lowestLong) {
+          console.log(`[TowerScheduler] CG多单机会: 新入场${newEntry.toFixed(0)} < 现有最低${lowestLong.toFixed(0)}, top1=${top1.amount.toFixed(0)}M > top2=${top2.amount.toFixed(0)}M`);
+          return { shouldUpdate: true, reason: `CG多单更优: ${newEntry.toFixed(0)} < ${lowestLong.toFixed(0)}` };
+        }
+      }
+    }
+
+    // 7. 检查空单机会
+    const shortAboveP = cgData.shortTop.filter(s => s.price > dailyHL.pStart);
+    if (shortAboveP.length >= 2) {
+      const sorted = [...shortAboveP].sort((a, b) => b.amount - a.amount);
+      const top1 = sorted[0];
+      const top2 = sorted[1];
+
+      if (top1.amount >= top2.amount * CG_TOP_RATIO_THRESHOLD) {
+        const newEntry = top1.price - 200;
+        const existingShorts = towerOrders.filter(o => o.side === 'SELL');
+        const highestShort = existingShorts.length > 0
+          ? Math.max(...existingShorts.map(o => o.price))
+          : 0;
+
+        if (newEntry > highestShort) {
+          console.log(`[TowerScheduler] CG空单机会: 新入场${newEntry.toFixed(0)} > 现有最高${highestShort.toFixed(0)}, top1=${top1.amount.toFixed(0)}M > top2=${top2.amount.toFixed(0)}M`);
+          return { shouldUpdate: true, reason: `CG空单更优: ${newEntry.toFixed(0)} > ${highestShort.toFixed(0)}` };
+        }
+      }
+    }
+
+    return { shouldUpdate: false };
+  } catch (error) {
+    console.error('[TowerScheduler] 检查CG机会异常:', error);
+    return { shouldUpdate: false };
   }
 }
 
