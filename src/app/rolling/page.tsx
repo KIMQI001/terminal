@@ -258,7 +258,7 @@ export default function RollingPage() {
               <div>
                 <label className={labelClass}>止损 %</label>
                 <select value={stopLoss} onChange={(e) => { const v = Number(e.target.value); setStopLoss(v); save(STORAGE_KEYS.STOP_LOSS, v); }} className={inputClass}>
-                  {[0, 2, 3, 5, 8, 10].map(n => <option key={n} value={n}>{n === 0 ? '不止损' : `${n}%`}</option>)}
+                  {[0, 1, 2, 3, 5, 8, 10].map(n => <option key={n} value={n}>{n === 0 ? '不止损' : `${n}%`}</option>)}
                 </select>
               </div>
             </div>
