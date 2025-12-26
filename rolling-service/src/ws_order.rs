@@ -321,7 +321,7 @@ impl WsOrderManager {
             .context("接收响应失败")?
     }
 
-    /// 下止盈单 (TAKE_PROFIT_MARKET)
+    /// 下止盈单 (TAKE_PROFIT_MARKET) - 使用 Algo Order API
     /// is_buy=false: 卖出止盈（做多平仓）
     /// is_buy=true: 买入止盈（做空平仓）
     pub async fn place_take_profit(
@@ -332,52 +332,60 @@ impl WsOrderManager {
         client_order_id: &str,
         is_buy: bool,
     ) -> Result<OrderResponse> {
-        let mut params = HashMap::new();
-
         let (side, position_side) = if is_buy {
             ("BUY", "SHORT")   // 做空止盈：买入平空
         } else {
             ("SELL", "LONG")   // 做多止盈：卖出平多
         };
 
-        params.insert("apiKey".to_string(), Value::String(self.config.api_key.clone()));
-        params.insert("symbol".to_string(), Value::String(symbol.to_string()));
-        params.insert("side".to_string(), Value::String(side.to_string()));
-        params.insert("type".to_string(), Value::String("TAKE_PROFIT_MARKET".to_string()));
-        params.insert("quantity".to_string(), Value::String(format!("{:.3}", quantity)));
-        params.insert("stopPrice".to_string(), Value::String(format!("{:.2}", trigger_price)));
-        params.insert("positionSide".to_string(), Value::String(position_side.to_string()));
-        params.insert("newClientOrderId".to_string(), Value::String(client_order_id.to_string()));
-
         let timestamp = chrono::Utc::now().timestamp_millis();
-        params.insert("timestamp".to_string(), Value::Number(timestamp.into()));
+        let query = format!(
+            "algoType=CONDITIONAL&symbol={}&side={}&positionSide={}&type=TAKE_PROFIT_MARKET&quantity={:.3}&triggerPrice={:.2}&clientAlgoId={}&timestamp={}",
+            symbol, side, position_side, quantity, trigger_price, client_order_id, timestamp
+        );
 
-        let signature = self.generate_signature(&params)?;
-        params.insert("signature".to_string(), Value::String(signature));
+        let mut mac = HmacSha256::new_from_slice(self.config.api_secret.as_bytes())?;
+        mac.update(query.as_bytes());
+        let signature = hex::encode(mac.finalize().into_bytes());
 
-        let request_id = Uuid::new_v4().to_string();
-        let ws_request = WsRequest {
-            id: request_id,
-            method: "order.place".to_string(),
-            params,
-        };
+        let url = format!("{}/fapi/v1/algoOrder?{}&signature={}",
+                         self.config.api_url, query, signature);
 
-        let (response_tx, response_rx) = oneshot::channel();
-        let pending = PendingRequest {
-            request: ws_request,
-            response_tx,
-        };
+        let resp = self.http_client
+            .post(&url)
+            .header("X-MBX-APIKEY", &self.config.api_key)
+            .send()
+            .await?;
 
-        self.request_tx.send(pending).await
-            .context("发送止盈请求失败")?;
+        let text = resp.text().await?;
 
-        timeout(Duration::from_secs(5), response_rx)
-            .await
-            .context("等待止盈响应超时")?
-            .context("接收止盈响应失败")?
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct AlgoOrderResp {
+            algo_id: i64,
+            client_algo_id: String,
+            success: bool,
+            #[serde(default)]
+            code: i32,
+            #[serde(default)]
+            msg: String,
+        }
+
+        let algo_resp: AlgoOrderResp = serde_json::from_str(&text)
+            .context(format!("解析止盈响应失败: {}", text))?;
+
+        if algo_resp.success {
+            Ok(OrderResponse {
+                order_id: algo_resp.algo_id,
+                client_order_id: algo_resp.client_algo_id,
+                status: "NEW".to_string(),
+            })
+        } else {
+            Err(anyhow!("API 错误 {}: {}", algo_resp.code, algo_resp.msg))
+        }
     }
 
-    /// 下止损单 (STOP_MARKET)
+    /// 下止损单 (STOP_MARKET) - 使用 Algo Order API
     /// is_buy=false: 卖出止损（做多平仓）
     /// is_buy=true: 买入止损（做空平仓）
     pub async fn place_stop_loss(
@@ -388,49 +396,57 @@ impl WsOrderManager {
         client_order_id: &str,
         is_buy: bool,
     ) -> Result<OrderResponse> {
-        let mut params = HashMap::new();
-
         let (side, position_side) = if is_buy {
             ("BUY", "SHORT")   // 做空止损：买入平空
         } else {
             ("SELL", "LONG")   // 做多止损：卖出平多
         };
 
-        params.insert("apiKey".to_string(), Value::String(self.config.api_key.clone()));
-        params.insert("symbol".to_string(), Value::String(symbol.to_string()));
-        params.insert("side".to_string(), Value::String(side.to_string()));
-        params.insert("type".to_string(), Value::String("STOP_MARKET".to_string()));
-        params.insert("quantity".to_string(), Value::String(format!("{:.3}", quantity)));
-        params.insert("stopPrice".to_string(), Value::String(format!("{:.2}", trigger_price)));
-        params.insert("positionSide".to_string(), Value::String(position_side.to_string()));
-        params.insert("newClientOrderId".to_string(), Value::String(client_order_id.to_string()));
-
         let timestamp = chrono::Utc::now().timestamp_millis();
-        params.insert("timestamp".to_string(), Value::Number(timestamp.into()));
+        let query = format!(
+            "algoType=CONDITIONAL&symbol={}&side={}&positionSide={}&type=STOP_MARKET&quantity={:.3}&triggerPrice={:.2}&clientAlgoId={}&timestamp={}",
+            symbol, side, position_side, quantity, trigger_price, client_order_id, timestamp
+        );
 
-        let signature = self.generate_signature(&params)?;
-        params.insert("signature".to_string(), Value::String(signature));
+        let mut mac = HmacSha256::new_from_slice(self.config.api_secret.as_bytes())?;
+        mac.update(query.as_bytes());
+        let signature = hex::encode(mac.finalize().into_bytes());
 
-        let request_id = Uuid::new_v4().to_string();
-        let ws_request = WsRequest {
-            id: request_id,
-            method: "order.place".to_string(),
-            params,
-        };
+        let url = format!("{}/fapi/v1/algoOrder?{}&signature={}",
+                         self.config.api_url, query, signature);
 
-        let (response_tx, response_rx) = oneshot::channel();
-        let pending = PendingRequest {
-            request: ws_request,
-            response_tx,
-        };
+        let resp = self.http_client
+            .post(&url)
+            .header("X-MBX-APIKEY", &self.config.api_key)
+            .send()
+            .await?;
 
-        self.request_tx.send(pending).await
-            .context("发送止损请求失败")?;
+        let text = resp.text().await?;
 
-        timeout(Duration::from_secs(5), response_rx)
-            .await
-            .context("等待止损响应超时")?
-            .context("接收止损响应失败")?
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct AlgoOrderResp {
+            algo_id: i64,
+            client_algo_id: String,
+            success: bool,
+            #[serde(default)]
+            code: i32,
+            #[serde(default)]
+            msg: String,
+        }
+
+        let algo_resp: AlgoOrderResp = serde_json::from_str(&text)
+            .context(format!("解析止损响应失败: {}", text))?;
+
+        if algo_resp.success {
+            Ok(OrderResponse {
+                order_id: algo_resp.algo_id,
+                client_order_id: algo_resp.client_algo_id,
+                status: "NEW".to_string(),
+            })
+        } else {
+            Err(anyhow!("API 错误 {}: {}", algo_resp.code, algo_resp.msg))
+        }
     }
 
     /// 取消订单
