@@ -94,8 +94,15 @@ impl GridEngine {
     /// 初始化：根据方向在价格上方或下方创建网格订单
     /// 做多: 价格下方挂买单
     /// 做空: 价格上方挂卖单
+    /// 如果设置了 start_roll_distance，则等盈利达到后再下单
     pub async fn initialize(&self, base_price: f64) -> Vec<GridOrderAction> {
         *self.base_price.write().await = base_price;
+
+        // 如果设置了开始补单距离，初始化时不下单，等盈利后再补
+        if self.rolling_config.start_roll_distance > 0.0 {
+            info!("初始化跳过: 需盈利 {:.1}% 后开始下单", self.rolling_config.start_roll_distance);
+            return Vec::new();
+        }
 
         let mut actions = Vec::new();
         let spacing = self.grid_config.grid_spacing;
