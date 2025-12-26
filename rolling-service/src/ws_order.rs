@@ -339,8 +339,9 @@ impl WsOrderManager {
         };
 
         let timestamp = chrono::Utc::now().timestamp_millis();
+        // 使用通用格式化，保留足够精度，Binance 会自动处理
         let query = format!(
-            "algoType=CONDITIONAL&symbol={}&side={}&positionSide={}&type=TAKE_PROFIT_MARKET&quantity={:.3}&triggerPrice={:.2}&clientAlgoId={}&timestamp={}",
+            "algoType=CONDITIONAL&symbol={}&side={}&positionSide={}&type=TAKE_PROFIT_MARKET&quantity={:.3}&triggerPrice={}&clientAlgoId={}&timestamp={}",
             symbol, side, position_side, quantity, trigger_price, client_order_id, timestamp
         );
 
@@ -359,12 +360,14 @@ impl WsOrderManager {
 
         let text = resp.text().await?;
 
+        // Algo Order API 成功时直接返回订单信息，失败时返回 code/msg
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct AlgoOrderResp {
+            #[serde(default)]
             algo_id: i64,
+            #[serde(default)]
             client_algo_id: String,
-            success: bool,
             #[serde(default)]
             code: i32,
             #[serde(default)]
@@ -374,7 +377,8 @@ impl WsOrderManager {
         let algo_resp: AlgoOrderResp = serde_json::from_str(&text)
             .context(format!("解析止盈响应失败: {}", text))?;
 
-        if algo_resp.success {
+        // 如果有 algo_id 说明成功
+        if algo_resp.algo_id > 0 {
             Ok(OrderResponse {
                 order_id: algo_resp.algo_id,
                 client_order_id: algo_resp.client_algo_id,
@@ -403,8 +407,9 @@ impl WsOrderManager {
         };
 
         let timestamp = chrono::Utc::now().timestamp_millis();
+        // 使用通用格式化，保留足够精度，Binance 会自动处理
         let query = format!(
-            "algoType=CONDITIONAL&symbol={}&side={}&positionSide={}&type=STOP_MARKET&quantity={:.3}&triggerPrice={:.2}&clientAlgoId={}&timestamp={}",
+            "algoType=CONDITIONAL&symbol={}&side={}&positionSide={}&type=STOP_MARKET&quantity={:.3}&triggerPrice={}&clientAlgoId={}&timestamp={}",
             symbol, side, position_side, quantity, trigger_price, client_order_id, timestamp
         );
 
@@ -423,12 +428,14 @@ impl WsOrderManager {
 
         let text = resp.text().await?;
 
+        // Algo Order API 成功时直接返回订单信息，失败时返回 code/msg
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct AlgoOrderResp {
+            #[serde(default)]
             algo_id: i64,
+            #[serde(default)]
             client_algo_id: String,
-            success: bool,
             #[serde(default)]
             code: i32,
             #[serde(default)]
@@ -438,7 +445,8 @@ impl WsOrderManager {
         let algo_resp: AlgoOrderResp = serde_json::from_str(&text)
             .context(format!("解析止损响应失败: {}", text))?;
 
-        if algo_resp.success {
+        // 如果有 algo_id 说明成功
+        if algo_resp.algo_id > 0 {
             Ok(OrderResponse {
                 order_id: algo_resp.algo_id,
                 client_order_id: algo_resp.client_algo_id,

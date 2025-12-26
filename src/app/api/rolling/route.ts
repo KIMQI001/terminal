@@ -21,7 +21,7 @@ const BINARY_PATH = path.join(ROLLING_SERVICE_DIR, 'target/release/rolling-servi
 // 支持的交易对精度配置
 const SYMBOL_PRECISION: Record<string, { price: number; quantity: number }> = {
   'ETHUSDC': { price: 2, quantity: 3 },
-  'BTCUSDC': { price: 2, quantity: 3 },
+  'BTCUSDC': { price: 1, quantity: 3 },  // BTC 价格精度是 1 (如 86088.4)
 };
 
 // 存储运行中的进程（按用户ID）
