@@ -130,9 +130,9 @@ async fn main() -> Result<()> {
                     &tp_action.client_order_id,
                     tp_action.is_buy,
                 ).await {
-                    Ok(_) => {
-                        engine.set_take_profit_order_id(Some(tp_action.client_order_id)).await;
-                        info!("止盈单已设置");
+                    Ok(resp) => {
+                        engine.set_take_profit_order_id(Some(resp.order_id)).await;
+                        info!("止盈单已设置, algo_id={}", resp.order_id);
                     }
                     Err(e) => error!("止盈单失败: {}", e),
                 }
@@ -148,9 +148,9 @@ async fn main() -> Result<()> {
                         &sl_action.client_order_id,
                         sl_action.is_buy,
                     ).await {
-                        Ok(_) => {
-                            engine.set_stop_loss_order_id(Some(sl_action.client_order_id)).await;
-                            info!("止损单已设置");
+                        Ok(resp) => {
+                            engine.set_stop_loss_order_id(Some(resp.order_id)).await;
+                            info!("止损单已设置, algo_id={}", resp.order_id);
                         }
                         Err(e) => error!("止损单失败: {}", e),
                     }
@@ -228,7 +228,7 @@ async fn main() -> Result<()> {
                 if need_update_tp {
                     // 取消旧止盈单
                     if let Some(old_tp_id) = engine_order.get_take_profit_order_id().await {
-                        let _ = api_order.cancel_order(&symbol_order, &old_tp_id).await;
+                        let _ = api_order.cancel_algo_order(&symbol_order, old_tp_id).await;
                     }
 
                     // 下新止盈单
@@ -240,8 +240,8 @@ async fn main() -> Result<()> {
                             &tp_action.client_order_id,
                             tp_action.is_buy,
                         ).await {
-                            Ok(_) => {
-                                engine_order.set_take_profit_order_id(Some(tp_action.client_order_id)).await;
+                            Ok(resp) => {
+                                engine_order.set_take_profit_order_id(Some(resp.order_id)).await;
                                 info!("止盈单已更新");
                             }
                             Err(e) => error!("更新止盈单失败: {}", e),
@@ -252,7 +252,7 @@ async fn main() -> Result<()> {
                     if stop_loss_percent > 0.0 {
                         // 取消旧止损单
                         if let Some(old_sl_id) = engine_order.get_stop_loss_order_id().await {
-                            let _ = api_order.cancel_order(&symbol_order, &old_sl_id).await;
+                            let _ = api_order.cancel_algo_order(&symbol_order, old_sl_id).await;
                         }
 
                         // 下新止损单
@@ -264,8 +264,8 @@ async fn main() -> Result<()> {
                                 &sl_action.client_order_id,
                                 sl_action.is_buy,
                             ).await {
-                                Ok(_) => {
-                                    engine_order.set_stop_loss_order_id(Some(sl_action.client_order_id)).await;
+                                Ok(resp) => {
+                                    engine_order.set_stop_loss_order_id(Some(resp.order_id)).await;
                                     info!("止损单已更新");
                                 }
                                 Err(e) => error!("更新止损单失败: {}", e),
@@ -281,17 +281,19 @@ async fn main() -> Result<()> {
                     info!("止盈单成交: {} @ {}", update.filled_qty, update.filled_price);
                     engine_order.on_close_filled(update.filled_price).await;
 
-                    // 取消止损单
+                    // 取消止损单（使用 Algo Order API）
                     if let Some(sl_id) = engine_order.get_stop_loss_order_id().await {
-                        let _ = api_order.cancel_order(&symbol_order, &sl_id).await;
+                        let _ = api_order.cancel_algo_order(&symbol_order, sl_id).await;
+                        engine_order.set_stop_loss_order_id(None).await;
                     }
                 } else if update.client_order_id.starts_with("roll_sl_") {
                     info!("止损单成交: {} @ {}", update.filled_qty, update.filled_price);
                     engine_order.on_close_filled(update.filled_price).await;
 
-                    // 取消止盈单
+                    // 取消止盈单（使用 Algo Order API）
                     if let Some(tp_id) = engine_order.get_take_profit_order_id().await {
-                        let _ = api_order.cancel_order(&symbol_order, &tp_id).await;
+                        let _ = api_order.cancel_algo_order(&symbol_order, tp_id).await;
+                        engine_order.set_take_profit_order_id(None).await;
                     }
                 }
             }

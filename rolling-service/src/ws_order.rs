@@ -458,6 +458,39 @@ impl WsOrderManager {
         }
     }
 
+    /// 取消 Algo Order (止盈止损单)
+    pub async fn cancel_algo_order(&self, symbol: &str, algo_id: i64) -> Result<()> {
+        let timestamp = chrono::Utc::now().timestamp_millis();
+        let query = format!("symbol={}&algoId={}&timestamp={}", symbol, algo_id, timestamp);
+
+        let mut mac = HmacSha256::new_from_slice(self.config.api_secret.as_bytes())?;
+        mac.update(query.as_bytes());
+        let signature = hex::encode(mac.finalize().into_bytes());
+
+        let url = format!("{}/fapi/v1/algoOrder?{}&signature={}",
+                         self.config.api_url, query, signature);
+
+        let resp = self.http_client
+            .delete(&url)
+            .header("X-MBX-APIKEY", &self.config.api_key)
+            .send()
+            .await?;
+
+        if resp.status().is_success() {
+            debug!("Algo Order {} 已取消", algo_id);
+            Ok(())
+        } else {
+            let text = resp.text().await?;
+            // 如果订单已不存在，也认为成功
+            if text.contains("-20127") || text.contains("not exist") {
+                debug!("Algo Order {} 已不存在", algo_id);
+                Ok(())
+            } else {
+                Err(anyhow!("取消 Algo Order 失败: {}", text))
+            }
+        }
+    }
+
     /// 取消订单
     pub async fn cancel_order(&self, symbol: &str, client_order_id: &str) -> Result<()> {
         let mut params = HashMap::new();

@@ -50,8 +50,8 @@ pub struct GridEngine {
     current_price: Arc<RwLock<f64>>,        // 当前价格
     orders: Arc<RwLock<HashMap<String, ActiveOrder>>>,  // 活跃挂单
     position: Arc<RwLock<Position>>,        // 当前持仓
-    take_profit_order_id: Arc<RwLock<Option<String>>>,  // 当前止盈单ID
-    stop_loss_order_id: Arc<RwLock<Option<String>>>,    // 当前止损单ID
+    take_profit_order_id: Arc<RwLock<Option<i64>>>,  // 当前止盈单 algo_id
+    stop_loss_order_id: Arc<RwLock<Option<i64>>>,    // 当前止损单 algo_id
     total_margin: Arc<RwLock<f64>>,         // 累计投入保证金 (USDT)
 }
 
@@ -582,24 +582,24 @@ impl GridEngine {
         self.position.read().await.clone()
     }
 
-    /// 设置止盈单ID
-    pub async fn set_take_profit_order_id(&self, order_id: Option<String>) {
-        *self.take_profit_order_id.write().await = order_id;
+    /// 设置止盈单 algo_id
+    pub async fn set_take_profit_order_id(&self, algo_id: Option<i64>) {
+        *self.take_profit_order_id.write().await = algo_id;
     }
 
-    /// 获取止盈单ID
-    pub async fn get_take_profit_order_id(&self) -> Option<String> {
-        self.take_profit_order_id.read().await.clone()
+    /// 获取止盈单 algo_id
+    pub async fn get_take_profit_order_id(&self) -> Option<i64> {
+        *self.take_profit_order_id.read().await
     }
 
-    /// 设置止损单ID
-    pub async fn set_stop_loss_order_id(&self, order_id: Option<String>) {
-        *self.stop_loss_order_id.write().await = order_id;
+    /// 设置止损单 algo_id
+    pub async fn set_stop_loss_order_id(&self, algo_id: Option<i64>) {
+        *self.stop_loss_order_id.write().await = algo_id;
     }
 
-    /// 获取止损单ID
-    pub async fn get_stop_loss_order_id(&self) -> Option<String> {
-        self.stop_loss_order_id.read().await.clone()
+    /// 获取止损单 algo_id
+    pub async fn get_stop_loss_order_id(&self) -> Option<i64> {
+        *self.stop_loss_order_id.read().await
     }
 
     /// 获取统计信息
