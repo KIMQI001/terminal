@@ -570,11 +570,21 @@ impl GridEngine {
     }
 
     /// 更新持仓信息（从交易所同步）
+    /// 同时计算已用保证金用于 max_margin 检查
     pub async fn update_position(&self, quantity: f64, entry_price: f64, unrealized_pnl: f64) {
         let mut pos = self.position.write().await;
         pos.quantity = quantity;
         pos.entry_price = entry_price;
         pos.unrealized_pnl = unrealized_pnl;
+
+        // 计算已用保证金: 持仓价值 / 杠杆
+        let leverage = self.grid_config.leverage as f64;
+        let position_value = quantity.abs() * entry_price;
+        let used_margin = position_value / leverage;
+        *self.total_margin.write().await = used_margin;
+
+        info!("同步已用保证金: {:.2} USDT (持仓价值={:.2}, 杠杆={}x)",
+              used_margin, position_value, self.grid_config.leverage);
     }
 
     /// 获取当前持仓
