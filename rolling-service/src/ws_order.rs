@@ -74,6 +74,7 @@ pub struct PositionInfo {
     pub symbol: String,
     pub position_amt: String,
     pub entry_price: String,
+    #[serde(rename = "unRealizedProfit")]
     pub unrealized_profit: String,
     pub position_side: String,
 }
