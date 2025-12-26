@@ -111,13 +111,15 @@ async fn main() -> Result<()> {
     ));
 
     // 同步持仓信息
-    if let Ok(Some(pos)) = api.get_position(&config.grid.symbol).await {
-        let qty: f64 = pos.position_amt.parse().unwrap_or(0.0);
-        let entry: f64 = pos.entry_price.parse().unwrap_or(0.0);
-        let pnl: f64 = pos.unrealized_profit.parse().unwrap_or(0.0);
-        if qty > 0.0 {
-            engine.update_position(qty, entry, pnl).await;
-            info!("同步持仓: {} ETH @ {}, 浮盈: {:.2}", qty, entry, pnl);
+    match api.get_position(&config.grid.symbol).await {
+        Ok(Some(pos)) => {
+            let qty: f64 = pos.position_amt.parse().unwrap_or(0.0);
+            let entry: f64 = pos.entry_price.parse().unwrap_or(0.0);
+            let pnl: f64 = pos.unrealized_profit.parse().unwrap_or(0.0);
+            info!("查询到持仓: qty={}, entry={}, pnl={}", qty, entry, pnl);
+            if qty > 0.0 {
+                engine.update_position(qty, entry, pnl).await;
+                info!("同步持仓: {} @ {}, 浮盈: {:.2}", qty, entry, pnl);
 
             // 如果有持仓，下止盈单
             if let Some(tp_action) = engine.calculate_take_profit().await {
@@ -154,6 +156,13 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+            }  // if qty > 0.0
+        }
+        Ok(None) => {
+            warn!("未查询到 LONG 持仓");
+        }
+        Err(e) => {
+            error!("查询持仓失败: {}", e);
         }
     }
 
