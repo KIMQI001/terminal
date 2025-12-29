@@ -9,7 +9,7 @@ import { OrderBlock } from "@/types/indicator";
 const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d'] as const;
 
 export function OBPanel() {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const { orderBlocks, multiTimeframeOB } = useIndicatorStore();
   const { candles, timeframe } = useChartStore();
   const { setPrefillData, setTradingLines, openModal } = useOrderStore();

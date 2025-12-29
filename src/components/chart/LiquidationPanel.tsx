@@ -23,7 +23,7 @@ interface LiquidationData {
 const INTERVALS = ["1d", "1w", "1M"] as const;
 
 export function LiquidationPanel() {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<LiquidationData | null>(null);
