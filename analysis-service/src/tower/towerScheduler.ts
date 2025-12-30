@@ -680,28 +680,32 @@ function calculateOrders(
     const shortAboveP = cgData.shortTop.filter(s => s.price > dailyHL.pStart);
     if (shortAboveP.length > 0) {
       const maxShort = shortAboveP.reduce((max, s) => s.amount > max.amount ? s : max, shortAboveP[0]);
-      const entry = maxShort.price - 200;
+      // 入场偏移 = max(200, 清算价 * 0.2%)
+      const offset = Math.max(200, maxShort.price * 0.002);
+      const entry = maxShort.price - offset;
       cgFirstShort = {
         liqPrice: maxShort.price,
         entry,
         stopLoss: maxShort.price,
         takeProfit: entry * (1 - MIN_TP_RATIO),  // 入场价 - 2.5%
       };
-      console.log(`[TowerScheduler] CG 首空单: P=${dailyHL.pStart.toFixed(0)}, 清算价=${maxShort.price}, 入场=${cgFirstShort.entry.toFixed(0)}, 止损=${cgFirstShort.stopLoss.toFixed(0)}`);
+      console.log(`[TowerScheduler] CG 首空单: P=${dailyHL.pStart.toFixed(0)}, 清算价=${maxShort.price}, 偏移=${offset.toFixed(0)}, 入场=${cgFirstShort.entry.toFixed(0)}, 止损=${cgFirstShort.stopLoss.toFixed(0)}`);
     }
 
     // 多单首单：找 D 以下最大清算值
     const longBelowD = cgData.longTop.filter(l => l.price < dailyHL.dStart);
     if (longBelowD.length > 0) {
       const maxLong = longBelowD.reduce((max, l) => l.amount > max.amount ? l : max, longBelowD[0]);
-      const entry = maxLong.price + 200;
+      // 入场偏移 = max(200, 清算价 * 0.2%)
+      const offset = Math.max(200, maxLong.price * 0.002);
+      const entry = maxLong.price + offset;
       cgFirstLong = {
         liqPrice: maxLong.price,
         entry,
         stopLoss: maxLong.price,
         takeProfit: entry * (1 + MIN_TP_RATIO),  // 入场价 + 2.5%
       };
-      console.log(`[TowerScheduler] CG 首多单: D=${dailyHL.dStart.toFixed(0)}, 清算价=${maxLong.price}, 入场=${cgFirstLong.entry.toFixed(0)}, 止损=${cgFirstLong.stopLoss.toFixed(0)}`);
+      console.log(`[TowerScheduler] CG 首多单: D=${dailyHL.dStart.toFixed(0)}, 清算价=${maxLong.price}, 偏移=${offset.toFixed(0)}, 入场=${cgFirstLong.entry.toFixed(0)}, 止损=${cgFirstLong.stopLoss.toFixed(0)}`);
     }
   }
 
