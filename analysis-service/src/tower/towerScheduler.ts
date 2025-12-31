@@ -266,6 +266,7 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     if (orderCheck.sufficient || orderCheck.hasNearOrder) {
       // 订单充足或有近距离订单时，检查是否有更优的 CG 首单机会
       const cgOpportunity = await checkCGUpdateOpportunity(exchange, exchangeConfig, management.symbol);
+      console.log(`[TowerScheduler] CG检查结果: shouldUpdate=${cgOpportunity.shouldUpdate}, reason=${cgOpportunity.reason || '无'}`);
 
       if (!cgOpportunity.shouldUpdate) {
         const reason = orderCheck.hasNearOrder ? '有订单在当前价附近' : `订单充足 多${orderCheck.bullish}空${orderCheck.bearish}`;
