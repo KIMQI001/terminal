@@ -517,6 +517,38 @@ async function checkCGUpdateOpportunity(
       return { shouldUpdate: false, reason: '无日K数据' };
     }
 
+    // 5.5 检查是否有 CG 首单挂着
+    const hasCGLong = towerOrders.some(o => o.side === 'BUY' && o.clientOrderId?.includes('_CG_'));
+    const hasCGShort = towerOrders.some(o => o.side === 'SELL' && o.clientOrderId?.includes('_CG_'));
+
+    // 5.6 如果没有 CG 多单，检查新的 CG 入场价是否满足 D 条件
+    if (!hasCGLong && cgData.longTop.length > 0) {
+      const longBelowD = cgData.longTop.filter(l => l.price < dailyHL.dStart);
+      if (longBelowD.length > 0) {
+        const maxLong = longBelowD.reduce((max, l) => l.amount > max.amount ? l : max, longBelowD[0]);
+        const offset = Math.max(200, maxLong.price * 0.002);
+        const newEntry = maxLong.price + offset;
+        if (newEntry <= dailyHL.dStart) {
+          console.log(`[TowerScheduler] CG多单机会: 无CG多单，新入场=${newEntry.toFixed(0)} <= D=${dailyHL.dStart.toFixed(0)}`);
+          return { shouldUpdate: true, reason: `CG多单可用: 入场=${newEntry.toFixed(0)} <= D` };
+        }
+      }
+    }
+
+    // 5.7 如果没有 CG 空单，检查新的 CG 入场价是否满足 P 条件
+    if (!hasCGShort && cgData.shortTop.length > 0) {
+      const shortAboveP = cgData.shortTop.filter(s => s.price > dailyHL.pStart);
+      if (shortAboveP.length > 0) {
+        const maxShort = shortAboveP.reduce((max, s) => s.amount > max.amount ? s : max, shortAboveP[0]);
+        const offset = Math.max(200, maxShort.price * 0.002);
+        const newEntry = maxShort.price - offset;
+        if (newEntry >= dailyHL.pStart) {
+          console.log(`[TowerScheduler] CG空单机会: 无CG空单，新入场=${newEntry.toFixed(0)} >= P=${dailyHL.pStart.toFixed(0)}`);
+          return { shouldUpdate: true, reason: `CG空单可用: 入场=${newEntry.toFixed(0)} >= P` };
+        }
+      }
+    }
+
     // 6. 检查多单机会
     const longBelowD = cgData.longTop.filter(l => l.price < dailyHL.dStart);
     if (longBelowD.length >= 2) {
