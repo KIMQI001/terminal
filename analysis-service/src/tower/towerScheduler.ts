@@ -96,6 +96,11 @@ const POSITION_MONITOR_INTERVAL = 2; // 每 2 次调度循环监控一次（即�
 let cleanupCounter = 0;
 const CLEANUP_INTERVAL = 120; // 每 120 次调度循环清理一次（即每 1 小时）
 
+// 每日8点检查（UTC+8）
+let lastDailyCheckDate: string | null = null;
+const DAILY_CHECK_HOUR = 8;  // UTC+8 早上8点
+const CG_SPREAD_THRESHOLD = 2000;  // CG top1 多空价差阈值
+
 /**
  * 检查并执行到期的托管任务
  */
@@ -130,6 +135,80 @@ async function checkAndExecute(): Promise<void> {
     cleanupOldPendingOrders();
     cleanupCanceledOrders();
   }
+
+  // 每日 8 点检查 CG 多空价差（UTC+8）
+  await checkDailyCGSpread(activeManagements);
+}
+
+/**
+ * 每日 8 点检查 CG top1 多空价差
+ * 如果价差 > 2000 点，取消所有挂单并更新
+ */
+async function checkDailyCGSpread(activeManagements: TowerManagementConfig[]): Promise<void> {
+  // 计算 UTC+8 时间
+  const now = new Date();
+  const utc8Hour = (now.getUTCHours() + 8) % 24;
+  const utc8Date = new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+  // 检查是否是 8 点且今天还没检查过
+  if (utc8Hour !== DAILY_CHECK_HOUR || lastDailyCheckDate === utc8Date) {
+    return;
+  }
+
+  console.log(`[TowerScheduler] 每日8点检查开始 (UTC+8: ${utc8Date} ${utc8Hour}:00)`);
+  lastDailyCheckDate = utc8Date;
+
+  for (const management of activeManagements) {
+    try {
+      // 获取 CG 数据
+      const cgData = await fetchCGLiqData(management.symbol);
+      if (!cgData || cgData.longTop.length === 0 || cgData.shortTop.length === 0) {
+        console.log(`[TowerScheduler] ${management.symbol} 无CG数据，跳过每日检查`);
+        continue;
+      }
+
+      // 计算 top1 多空价差
+      const longTop1 = cgData.longTop[0].price;
+      const shortTop1 = cgData.shortTop[0].price;
+      const spread = Math.abs(shortTop1 - longTop1);
+
+      console.log(`[TowerScheduler] ${management.symbol} CG价差: 空top1=${shortTop1}, 多top1=${longTop1}, 价差=${spread.toFixed(0)}`);
+
+      if (spread > CG_SPREAD_THRESHOLD) {
+        console.log(`[TowerScheduler] ${management.symbol} CG价差 ${spread.toFixed(0)} > ${CG_SPREAD_THRESHOLD}，触发更新`);
+
+        // 获取 API 配置
+        const exchange = management.exchange || 'binance';
+        const apiConfig = exchange === 'aster'
+          ? getAsterApiConfig(management.userId)
+          : getBinanceApiConfig(management.userId);
+
+        if (!apiConfig) {
+          console.error(`[TowerScheduler] 用户 ${management.userId} 没有 ${exchange} API 配置`);
+          continue;
+        }
+
+        const exchangeConfig: exchangeAdapter.ExchangeApiConfig = {
+          apiKey: apiConfig.apiKey,
+          apiSecret: apiConfig.apiSecret,
+          isTestnet: 'isTestnet' in apiConfig ? (apiConfig as { isTestnet?: boolean }).isTestnet : false,
+        };
+
+        // 取消所有挂单
+        const cancelResult = await exchangeAdapter.cancelAllOrders(exchange, exchangeConfig, management.symbol);
+        if (cancelResult.success) {
+          console.log(`[TowerScheduler] ${management.symbol} 已取消所有挂单`);
+        }
+
+        // 触发更新（执行托管任务）
+        await executeTowerManagement(management);
+      }
+    } catch (error) {
+      console.error(`[TowerScheduler] ${management.symbol} 每日检查异常:`, error);
+    }
+  }
+
+  console.log('[TowerScheduler] 每日8点检查完成');
 }
 
 /**
