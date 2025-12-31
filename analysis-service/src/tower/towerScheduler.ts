@@ -521,6 +521,7 @@ async function checkCGUpdateOpportunity(
     // 5.5 检查是否有 CG 首单挂着
     const hasCGLong = towerOrders.some(o => o.side === 'BUY' && o.clientOrderId?.includes('_CG_'));
     const hasCGShort = towerOrders.some(o => o.side === 'SELL' && o.clientOrderId?.includes('_CG_'));
+    console.log(`[TowerScheduler] CG首单状态: 多=${hasCGLong}, 空=${hasCGShort}, D=${dailyHL.dStart.toFixed(0)}, P=${dailyHL.pStart.toFixed(0)}`);
 
     // 5.6 如果没有 CG 多单，检查新的 CG 入场价是否满足 D 条件
     if (!hasCGLong && cgData.longTop.length > 0) {
@@ -529,10 +530,12 @@ async function checkCGUpdateOpportunity(
         const maxLong = longBelowD.reduce((max, l) => l.amount > max.amount ? l : max, longBelowD[0]);
         const offset = Math.max(200, maxLong.price * 0.002);
         const newEntry = maxLong.price + offset;
+        console.log(`[TowerScheduler] CG多单检查: 清算价=${maxLong.price}, 入场=${newEntry.toFixed(0)}, D=${dailyHL.dStart.toFixed(0)}, 满足=${newEntry <= dailyHL.dStart}`);
         if (newEntry <= dailyHL.dStart) {
-          console.log(`[TowerScheduler] CG多单机会: 无CG多单，新入场=${newEntry.toFixed(0)} <= D=${dailyHL.dStart.toFixed(0)}`);
           return { shouldUpdate: true, reason: `CG多单可用: 入场=${newEntry.toFixed(0)} <= D` };
         }
+      } else {
+        console.log(`[TowerScheduler] CG多单检查: 无清算价 < D`);
       }
     }
 
@@ -543,10 +546,12 @@ async function checkCGUpdateOpportunity(
         const maxShort = shortAboveP.reduce((max, s) => s.amount > max.amount ? s : max, shortAboveP[0]);
         const offset = Math.max(200, maxShort.price * 0.002);
         const newEntry = maxShort.price - offset;
+        console.log(`[TowerScheduler] CG空单检查: 清算价=${maxShort.price}, 入场=${newEntry.toFixed(0)}, P=${dailyHL.pStart.toFixed(0)}, 满足=${newEntry >= dailyHL.pStart}`);
         if (newEntry >= dailyHL.pStart) {
-          console.log(`[TowerScheduler] CG空单机会: 无CG空单，新入场=${newEntry.toFixed(0)} >= P=${dailyHL.pStart.toFixed(0)}`);
           return { shouldUpdate: true, reason: `CG空单可用: 入场=${newEntry.toFixed(0)} >= P` };
         }
+      } else {
+        console.log(`[TowerScheduler] CG空单检查: 无清算价 > P`);
       }
     }
 
@@ -595,10 +600,10 @@ async function checkCGUpdateOpportunity(
       }
     }
 
-    return { shouldUpdate: false };
+    return { shouldUpdate: false, reason: '无更优CG机会' };
   } catch (error) {
     console.error('[TowerScheduler] 检查CG机会异常:', error);
-    return { shouldUpdate: false };
+    return { shouldUpdate: false, reason: '检查异常' };
   }
 }
 
