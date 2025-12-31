@@ -194,13 +194,8 @@ async function checkDailyCGSpread(activeManagements: TowerManagementConfig[]): P
           isTestnet: 'isTestnet' in apiConfig ? (apiConfig as { isTestnet?: boolean }).isTestnet : false,
         };
 
-        // 取消所有挂单
-        const cancelResult = await exchangeAdapter.cancelAllOrders(exchange, exchangeConfig, management.symbol);
-        if (cancelResult.success) {
-          console.log(`[TowerScheduler] ${management.symbol} 已取消所有挂单`);
-        }
-
-        // 触发更新（执行托管任务）
+        // 取消所有守塔订单并重新执行托管
+        await cancelAllTowerOrders(exchange, exchangeConfig, management.symbol);
         await executeTowerManagement(management);
       }
     } catch (error) {
