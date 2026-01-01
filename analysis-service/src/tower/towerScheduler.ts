@@ -194,6 +194,16 @@ async function checkDailyCGSpread(activeManagements: TowerManagementConfig[]): P
           isTestnet: 'isTestnet' in apiConfig ? (apiConfig as { isTestnet?: boolean }).isTestnet : false,
         };
 
+        // 检查是否有持仓，有持仓则跳过
+        const positionsResult = await exchangeAdapter.getPositions(exchange, exchangeConfig, management.symbol);
+        if (positionsResult.success && positionsResult.positions) {
+          const positions = positionsResult.positions.filter(p => Math.abs(p.positionAmt) >= 0.001);
+          if (positions.length > 0) {
+            console.log(`[TowerScheduler] ${management.symbol} 有持仓，跳过每日更新`);
+            continue;
+          }
+        }
+
         // 取消所有守塔订单并重新执行托管
         await cancelAllTowerOrders(exchange, exchangeConfig, management.symbol);
         await executeTowerManagement(management);
