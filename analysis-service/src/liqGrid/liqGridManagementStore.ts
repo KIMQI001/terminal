@@ -19,6 +19,7 @@ export interface LiqGridManagementConfig {
   baseMargin: number;            // 基础保证金
   marginPerLevel: number;        // 每层递增保证金
   leverage: number;              // 杠杆倍数
+  maxQuantity: number;           // 最大开仓数量（ETH）
   lastRunAt: string | null;      // 上次执行时间
   nextRunAt: string | null;      // 下次执行时间
   createdAt: string;
@@ -49,6 +50,7 @@ interface ManagementRow {
   base_margin: number;
   margin_per_level: number;
   leverage: number;
+  max_quantity: number;
   last_run_at: string | null;
   next_run_at: string | null;
   created_at: string;
@@ -116,6 +118,12 @@ export function initLiqGridManagementTables(): void {
     console.log('[LiqGridManagement] 添加 exchange 字段');
   } catch { /* 列已存在 */ }
 
+  // 迁移：添加 max_quantity 字段
+  try {
+    db.exec(`ALTER TABLE liq_grid_management ADD COLUMN max_quantity REAL NOT NULL DEFAULT 0`);
+    console.log('[LiqGridManagement] 添加 max_quantity 字段');
+  } catch { /* 列已存在 */ }
+
   console.log('[LiqGridManagement] 表初始化完成');
 }
 
@@ -158,8 +166,10 @@ export function upsertManagement(config: {
   baseMargin: number;
   marginPerLevel: number;
   leverage: number;
+  maxQuantity?: number;
 }): LiqGridManagementConfig {
   const exchange = config.exchange || 'binance';
+  const maxQuantity = config.maxQuantity ?? 0;
   const db = getDatabase();
   const now = new Date().toISOString();
 
@@ -178,6 +188,7 @@ export function upsertManagement(config: {
         base_margin = ?,
         margin_per_level = ?,
         leverage = ?,
+        max_quantity = ?,
         next_run_at = ?,
         updated_at = ?
       WHERE user_id = ? AND symbol = ?
@@ -188,20 +199,21 @@ export function upsertManagement(config: {
       config.baseMargin,
       config.marginPerLevel,
       config.leverage,
+      maxQuantity,
       nextRunAt,
       now,
       config.userId,
       config.symbol
     );
 
-    console.log(`[LiqGridManagement] 更新托管配置: userId=${config.userId}, symbol=${config.symbol}, exchange=${exchange}, active=${config.isActive}`);
+    console.log(`[LiqGridManagement] 更新托管配置: userId=${config.userId}, symbol=${config.symbol}, exchange=${exchange}, active=${config.isActive}, maxQty=${maxQuantity}`);
   } else {
     // 创建
     db.prepare(`
       INSERT INTO liq_grid_management (
         user_id, symbol, exchange, is_active, interval_minutes, base_margin, margin_per_level,
-        leverage, next_run_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        leverage, max_quantity, next_run_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       config.userId,
       config.symbol,
@@ -211,12 +223,13 @@ export function upsertManagement(config: {
       config.baseMargin,
       config.marginPerLevel,
       config.leverage,
+      maxQuantity,
       nextRunAt,
       now,
       now
     );
 
-    console.log(`[LiqGridManagement] 创建托管配置: userId=${config.userId}, symbol=${config.symbol}, exchange=${exchange}`);
+    console.log(`[LiqGridManagement] 创建托管配置: userId=${config.userId}, symbol=${config.symbol}, exchange=${exchange}, maxQty=${maxQuantity}`);
   }
 
   return getManagement(config.userId, config.symbol)!;
@@ -392,6 +405,7 @@ function rowToConfig(row: ManagementRow): LiqGridManagementConfig {
     baseMargin: row.base_margin,
     marginPerLevel: row.margin_per_level,
     leverage: row.leverage,
+    maxQuantity: row.max_quantity || 0,
     lastRunAt: row.last_run_at,
     nextRunAt: row.next_run_at,
     createdAt: row.created_at,

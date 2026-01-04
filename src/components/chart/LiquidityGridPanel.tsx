@@ -9,6 +9,7 @@ const STORAGE_KEY_BASE_MARGIN = "liq_grid_base_margin";
 const STORAGE_KEY_MARGIN_PER_LEVEL = "liq_grid_margin_per_level";
 const STORAGE_KEY_LEVERAGE = "liq_grid_leverage";
 const STORAGE_KEY_UPDATE_INTERVAL = "liq_grid_update_interval";
+const STORAGE_KEY_MAX_QUANTITY = "liq_grid_max_quantity";
 
 interface ManagementConfig {
   id: number;
@@ -19,6 +20,7 @@ interface ManagementConfig {
   baseMargin: number;
   marginPerLevel: number;
   leverage: number;
+  maxQuantity: number;
   lastRunAt: string | null;
   nextRunAt: string | null;
 }
@@ -64,6 +66,12 @@ export function LiquidityGridPanel() {
     }
     return 60;
   });
+  const [maxQuantity, setMaxQuantity] = useState(() => {
+    if (typeof window !== "undefined") {
+      return Number(localStorage.getItem(STORAGE_KEY_MAX_QUANTITY)) || 0;
+    }
+    return 0;
+  });
 
   const { symbol } = useChartStore();
   const { token } = useUserStore();
@@ -84,6 +92,10 @@ export function LiquidityGridPanel() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_UPDATE_INTERVAL, String(updateInterval));
   }, [updateInterval]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_MAX_QUANTITY, String(maxQuantity));
+  }, [maxQuantity]);
 
   // 从服务端加载托管状态
   const fetchManagement = useCallback(async () => {
@@ -108,6 +120,7 @@ export function LiquidityGridPanel() {
           setMarginPerLevel(data.management.marginPerLevel);
           setLeverage(data.management.leverage);
           setUpdateInterval(data.management.intervalMinutes);
+          setMaxQuantity(data.management.maxQuantity || 0);
         }
       }
     } catch (error) {
@@ -168,6 +181,7 @@ export function LiquidityGridPanel() {
           baseMargin,
           marginPerLevel,
           leverage,
+          maxQuantity,
         }),
       });
 
@@ -299,6 +313,21 @@ export function LiquidityGridPanel() {
                 <option value={120}>2 小时</option>
                 <option value={240}>4 小时</option>
               </select>
+            </div>
+
+            {/* 最大数量 */}
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-gray-500 w-12">最大:</span>
+              <input
+                type="number"
+                value={maxQuantity}
+                onChange={(e) => setMaxQuantity(Number(e.target.value))}
+                className="w-14 px-1 py-0.5 text-[10px] border rounded text-center"
+                disabled={isActive}
+                step="0.1"
+                min="0"
+              />
+              <span className="text-[10px] text-gray-400">ETH (0=不限)</span>
             </div>
           </div>
 

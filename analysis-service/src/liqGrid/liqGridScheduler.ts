@@ -317,6 +317,20 @@ async function executeLiqGridManagement(management: LiqGridManagementConfig): Pr
       orders = [...buyOrders, ...sellOrders];
     }
 
+    // 10. 如果设置了 maxQuantity，限制每个订单的数量
+    if (management.maxQuantity > 0) {
+      let clippedCount = 0;
+      for (const order of orders) {
+        if (order.quantity > management.maxQuantity) {
+          order.quantity = management.maxQuantity;
+          clippedCount++;
+        }
+      }
+      if (clippedCount > 0) {
+        console.log(`[LiqGridScheduler] 限制数量: ${clippedCount} 个订单被裁剪到 maxQty=${management.maxQuantity}`);
+      }
+    }
+
     if (orders.length === 0) {
       console.log('[LiqGridScheduler] 没有符合条件的订单（可能被持仓或P/D区域过滤）');
       addRecord({

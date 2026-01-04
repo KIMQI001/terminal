@@ -86,6 +86,7 @@ liqGridManagementRoutes.post('/', (req: Request, res: Response) => {
       baseMargin = 50,
       marginPerLevel = 10,
       leverage = 10,
+      maxQuantity = 0,
     } = req.body;
 
     if (!userId || !symbol) {
@@ -105,9 +106,10 @@ liqGridManagementRoutes.post('/', (req: Request, res: Response) => {
       baseMargin,
       marginPerLevel,
       leverage,
+      maxQuantity,
     });
 
-    console.log(`[LiqGridManagement API] 更新配置: userId=${userId}, symbol=${symbol}, exchange=${exchange || 'binance'}, active=${isActive}`);
+    console.log(`[LiqGridManagement API] 更新配置: userId=${userId}, symbol=${symbol}, exchange=${exchange || 'binance'}, active=${isActive}, maxQty=${maxQuantity}`);
 
     res.json({
       success: true,
@@ -137,6 +139,7 @@ liqGridManagementRoutes.post('/start', (req: Request, res: Response) => {
       baseMargin = 50,
       marginPerLevel = 10,
       leverage = 10,
+      maxQuantity = 0,
     } = req.body;
 
     if (!userId || !symbol) {
@@ -157,9 +160,10 @@ liqGridManagementRoutes.post('/start', (req: Request, res: Response) => {
       baseMargin,
       marginPerLevel,
       leverage,
+      maxQuantity,
     });
 
-    console.log(`[LiqGridManagement API] 启动托管: userId=${userId}, symbol=${symbol}, exchange=${exchange || 'binance'}, baseMargin=${baseMargin}+${marginPerLevel}/层, leverage=${leverage}x, interval=${intervalMinutes}分钟`);
+    console.log(`[LiqGridManagement API] 启动托管: userId=${userId}, symbol=${symbol}, exchange=${exchange || 'binance'}, baseMargin=${baseMargin}+${marginPerLevel}/层, leverage=${leverage}x, interval=${intervalMinutes}分钟, maxQty=${maxQuantity}`);
 
     res.json({
       success: true,

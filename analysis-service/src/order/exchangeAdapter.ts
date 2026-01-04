@@ -502,7 +502,7 @@ export async function cancelOrder(
 }
 
 /**
- * 取消所有带特定前缀的订单
+ * 取消所有带特定前缀的订单（包括普通订单和 Algo 订单）
  */
 export async function cancelOrdersByPrefix(
   exchange: ExchangeType,
@@ -510,34 +510,35 @@ export async function cancelOrdersByPrefix(
   symbol: string,
   prefix: string
 ): Promise<{ success: boolean; canceledCount: number; error?: string }> {
-  // 先获取所有挂单
+  let canceledCount = 0;
+
+  // 1. 取消普通订单
   const ordersResult = await getOpenOrders(exchange, config, symbol);
-  if (!ordersResult.success || !ordersResult.orders) {
-    return { success: false, canceledCount: 0, error: ordersResult.error };
+  if (ordersResult.success && ordersResult.orders) {
+    const ordersToCancel = ordersResult.orders.filter(o => o.clientOrderId?.startsWith(prefix));
+    for (const order of ordersToCancel) {
+      const result = await cancelOrder(exchange, config, symbol, order.orderId);
+      if (result.success) {
+        canceledCount++;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
   }
 
-  // 过滤出需要取消的订单
-  const ordersToCancel = ordersResult.orders.filter(o => o.clientOrderId?.startsWith(prefix));
-
-  // Algo 订单类型（止损、止盈等条件单）
-  const algoOrderTypes = ['STOP_MARKET', 'TAKE_PROFIT_MARKET', 'STOP', 'TAKE_PROFIT', 'TRAILING_STOP_MARKET'];
-
-  let canceledCount = 0;
-  for (const order of ordersToCancel) {
-    let result: { success: boolean; error?: string };
-
-    // 根据订单类型选择取消方法
-    if (algoOrderTypes.includes(order.type)) {
-      result = await cancelAlgoOrder(exchange, config, symbol, order.orderId);
-    } else {
-      result = await cancelOrder(exchange, config, symbol, order.orderId);
+  // 2. 取消 Algo 订单（止损、止盈等条件单）
+  const algoOrdersResult = await getOpenAlgoOrders(exchange, config, symbol);
+  if (algoOrdersResult.success && algoOrdersResult.orders) {
+    const algoOrdersToCancel = algoOrdersResult.orders.filter(o => o.clientAlgoId?.startsWith(prefix));
+    for (const order of algoOrdersToCancel) {
+      const result = await cancelAlgoOrder(exchange, config, symbol, order.algoId);
+      if (result.success) {
+        canceledCount++;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
-
-    if (result.success) {
-      canceledCount++;
+    if (algoOrdersToCancel.length > 0) {
+      console.log(`[cancelOrdersByPrefix] 取消了 ${algoOrdersToCancel.length} 个 Algo 订单`);
     }
-    // 延迟避免请求过快
-    await new Promise(resolve => setTimeout(resolve, 50));
   }
 
   return { success: true, canceledCount };
@@ -626,6 +627,45 @@ export async function placeTrailingStopOrder(
       orderId: data.algoId,
       clientOrderId: data.clientAlgoId,
     };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : '网络错误' };
+  }
+}
+
+/**
+ * 获取 Algo 挂单列表 (Binance)
+ */
+export async function getOpenAlgoOrders(
+  exchange: ExchangeType,
+  config: ExchangeApiConfig,
+  symbol: string
+): Promise<{ success: boolean; orders?: Array<{ algoId: number; clientAlgoId: string; type: string }>; error?: string }> {
+  if (exchange === 'aster') {
+    // Aster 没有单独的 Algo 订单 API
+    return { success: true, orders: [] };
+  }
+
+  // Binance
+  const baseUrl = getBinanceBaseUrl(config.isTestnet);
+  const timestamp = Date.now();
+  const queryString = `symbol=${symbol}&timestamp=${timestamp}`;
+  const signature = generateSignature(queryString, config.apiSecret);
+
+  try {
+    const response = await fetch(
+      `${baseUrl}/fapi/v1/openAlgoOrders?${queryString}&signature=${signature}`,
+      { headers: { 'X-MBX-APIKEY': config.apiKey } }
+    );
+
+    if (!response.ok) {
+      console.warn('[getOpenAlgoOrders] 获取 Algo 订单警告');
+      return { success: true, orders: [] };
+    }
+
+    const data = await response.json() as { orders?: Array<{ algoId: number; clientAlgoId: string; type: string }> } | Array<{ algoId: number; clientAlgoId: string; type: string }>;
+
+    const orders = Array.isArray(data) ? data : (data.orders || []);
+    return { success: true, orders };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : '网络错误' };
   }
