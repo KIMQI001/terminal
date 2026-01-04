@@ -519,9 +519,20 @@ export async function cancelOrdersByPrefix(
   // 过滤出需要取消的订单
   const ordersToCancel = ordersResult.orders.filter(o => o.clientOrderId?.startsWith(prefix));
 
+  // Algo 订单类型（止损、止盈等条件单）
+  const algoOrderTypes = ['STOP_MARKET', 'TAKE_PROFIT_MARKET', 'STOP', 'TAKE_PROFIT', 'TRAILING_STOP_MARKET'];
+
   let canceledCount = 0;
   for (const order of ordersToCancel) {
-    const result = await cancelOrder(exchange, config, symbol, order.orderId);
+    let result: { success: boolean; error?: string };
+
+    // 根据订单类型选择取消方法
+    if (algoOrderTypes.includes(order.type)) {
+      result = await cancelAlgoOrder(exchange, config, symbol, order.orderId);
+    } else {
+      result = await cancelOrder(exchange, config, symbol, order.orderId);
+    }
+
     if (result.success) {
       canceledCount++;
     }
