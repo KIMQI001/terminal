@@ -31,6 +31,8 @@ export interface PendingEntryOrder {
   trailingActive: boolean;
   trailingHighPrice: number | null;  // 多单最高价 / 空单最低价
   trailingActivatedAt: string | null;
+  trailingActivationRatio: number;   // 追踪止盈激活比例（默认 0.02 = 2%）
+  trailingCallbackRate: number;      // 追踪止盈回撤率（默认 0.3 = 0.3%）
   // 平仓相关字段（战绩统计用）
   closedAt: string | null;
   closePrice: number | null;
@@ -63,6 +65,8 @@ interface PendingOrderRow {
   trailing_active: number;
   trailing_high_price: number | null;
   trailing_activated_at: string | null;
+  trailing_activation_ratio: number;
+  trailing_callback_rate: number;
   // 平仓相关字段
   closed_at: string | null;
   close_price: number | null;
@@ -121,6 +125,14 @@ export function initPendingOrdersTable(): void {
   } catch { /* 列已存在 */ }
   try {
     db.exec(`ALTER TABLE pending_entry_orders ADD COLUMN trailing_activated_at TEXT`);
+  } catch { /* 列已存在 */ }
+  try {
+    db.exec(`ALTER TABLE pending_entry_orders ADD COLUMN trailing_activation_ratio REAL NOT NULL DEFAULT 0.02`);
+    console.log('[PendingOrderStore] 添加 trailing_activation_ratio 字段');
+  } catch { /* 列已存在 */ }
+  try {
+    db.exec(`ALTER TABLE pending_entry_orders ADD COLUMN trailing_callback_rate REAL NOT NULL DEFAULT 0.3`);
+    console.log('[PendingOrderStore] 添加 trailing_callback_rate 字段');
   } catch { /* 列已存在 */ }
 
   // 迁移：为旧表添加平仓相关字段（战绩统计用）
@@ -239,15 +251,20 @@ export function addPendingOrder(order: {
   entryPrice: number;
   stopLoss: number;
   takeProfit: number;
+  trailingActivationRatio?: number;
+  trailingCallbackRate?: number;
 }): number {
   const db = getDatabase();
   const exchange = order.exchange || 'binance';
+  const trailingActivationRatio = order.trailingActivationRatio ?? 0.02;
+  const trailingCallbackRate = order.trailingCallbackRate ?? 0.3;
 
   // 使用 INSERT OR REPLACE 覆盖同一 clientOrderId 的旧记录
   const stmt = db.prepare(`
     INSERT OR REPLACE INTO pending_entry_orders
-    (client_order_id, symbol, exchange, side, position_side, quantity, entry_price, stop_loss, take_profit, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+    (client_order_id, symbol, exchange, side, position_side, quantity, entry_price, stop_loss, take_profit,
+     trailing_activation_ratio, trailing_callback_rate, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
   `);
 
   const result = stmt.run(
@@ -260,6 +277,8 @@ export function addPendingOrder(order: {
     order.entryPrice,
     order.stopLoss,
     order.takeProfit,
+    trailingActivationRatio,
+    trailingCallbackRate,
     new Date().toISOString()
   );
 
@@ -522,6 +541,8 @@ function rowToOrder(row: PendingOrderRow): PendingEntryOrder {
     trailingActive: row.trailing_active === 1,
     trailingHighPrice: row.trailing_high_price,
     trailingActivatedAt: row.trailing_activated_at,
+    trailingActivationRatio: row.trailing_activation_ratio ?? 0.02,
+    trailingCallbackRate: row.trailing_callback_rate ?? 0.3,
     // 平仓相关字段
     closedAt: row.closed_at,
     closePrice: row.close_price,

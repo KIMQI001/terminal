@@ -245,22 +245,24 @@ async function handleEntryFilled(
 
     // 下追踪止盈单（如果还没有）
     if (!hasTrailingStop) {
-      // activationPrice: 盈利2%后激活追踪
-      // callbackRate: 从最高价回撤0.3%后触发止盈
+      // 使用订单配置的追踪止盈参数
+      const activationRatio = pendingOrder.trailingActivationRatio; // 默认 0.02 = 2%
+      const callbackRate = pendingOrder.trailingCallbackRate;       // 默认 0.3 = 0.3%
+
       const trailingActivationPrice = pendingOrder.positionSide === 'LONG'
-        ? filledPrice * 1.02   // 多单：价格上涨2%后激活
-        : filledPrice * 0.98;  // 空单：价格下跌2%后激活
+        ? filledPrice * (1 + activationRatio)   // 多单：价格上涨后激活
+        : filledPrice * (1 - activationRatio);  // 空单：价格下跌后激活
 
       const trailSuffix = Math.random().toString(36).slice(-4);
       const trailClientId = `${clientOrderId}_tr${trailSuffix}`;
-      console.log(`[OrderMonitor] 下追踪止盈单: 激活价=${trailingActivationPrice.toFixed(2)}, 回撤=0.3%`);
+      console.log(`[OrderMonitor] 下追踪止盈单: 激活价=${trailingActivationPrice.toFixed(2)}, 激活比例=${(activationRatio * 100).toFixed(2)}%, 回撤=${callbackRate}%`);
       const trailingTpResult = await placeTrailingStopOrder(apiConfig, {
         symbol: pendingOrder.symbol,
         side: closeSide,
         positionSide: pendingOrder.positionSide,
         quantity: pendingOrder.quantity,
-        callbackRate: 0.3,              // 0.3% 回撤触发
-        activationPrice: trailingActivationPrice,  // 盈利2%后激活
+        callbackRate: callbackRate,
+        activationPrice: trailingActivationPrice,
         clientOrderId: trailClientId,
       });
 
@@ -766,10 +768,12 @@ async function sendEntryFilledNotification(
   const rewardDistance = Math.abs(order.takeProfit - filledPrice);
   const riskReward = riskDistance > 0 ? (rewardDistance / riskDistance).toFixed(1) : 'N/A';
 
-  // 追踪止盈激活价
+  // 追踪止盈激活价（使用订单配置）
+  const activationRatio = order.trailingActivationRatio;
+  const callbackRate = order.trailingCallbackRate;
   const trailingActivationPrice = order.positionSide === 'LONG'
-    ? filledPrice * 1.02
-    : filledPrice * 0.98;
+    ? filledPrice * (1 + activationRatio)
+    : filledPrice * (1 - activationRatio);
 
   let statusIcon = '✅';
   let statusText = '止损+双止盈已挂单';
@@ -793,7 +797,7 @@ async function sendEntryFilledNotification(
     `- **数量**: ${order.quantity}`,
     `- **止损**: $${order.stopLoss.toFixed(2)}`,
     `- **固定止盈**: $${order.takeProfit.toFixed(2)} (保底)`,
-    `- **追踪止盈**: 激活价 $${trailingActivationPrice.toFixed(2)} (盈利2%), 回撤0.3%触发`,
+    `- **追踪止盈**: 激活价 $${trailingActivationPrice.toFixed(2)} (盈利${(activationRatio * 100).toFixed(2)}%), 回撤${callbackRate}%触发`,
     `- **盈亏比**: 1:${riskReward}`,
     '',
     `**状态**: ${statusText}`,

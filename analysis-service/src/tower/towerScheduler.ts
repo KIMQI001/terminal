@@ -362,7 +362,10 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     }
 
     // 9. 下单
-    const result = await placeOrders(exchange, exchangeConfig, management.symbol, orders);
+    const result = await placeOrders(exchange, exchangeConfig, management.symbol, orders, {
+      activationRatio: management.trailingActivationRatio,
+      callbackRate: management.trailingCallbackRate,
+    });
 
     // 10. 记录结果
     const bullishCount = orders.filter(o => o.side === 'BUY').length;
@@ -1129,7 +1132,8 @@ async function placeOrders(
   exchange: ExchangeType,
   exchangeConfig: exchangeAdapter.ExchangeApiConfig,
   symbol: string,
-  orders: TowerOrder[]
+  orders: TowerOrder[],
+  trailingConfig: { activationRatio: number; callbackRate: number }
 ): Promise<{ success: number; errors: string[] }> {
   let success = 0;
   const errors: string[] = [];
@@ -1193,6 +1197,8 @@ async function placeOrders(
         entryPrice: order.price,
         stopLoss: order.stopLoss,
         takeProfit: order.takeProfit,
+        trailingActivationRatio: trailingConfig.activationRatio,
+        trailingCallbackRate: trailingConfig.callbackRate,
       });
 
       // 延迟避免请求过快
@@ -1218,6 +1224,8 @@ async function savePendingOrder(params: {
   entryPrice: number;
   stopLoss: number;
   takeProfit: number;
+  trailingActivationRatio?: number;
+  trailingCallbackRate?: number;
 }): Promise<void> {
   // 直接调用 pendingOrderStore
   const { addPendingOrder } = await import('../order/pendingOrderStore');

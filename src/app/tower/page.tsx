@@ -60,6 +60,8 @@ interface TowerManagementConfig {
   bearishStartLayer: number;
   minSpacingRatio: number;
   minEntryDistance: number;
+  trailingActivationRatio: number;  // 追踪止盈激活比例（默认 0.02 = 2%）
+  trailingCallbackRate: number;     // 追踪止盈回撤率（默认 0.3 = 0.3%）
   lastRunAt: string | null;
   nextRunAt: string | null;
   createdAt: string;
@@ -182,6 +184,8 @@ export default function TowerPage() {
   const [minSpacingRatio, setMinSpacingRatio] = useState(5); // 万分之几，默认5（万分之五）
   const [minEntryDistance, setMinEntryDistance] = useState(5); // 启动间距（千分比），默认千分之五
   const [autoInterval, setAutoInterval] = useState(15); // 托管间隔（分钟），默认15分钟
+  const [trailingActivationRatio, setTrailingActivationRatio] = useState(2); // 追踪止盈激活比例（百分比），默认2%
+  const [trailingCallbackRate, setTrailingCallbackRate] = useState(0.3); // 追踪止盈回撤率（百分比），默认0.3%
   const [isAutoOrdering, setIsAutoOrdering] = useState(false);
   const [orderProgress, setOrderProgress] = useState<{
     current: number;
@@ -282,6 +286,8 @@ export default function TowerPage() {
           bearishStartLayer,
           minSpacingRatio,
           minEntryDistance,
+          trailingActivationRatio: trailingActivationRatio / 100, // 转换为小数
+          trailingCallbackRate,
         }),
       });
       return response.json();
@@ -324,6 +330,8 @@ export default function TowerPage() {
       setMinSpacingRatio(config.minSpacingRatio);
       setMinEntryDistance(config.minEntryDistance ?? 5);
       setAutoInterval(config.intervalMinutes);
+      setTrailingActivationRatio((config.trailingActivationRatio ?? 0.02) * 100); // 转换为百分比
+      setTrailingCallbackRate(config.trailingCallbackRate ?? 0.3);
       // 同步到 localStorage
       localStorage.setItem(STORAGE_KEYS.BASE_MARGIN, String(config.baseMargin));
       localStorage.setItem(STORAGE_KEYS.MARGIN_INCREMENT, String(config.marginIncrement));
@@ -1114,6 +1122,36 @@ export default function TowerPage() {
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </select>
+
+                {/* 追踪止盈激活比例 */}
+                <div className="flex items-center gap-0.5" title="追踪止盈激活比例">
+                  <input
+                    type="number"
+                    value={trailingActivationRatio}
+                    onChange={(e) => setTrailingActivationRatio(Number(e.target.value))}
+                    disabled={isAutoManaged}
+                    min="0.1"
+                    max="10"
+                    step="0.1"
+                    className="w-12 px-1 py-1.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500 disabled:opacity-60"
+                  />
+                  <span className="text-xs text-[var(--text-tertiary)]">%</span>
+                </div>
+
+                {/* 追踪止盈回撤率 */}
+                <div className="flex items-center gap-0.5" title="追踪止盈回撤率">
+                  <input
+                    type="number"
+                    value={trailingCallbackRate}
+                    onChange={(e) => setTrailingCallbackRate(Number(e.target.value))}
+                    disabled={isAutoManaged}
+                    min="0.1"
+                    max="5"
+                    step="0.1"
+                    className="w-12 px-1 py-1.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500 disabled:opacity-60"
+                  />
+                  <span className="text-xs text-[var(--text-tertiary)]">%回</span>
+                </div>
 
                 <button
                   onClick={handleToggleAutoManage}
