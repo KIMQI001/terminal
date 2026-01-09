@@ -111,6 +111,8 @@ pub enum Timeframe {
     H4,
     #[serde(rename = "1d")]
     D1,
+    #[serde(rename = "4d")]
+    D4,
     #[serde(rename = "1w")]
     W1,
 }
@@ -125,6 +127,7 @@ impl Timeframe {
             Timeframe::H1 => "1h",
             Timeframe::H4 => "4h",
             Timeframe::D1 => "1d",
+            Timeframe::D4 => "4d",
             Timeframe::W1 => "1w",
         }
     }
@@ -138,6 +141,7 @@ impl Timeframe {
             Timeframe::H1 => 60 * 60,
             Timeframe::H4 => 4 * 60 * 60,
             Timeframe::D1 => 24 * 60 * 60,
+            Timeframe::D4 => 4 * 24 * 60 * 60,
             Timeframe::W1 => 7 * 24 * 60 * 60,
         }
     }
@@ -151,8 +155,30 @@ impl Timeframe {
             "1h" => Some(Timeframe::H1),
             "4h" => Some(Timeframe::H4),
             "1d" => Some(Timeframe::D1),
+            "4d" => Some(Timeframe::D4),
             "1w" => Some(Timeframe::W1),
             _ => None,
+        }
+    }
+
+    /// 是否需要从基础周期聚合（Binance 不原生支持）
+    pub fn needs_aggregation(&self) -> bool {
+        matches!(self, Timeframe::D4)
+    }
+
+    /// 返回聚合所需的基础时间周期
+    pub fn base_timeframe(&self) -> Timeframe {
+        match self {
+            Timeframe::D4 => Timeframe::D1,
+            _ => *self,
+        }
+    }
+
+    /// 返回聚合所需的基础周期数量
+    pub fn aggregation_count(&self) -> usize {
+        match self {
+            Timeframe::D4 => 4,
+            _ => 1,
         }
     }
 }
@@ -202,4 +228,130 @@ impl std::fmt::Display for SubscriptionKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}@{}", self.symbol, self.timeframe)
     }
+}
+
+/// 将多根基础K线聚合为一根更高时间周期的K线
+///
+/// # 参数
+/// - klines: 基础K线数组（必须按时间升序排列）
+/// - target_timeframe: 目标时间周期
+/// - count: 聚合数量（如 4D 需要 4 根 1D）
+///
+/// # 返回
+/// 聚合后的K线数组
+pub fn aggregate_klines(klines: &[Kline], target_timeframe: &str, count: usize) -> Vec<Kline> {
+    if klines.is_empty() || count == 0 {
+        return Vec::new();
+    }
+
+    let mut result = Vec::new();
+    let chunks = klines.chunks(count);
+
+    for chunk in chunks {
+        if chunk.is_empty() {
+            continue;
+        }
+
+        let first = &chunk[0];
+        let last = chunk.last().unwrap();
+
+        // 聚合OHLCV
+        let open = first.open;
+        let close = last.close;
+        let high = chunk.iter().map(|k| k.high).fold(f64::NEG_INFINITY, f64::max);
+        let low = chunk.iter().map(|k| k.low).fold(f64::INFINITY, f64::min);
+        let volume: f64 = chunk.iter().map(|k| k.volume).sum();
+        let quote_volume: f64 = chunk.iter().map(|k| k.quote_volume).sum();
+        let trades: i64 = chunk.iter().map(|k| k.trades).sum();
+
+        // 只有当所有子K线都收盘时，聚合K线才算收盘
+        let is_closed = chunk.len() == count && chunk.iter().all(|k| k.is_closed);
+
+        result.push(Kline {
+            symbol: first.symbol.clone(),
+            timeframe: target_timeframe.to_string(),
+            open_time: first.open_time,
+            open,
+            high,
+            low,
+            close,
+            volume,
+            close_time: last.close_time,
+            quote_volume,
+            trades,
+            is_closed,
+        });
+    }
+
+    result
+}
+
+/// 计算4D K线的起始时间
+/// 以 UTC 2020-01-01 为锚点，每4天为一个周期
+pub fn get_4d_period_start(timestamp_secs: i64) -> i64 {
+    // 2020-01-01 00:00:00 UTC = 1577836800
+    const ANCHOR: i64 = 1577836800;
+    const PERIOD_SECS: i64 = 4 * 24 * 60 * 60; // 4天
+
+    let elapsed = timestamp_secs - ANCHOR;
+    let periods = elapsed / PERIOD_SECS;
+    ANCHOR + periods * PERIOD_SECS
+}
+
+/// 将1D K线按4D周期分组并聚合
+pub fn aggregate_to_4d(daily_klines: &[Kline]) -> Vec<Kline> {
+    if daily_klines.is_empty() {
+        return Vec::new();
+    }
+
+    // 按4D周期分组
+    let mut grouped: std::collections::BTreeMap<i64, Vec<&Kline>> = std::collections::BTreeMap::new();
+
+    for kline in daily_klines {
+        let period_start = get_4d_period_start(kline.open_time);
+        grouped.entry(period_start).or_default().push(kline);
+    }
+
+    // 聚合每个周期
+    let mut result = Vec::new();
+    for (period_start, klines) in grouped {
+        if klines.is_empty() {
+            continue;
+        }
+
+        // 按时间排序
+        let mut sorted_klines: Vec<_> = klines;
+        sorted_klines.sort_by_key(|k| k.open_time);
+
+        let first = sorted_klines[0];
+        let last = sorted_klines.last().unwrap();
+
+        let open = first.open;
+        let close = last.close;
+        let high = sorted_klines.iter().map(|k| k.high).fold(f64::NEG_INFINITY, f64::max);
+        let low = sorted_klines.iter().map(|k| k.low).fold(f64::INFINITY, f64::min);
+        let volume: f64 = sorted_klines.iter().map(|k| k.volume).sum();
+        let quote_volume: f64 = sorted_klines.iter().map(|k| k.quote_volume).sum();
+        let trades: i64 = sorted_klines.iter().map(|k| k.trades).sum();
+
+        // 4D周期收盘：需要4根1D K线且最后一根已收盘
+        let is_closed = sorted_klines.len() == 4 && last.is_closed;
+
+        result.push(Kline {
+            symbol: first.symbol.clone(),
+            timeframe: "4d".to_string(),
+            open_time: period_start,
+            open,
+            high,
+            low,
+            close,
+            volume,
+            close_time: period_start + 4 * 24 * 60 * 60 - 1,
+            quote_volume,
+            trades,
+            is_closed,
+        });
+    }
+
+    result
 }

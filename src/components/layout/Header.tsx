@@ -27,6 +27,7 @@ const timeframes: { value: Timeframe; label: string }[] = [
   { value: "1h", label: "1H" },
   { value: "4h", label: "4H" },
   { value: "1d", label: "1D" },
+  { value: "4d", label: "4D" },
 ];
 
 const indicators: { key: keyof IndicatorState; label: string }[] = [

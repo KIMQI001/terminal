@@ -7,7 +7,7 @@ use tracing::{debug, info, warn};
 
 use crate::db::KlineRepository;
 use crate::exchanges::{Exchange, ExchangeRest, ExchangeWs};
-use crate::types::{ExchangeType, Kline, KlineSimple, SubscriptionKey, WsMessage};
+use crate::types::{aggregate_to_4d, ExchangeType, Kline, KlineSimple, SubscriptionKey, Timeframe, WsMessage};
 
 /// 内存缓存配置
 const DEFAULT_CACHE_SIZE: usize = 1000; // 默认缓存大小
@@ -101,6 +101,16 @@ impl KlineManager {
         let key = SubscriptionKey::new(symbol, timeframe);
         let symbol_upper = symbol.to_uppercase();
         let cache_size = get_cache_size(&symbol_upper);
+
+        // 检查是否需要聚合（如 4D）
+        let tf = Timeframe::from_str(timeframe);
+        let needs_aggregation = tf.map(|t| t.needs_aggregation()).unwrap_or(false);
+
+        if needs_aggregation {
+            return self
+                .init_aggregated_subscription(symbol, timeframe, exchange_type, cache_size)
+                .await;
+        }
 
         // 获取交易所实例
         let exchange = self
@@ -213,6 +223,135 @@ impl KlineManager {
         Ok(all_klines.iter().map(KlineSimple::from).collect())
     }
 
+    /// 初始化需要聚合的订阅（如 4D）
+    async fn init_aggregated_subscription(
+        &self,
+        symbol: &str,
+        timeframe: &str,
+        exchange_type: Option<ExchangeType>,
+        cache_size: usize,
+    ) -> anyhow::Result<Vec<KlineSimple>> {
+        let key = SubscriptionKey::new(symbol, timeframe);
+        let symbol_upper = symbol.to_uppercase();
+
+        // 获取交易所实例
+        let exchange = self
+            .get_exchange(exchange_type)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Exchange not registered"))?;
+
+        let exchange_name = exchange.exchange_type().as_str();
+        let rest = exchange.rest();
+
+        info!(
+            "[{}] Initializing aggregated subscription for {}@{} (needs 1D data)",
+            exchange_name, symbol_upper, timeframe
+        );
+
+        // 4D 需要 4 倍的 1D 数据来聚合
+        let base_timeframe = "1d";
+        let base_count = cache_size * 4;
+
+        // 1. 从数据库加载 1D 历史数据
+        let db_klines = self
+            .repo
+            .get_klines(&symbol_upper, base_timeframe, base_count as i64, None)
+            .await?;
+
+        info!(
+            "[{}] Loaded {} 1D klines from DB for aggregation",
+            exchange_name,
+            db_klines.len()
+        );
+
+        // 2. 从 API 获取更多数据（如果需要）
+        let mut api_klines = Vec::new();
+        if db_klines.len() < base_count {
+            let needed = base_count - db_klines.len();
+            let end_time_ms = db_klines.first().map(|k| k.open_time * 1000 - 1);
+
+            info!(
+                "[{}] Need {} more 1D klines, fetching from API...",
+                exchange_name, needed
+            );
+
+            api_klines = rest
+                .get_klines_batch(&symbol_upper, base_timeframe, needed, end_time_ms)
+                .await?;
+
+            info!(
+                "[{}] Fetched {} 1D klines from API",
+                exchange_name,
+                api_klines.len()
+            );
+        }
+
+        // 3. 获取最新 1D 数据
+        let latest_time = db_klines.last().map(|k| k.open_time);
+        let start_time_ms = latest_time.map(|t| (t + 1) * 1000);
+
+        let recent_klines = rest
+            .get_klines(&symbol_upper, base_timeframe, 1000, start_time_ms, None)
+            .await
+            .unwrap_or_default();
+
+        if !recent_klines.is_empty() {
+            info!(
+                "[{}] Fetched {} recent 1D klines from API",
+                exchange_name,
+                recent_klines.len()
+            );
+        }
+
+        // 4. 合并所有 1D 数据
+        let mut all_daily = api_klines.clone();
+        all_daily.extend(db_klines);
+        all_daily.extend(recent_klines.clone());
+
+        // 去重并排序
+        all_daily.sort_by_key(|k| k.open_time);
+        all_daily.dedup_by_key(|k| k.open_time);
+
+        info!(
+            "[{}] Total {} 1D klines for aggregation",
+            exchange_name,
+            all_daily.len()
+        );
+
+        // 5. 聚合为 4D
+        let aggregated = aggregate_to_4d(&all_daily);
+
+        // 只保留最近的 cache_size 条
+        let mut final_klines = aggregated;
+        if final_klines.len() > cache_size {
+            final_klines = final_klines.split_off(final_klines.len() - cache_size);
+        }
+
+        info!(
+            "[{}] Final cache size for {}@{}: {} klines (aggregated from 1D)",
+            exchange_name,
+            symbol_upper,
+            timeframe,
+            final_klines.len()
+        );
+
+        // 更新缓存
+        {
+            let mut cache = self.cache.write().await;
+            cache.insert(key, final_klines.clone());
+        }
+
+        // 6. 将 1D 数据写入数据库（4D 不写入，因为是计算得出的）
+        let mut to_write = api_klines;
+        to_write.extend(recent_klines);
+        if !to_write.is_empty() {
+            self.repo.batch_insert_klines(&to_write).await?;
+        }
+
+        // 7. 返回简化格式给客户端
+        Ok(final_klines.iter().map(KlineSimple::from).collect())
+    }
+
     /// 获取缓存中的K线数据
     pub async fn get_cached_klines(
         &self,
@@ -254,6 +393,11 @@ impl KlineManager {
         // 广播更新给客户端
         let _ = self.broadcaster.send((key.clone(), kline_simple));
 
+        // 如果是 1D K线更新，同时更新 4D 缓存
+        if kline.timeframe == "1d" {
+            self.update_aggregated_cache(&kline).await;
+        }
+
         // 如果K线已收盘，加入待写入队列
         if kline.is_closed {
             let mut pending = self.pending_writes.write().await;
@@ -270,6 +414,86 @@ impl KlineManager {
                 }
             }
         }
+    }
+
+    /// 当 1D K线更新时，同步更新聚合的 4D 缓存
+    async fn update_aggregated_cache(&self, daily_kline: &Kline) {
+        use crate::types::get_4d_period_start;
+
+        let key_4d = SubscriptionKey::new(&daily_kline.symbol, "4d");
+
+        // 检查是否有 4D 订阅
+        let has_4d_subscription = {
+            let cache = self.cache.read().await;
+            cache.contains_key(&key_4d)
+        };
+
+        if !has_4d_subscription {
+            return;
+        }
+
+        // 获取 1D 缓存中属于当前 4D 周期的所有 K 线
+        let key_1d = SubscriptionKey::new(&daily_kline.symbol, "1d");
+        let period_start = get_4d_period_start(daily_kline.open_time);
+
+        let period_klines: Vec<Kline> = {
+            let cache = self.cache.read().await;
+            if let Some(daily_cache) = cache.get(&key_1d) {
+                daily_cache
+                    .iter()
+                    .filter(|k| get_4d_period_start(k.open_time) == period_start)
+                    .cloned()
+                    .collect()
+            } else {
+                return;
+            }
+        };
+
+        if period_klines.is_empty() {
+            return;
+        }
+
+        // 计算聚合后的 4D K 线
+        let first = &period_klines[0];
+        let last = period_klines.last().unwrap();
+
+        let aggregated_kline = Kline {
+            symbol: daily_kline.symbol.clone(),
+            timeframe: "4d".to_string(),
+            open_time: period_start,
+            open: first.open,
+            high: period_klines.iter().map(|k| k.high).fold(f64::NEG_INFINITY, f64::max),
+            low: period_klines.iter().map(|k| k.low).fold(f64::INFINITY, f64::min),
+            close: last.close,
+            volume: period_klines.iter().map(|k| k.volume).sum(),
+            close_time: period_start + 4 * 24 * 60 * 60 - 1,
+            quote_volume: period_klines.iter().map(|k| k.quote_volume).sum(),
+            trades: period_klines.iter().map(|k| k.trades).sum(),
+            is_closed: period_klines.len() == 4 && last.is_closed,
+        };
+
+        let cache_size = get_cache_size(&daily_kline.symbol);
+
+        // 更新 4D 缓存
+        {
+            let mut cache = self.cache.write().await;
+            if let Some(klines_4d) = cache.get_mut(&key_4d) {
+                // 查找是否已有这个周期的 K 线
+                if let Some(existing) = klines_4d.iter_mut().find(|k| k.open_time == period_start) {
+                    *existing = aggregated_kline.clone();
+                } else {
+                    // 新周期，添加到末尾
+                    klines_4d.push(aggregated_kline.clone());
+                    if klines_4d.len() > cache_size {
+                        klines_4d.remove(0);
+                    }
+                }
+            }
+        }
+
+        // 广播 4D 更新
+        let kline_simple = KlineSimple::from(&aggregated_kline);
+        let _ = self.broadcaster.send((key_4d, kline_simple));
     }
 
     /// 强制刷新待写入队列到数据库
