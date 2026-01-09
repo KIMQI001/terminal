@@ -535,7 +535,7 @@ export function TradingChart() {
     };
   }, [symbol, timeframe, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend]);
 
-  // 加载K线计算前高前低 (H/L) - 优先使用4D，不存在则使用1D
+  // 加载K线计算前高前低 - 合并 4D+1D，取更保守的 P/D 值
   const { setDailyHL, dailyHL, dailyHLLines } = useChartStore();
 
   useEffect(() => {
@@ -553,9 +553,7 @@ export function TradingChart() {
       // 从倒数第二根K线向左扫描，找到包含当前价格的K线
       for (let i = klineData.length - 2; i >= 0; i--) {
         const candle = klineData[i];
-        // 当前价格在这根K线的高低点范围内
         if (currentPrice >= candle.low && currentPrice <= candle.high) {
-          // 找到锚定K线，计算 H 和 L
           return {
             high: Math.max(candle.high, latestCandle.high),
             low: Math.min(candle.low, latestCandle.low),
@@ -566,42 +564,65 @@ export function TradingChart() {
       return null;
     };
 
+    // 计算 P/D 区域
+    const calculatePD = (high: number, low: number) => {
+      const range = high - low;
+      const quarterRange = range / 4;
+      return {
+        pStart: high - quarterRange,
+        dStart: low + quarterRange,
+      };
+    };
+
     const calculateDailyHL = async () => {
       try {
-        // 先获取1D数据用于获取当前价格
+        // 获取1D数据
         const dailyData = await fetchKlines(symbol, '1d', 100);
         if (isCancelled || dailyData.length < 2) return;
 
         const currentPrice = dailyData[dailyData.length - 1].close;
 
-        // 优先尝试使用4D K线
-        let result: { high: number; low: number; anchorTime: number } | null = null;
+        let hl4d: { high: number; low: number; anchorTime: number } | null = null;
+        let hl1d: { high: number; low: number; anchorTime: number } | null = null;
 
+        // 1. 尝试获取 4D K线
         try {
           const fourDayData = await fetchKlines(symbol, '4d', 100);
           if (!isCancelled && fourDayData.length >= 2) {
-            result = findAnchorAndCalculateHL(fourDayData, currentPrice);
-            if (result) {
-              console.log('[HLPD] Using 4D K-line for H/L calculation');
-            }
+            hl4d = findAnchorAndCalculateHL(fourDayData, currentPrice);
           }
         } catch (e) {
-          console.log('[HLPD] 4D K-line not available, falling back to 1D');
+          // 4D 不可用，继续
         }
 
-        // 如果4D没找到锚定K线，回退到1D
-        if (!result) {
-          result = findAnchorAndCalculateHL(dailyData, currentPrice);
-          if (result) {
-            console.log('[HLPD] Using 1D K-line for H/L calculation');
-          }
-        }
+        // 2. 获取 1D K线
+        hl1d = findAnchorAndCalculateHL(dailyData, currentPrice);
 
+        // 3. 合并结果
         if (!isCancelled) {
-          if (result) {
+          if (hl4d && hl1d) {
+            // 两者都有，合并取更保守的值
+            const pd4d = calculatePD(hl4d.high, hl4d.low);
+            const pd1d = calculatePD(hl1d.high, hl1d.low);
+
+            const result = {
+              high: Math.max(hl4d.high, hl1d.high),
+              low: Math.min(hl4d.low, hl1d.low),
+              pStart: Math.max(pd4d.pStart, pd1d.pStart),  // P 取大值，卖得更高
+              dStart: Math.min(pd4d.dStart, pd1d.dStart),  // D 取小值，买得更低
+              anchorTime: hl4d.anchorTime,
+            };
+            console.log(`[HLPD] 合并 4D+1D: P=${result.pStart.toFixed(0)} (4D:${pd4d.pStart.toFixed(0)}, 1D:${pd1d.pStart.toFixed(0)}), D=${result.dStart.toFixed(0)} (4D:${pd4d.dStart.toFixed(0)}, 1D:${pd1d.dStart.toFixed(0)})`);
             setDailyHL(result);
+          } else if (hl4d) {
+            const pd = calculatePD(hl4d.high, hl4d.low);
+            console.log('[HLPD] 仅使用 4D K线');
+            setDailyHL({ ...hl4d, ...pd });
+          } else if (hl1d) {
+            const pd = calculatePD(hl1d.high, hl1d.low);
+            console.log('[HLPD] 仅使用 1D K线');
+            setDailyHL({ ...hl1d, ...pd });
           } else {
-            // 如果都没找到（当前价格已突破所有历史K线范围），清空
             setDailyHL(null);
           }
         }

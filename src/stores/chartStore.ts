@@ -6,6 +6,8 @@ import type { LiquidationHillData } from "@/lib/chart/primitives";
 export interface DailyHL {
   high: number;       // 前高 (锚定K线与当日的最高)
   low: number;        // 前低 (锚定K线与当日的最低)
+  pStart: number;     // 溢价区起点 (合并4D+1D后的最大P)
+  dStart: number;     // 折扣区起点 (合并4D+1D后的最小D)
   anchorTime: number; // 锚定K线时间
 }
 

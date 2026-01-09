@@ -16,18 +16,18 @@ export function DailyHLPanel() {
 
   const range = dailyHL.high - dailyHL.low;
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
-  const quarterRange = range / 4;
 
-  // 判断当前区域
+  // 使用预计算的 P/D 值（已合并 4D+1D）
+  const { pStart, dStart } = dailyHL;
+
+  // 判断当前区域（使用合并后的 P/D）
   let zone: ZoneType = 'M';
-  if (currentPrice >= dailyHL.high - quarterRange) {
+  if (currentPrice >= pStart) {
     zone = 'P';
-  } else if (currentPrice <= dailyHL.low + quarterRange) {
+  } else if (currentPrice <= dStart) {
     zone = 'D';
   }
 
-  const pStart = dailyHL.high - quarterRange;
-  const dStart = dailyHL.low + quarterRange;
   const decimals = symbol.includes('BTC') ? 1 : 2;
 
   const getZoneColor = (z: ZoneType) => {
