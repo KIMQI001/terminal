@@ -535,45 +535,75 @@ export function TradingChart() {
     };
   }, [symbol, timeframe, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend]);
 
-  // 加载日K计算前高前低 (H/L)
+  // 加载K线计算前高前低 (H/L) - 优先使用4D，不存在则使用1D
   const { setDailyHL, dailyHL, dailyHLLines } = useChartStore();
 
   useEffect(() => {
     let isCancelled = false;
 
+    // 通用的 H/L 计算函数
+    const findAnchorAndCalculateHL = (
+      klineData: Candle[],
+      currentPrice: number
+    ): { high: number; low: number; anchorTime: number } | null => {
+      if (klineData.length < 2) return null;
+
+      const latestCandle = klineData[klineData.length - 1];
+
+      // 从倒数第二根K线向左扫描，找到包含当前价格的K线
+      for (let i = klineData.length - 2; i >= 0; i--) {
+        const candle = klineData[i];
+        // 当前价格在这根K线的高低点范围内
+        if (currentPrice >= candle.low && currentPrice <= candle.high) {
+          // 找到锚定K线，计算 H 和 L
+          return {
+            high: Math.max(candle.high, latestCandle.high),
+            low: Math.min(candle.low, latestCandle.low),
+            anchorTime: candle.time,
+          };
+        }
+      }
+      return null;
+    };
+
     const calculateDailyHL = async () => {
       try {
-        // 获取日K数据 (100根足够)
+        // 先获取1D数据用于获取当前价格
         const dailyData = await fetchKlines(symbol, '1d', 100);
         if (isCancelled || dailyData.length < 2) return;
 
-        // 获取当前价格（最新K线收盘价）
         const currentPrice = dailyData[dailyData.length - 1].close;
-        const todayCandle = dailyData[dailyData.length - 1];
 
-        // 从倒数第二根K线向左扫描，找到包含当前价格的K线
-        for (let i = dailyData.length - 2; i >= 0; i--) {
-          const candle = dailyData[i];
-          // 当前价格在这根K线的高低点范围内
-          if (currentPrice >= candle.low && currentPrice <= candle.high) {
-            // 找到锚定K线，计算 H 和 L
-            const high = Math.max(candle.high, todayCandle.high);
-            const low = Math.min(candle.low, todayCandle.low);
+        // 优先尝试使用4D K线
+        let result: { high: number; low: number; anchorTime: number } | null = null;
 
-            if (!isCancelled) {
-              setDailyHL({
-                high,
-                low,
-                anchorTime: candle.time,
-              });
+        try {
+          const fourDayData = await fetchKlines(symbol, '4d', 100);
+          if (!isCancelled && fourDayData.length >= 2) {
+            result = findAnchorAndCalculateHL(fourDayData, currentPrice);
+            if (result) {
+              console.log('[HLPD] Using 4D K-line for H/L calculation');
             }
-            return;
+          }
+        } catch (e) {
+          console.log('[HLPD] 4D K-line not available, falling back to 1D');
+        }
+
+        // 如果4D没找到锚定K线，回退到1D
+        if (!result) {
+          result = findAnchorAndCalculateHL(dailyData, currentPrice);
+          if (result) {
+            console.log('[HLPD] Using 1D K-line for H/L calculation');
           }
         }
 
-        // 如果没找到（当前价格已突破所有历史K线范围），清空
         if (!isCancelled) {
-          setDailyHL(null);
+          if (result) {
+            setDailyHL(result);
+          } else {
+            // 如果都没找到（当前价格已突破所有历史K线范围），清空
+            setDailyHL(null);
+          }
         }
       } catch (error) {
         console.error('Failed to calculate daily H/L:', error);
