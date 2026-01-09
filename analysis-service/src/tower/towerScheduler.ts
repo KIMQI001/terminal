@@ -671,54 +671,92 @@ async function cancelAllTowerOrders(
 }
 
 /**
- * 获取日K前高前低
- * 从当前价格向左扫描日K，找到包含当前价格的锚定K线
+ * 获取K线前高前低 - 优先使用 4D，不存在则回退到 1D
+ * 从当前价格向左扫描K线，找到包含当前价格的锚定K线
  */
 async function getDailyHL(symbol: string, currentPrice: number): Promise<DailyHL | null> {
+  // 通用的锚定K线查找函数
+  const findAnchor = (
+    klines: Array<{ high: number; low: number }>,
+    currentPrice: number
+  ): { high: number; low: number } | null => {
+    if (klines.length < 2) return null;
+
+    const latestCandle = klines[klines.length - 1];
+
+    // 从倒数第二根向左扫描，找到包含当前价格的K线
+    for (let i = klines.length - 2; i >= 0; i--) {
+      const { high, low } = klines[i];
+      if (currentPrice >= low && currentPrice <= high) {
+        // 找到锚定K线
+        return {
+          high: Math.max(high, latestCandle.high),
+          low: Math.min(low, latestCandle.low),
+        };
+      }
+    }
+    return null;
+  };
+
+  // 计算 P/D 区域
+  const calculatePD = (high: number, low: number): DailyHL => {
+    const range = high - low;
+    const quarterRange = range / 4;
+    return {
+      high,
+      low,
+      pStart: high - quarterRange,  // P区开始 (价格高于此为溢价区)
+      dStart: low + quarterRange,   // D区开始 (价格低于此为折扣区)
+    };
+  };
+
   try {
-    // 获取日K数据
-    const response = await fetch(
+    // 1. 优先尝试从 kline-server 获取 4D K线
+    try {
+      const klineApiUrl = process.env.KLINE_API_URL || 'http://127.0.0.1:3001';
+      const response4d = await fetch(
+        `${klineApiUrl}/api/klines/${symbol}/4d?limit=100`
+      );
+
+      if (response4d.ok) {
+        const data4d = await response4d.json() as { klines: Array<{ high: number; low: number }> };
+        if (data4d.klines && data4d.klines.length >= 2) {
+          const anchor = findAnchor(data4d.klines, currentPrice);
+          if (anchor) {
+            console.log('[TowerScheduler] HLPD 使用 4D K线');
+            return calculatePD(anchor.high, anchor.low);
+          }
+        }
+      }
+    } catch (e) {
+      console.log('[TowerScheduler] 4D K线不可用，回退到 1D');
+    }
+
+    // 2. 回退到 1D (从 Binance API)
+    const response1d = await fetch(
       `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1d&limit=100`
     );
 
-    if (!response.ok) {
+    if (!response1d.ok) {
       console.error('[TowerScheduler] 获取日K数据失败');
       return null;
     }
 
-    const klines = await response.json() as Array<[number, string, string, string, string, ...unknown[]]>;
-    if (klines.length < 2) return null;
+    const klines1d = await response1d.json() as Array<[number, string, string, string, string, ...unknown[]]>;
+    const parsed1d = klines1d.map(k => ({
+      high: parseFloat(k[2]),
+      low: parseFloat(k[3]),
+    }));
 
-    // 当日K线
-    const todayCandle = {
-      high: parseFloat(klines[klines.length - 1][2]),
-      low: parseFloat(klines[klines.length - 1][3]),
-    };
-
-    // 从倒数第二根向左扫描，找到包含当前价格的K线
-    for (let i = klines.length - 2; i >= 0; i--) {
-      const high = parseFloat(klines[i][2]);
-      const low = parseFloat(klines[i][3]);
-
-      if (currentPrice >= low && currentPrice <= high) {
-        // 找到锚定K线
-        const finalHigh = Math.max(high, todayCandle.high);
-        const finalLow = Math.min(low, todayCandle.low);
-        const range = finalHigh - finalLow;
-        const quarterRange = range / 4;
-
-        return {
-          high: finalHigh,
-          low: finalLow,
-          pStart: finalHigh - quarterRange,  // P区开始 (价格高于此为溢价区)
-          dStart: finalLow + quarterRange,   // D区开始 (价格低于此为折扣区)
-        };
-      }
+    const anchor = findAnchor(parsed1d, currentPrice);
+    if (anchor) {
+      console.log('[TowerScheduler] HLPD 使用 1D K线');
+      return calculatePD(anchor.high, anchor.low);
     }
 
     return null;
   } catch (error) {
-    console.error('[TowerScheduler] 获取日K异常:', error);
+    console.error('[TowerScheduler] 获取K线异常:', error);
     return null;
   }
 }
