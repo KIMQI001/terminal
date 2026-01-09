@@ -848,13 +848,8 @@ export function TradingChart() {
       });
     }
 
-    // 5. 显示日K前高前低价格线 (根据选中状态)
+    // 5. 显示日K前高前低价格线 (根据选中状态，使用已合并的 P/D 值)
     if (dailyHL) {
-      const range = dailyHL.high - dailyHL.low;
-      const quarterRange = range / 4;
-      const pStart = dailyHL.high - quarterRange;
-      const dStart = dailyHL.low + quarterRange;
-
       // H - 前高 (浅红)
       if (dailyHLLines.H) {
         const highLine = candleSeriesRef.current.createPriceLine({
@@ -868,10 +863,10 @@ export function TradingChart() {
         priceLinesRef.current.push(highLine);
       }
 
-      // P - 溢价区开始
+      // P - 溢价区开始（使用合并后的值）
       if (dailyHLLines.P) {
         const pLine = candleSeriesRef.current.createPriceLine({
-          price: pStart,
+          price: dailyHL.pStart,
           color: '#ef4444',  // 红色
           lineWidth: 1,
           lineStyle: 2,
@@ -881,10 +876,10 @@ export function TradingChart() {
         priceLinesRef.current.push(pLine);
       }
 
-      // D - 折扣区开始
+      // D - 折扣区开始（使用合并后的值）
       if (dailyHLLines.D) {
         const dLine = candleSeriesRef.current.createPriceLine({
-          price: dStart,
+          price: dailyHL.dStart,
           color: '#22c55e',  // 绿色
           lineWidth: 1,
           lineStyle: 2,
