@@ -424,6 +424,7 @@ const NEAR_PRICE_RATIO = 1 / 100;
 
 // CG 首单更新参数
 const CG_TOP_RATIO_THRESHOLD = 1.2;  // top1 需要比 top2 大 20%
+const CG_BETTER_THRESHOLD = 200;     // CG 首单更优阈值（点）
 
 /**
  * 检查订单数量
@@ -531,37 +532,67 @@ async function checkCGUpdateOpportunity(
       return { shouldUpdate: false, reason: '无日K数据' };
     }
 
-    // 5.5 检查是否有 CG 首单挂着
-    const hasCGLong = towerOrders.some(o => o.side === 'BUY' && o.clientOrderId?.includes('_CG_'));
-    const hasCGShort = towerOrders.some(o => o.side === 'SELL' && o.clientOrderId?.includes('_CG_'));
-    console.log(`[TowerScheduler] CG首单状态: 多=${hasCGLong}, 空=${hasCGShort}, D=${dailyHL.dStart.toFixed(0)}, P=${dailyHL.pStart.toFixed(0)}`);
+    // 5.5 检查是否有 CG 首单挂着，并获取其入场价
+    const cgLongOrder = towerOrders.find(o => o.side === 'BUY' && o.clientOrderId?.includes('_CG_'));
+    const cgShortOrder = towerOrders.find(o => o.side === 'SELL' && o.clientOrderId?.includes('_CG_'));
+    const hasCGLong = !!cgLongOrder;
+    const hasCGShort = !!cgShortOrder;
+    console.log(`[TowerScheduler] CG首单状态: 多=${hasCGLong}${hasCGLong ? `@${cgLongOrder!.price.toFixed(0)}` : ''}, 空=${hasCGShort}${hasCGShort ? `@${cgShortOrder!.price.toFixed(0)}` : ''}, D=${dailyHL.dStart.toFixed(0)}, P=${dailyHL.pStart.toFixed(0)}`);
 
-    // 5.6 如果没有 CG 多单，检查新的 CG 入场价是否满足 D 条件
-    if (!hasCGLong && cgData.longTop.length > 0) {
+    // 5.6 检查 CG 多单机会（无论是否已有）
+    if (cgData.longTop.length > 0) {
       const longBelowD = cgData.longTop.filter(l => l.price < dailyHL.dStart);
       if (longBelowD.length > 0) {
         const maxLong = longBelowD.reduce((max, l) => l.amount > max.amount ? l : max, longBelowD[0]);
         const offset = Math.max(200, maxLong.price * 0.002);
         const newEntry = maxLong.price + offset;
-        console.log(`[TowerScheduler] CG多单检查: 清算价=${maxLong.price}, 入场=${newEntry.toFixed(0)}, D=${dailyHL.dStart.toFixed(0)}, 满足=${newEntry <= dailyHL.dStart}`);
+
         if (newEntry <= dailyHL.dStart) {
-          return { shouldUpdate: true, reason: `CG多单可用: 入场=${newEntry.toFixed(0)} <= D` };
+          if (!hasCGLong) {
+            // 没有 CG 多单，新建
+            console.log(`[TowerScheduler] CG多单检查: 清算价=${maxLong.price}, 入场=${newEntry.toFixed(0)}, D=${dailyHL.dStart.toFixed(0)}, 满足`);
+            return { shouldUpdate: true, reason: `CG多单可用: 入场=${newEntry.toFixed(0)} <= D` };
+          } else {
+            // 已有 CG 多单，检查是否更优（新入场价更低）
+            const existingEntry = cgLongOrder!.price;
+            const improvement = existingEntry - newEntry;
+            console.log(`[TowerScheduler] CG多单检查: 新入场=${newEntry.toFixed(0)}, 现有=${existingEntry.toFixed(0)}, 改善=${improvement.toFixed(0)}点`);
+            if (improvement >= CG_BETTER_THRESHOLD) {
+              return { shouldUpdate: true, reason: `CG多单更优: ${newEntry.toFixed(0)} 比现有 ${existingEntry.toFixed(0)} 低 ${improvement.toFixed(0)}点` };
+            }
+          }
+        } else {
+          console.log(`[TowerScheduler] CG多单检查: 入场=${newEntry.toFixed(0)} > D=${dailyHL.dStart.toFixed(0)}, 不满足`);
         }
       } else {
         console.log(`[TowerScheduler] CG多单检查: 无清算价 < D`);
       }
     }
 
-    // 5.7 如果没有 CG 空单，检查新的 CG 入场价是否满足 P 条件
-    if (!hasCGShort && cgData.shortTop.length > 0) {
+    // 5.7 检查 CG 空单机会（无论是否已有）
+    if (cgData.shortTop.length > 0) {
       const shortAboveP = cgData.shortTop.filter(s => s.price > dailyHL.pStart);
       if (shortAboveP.length > 0) {
         const maxShort = shortAboveP.reduce((max, s) => s.amount > max.amount ? s : max, shortAboveP[0]);
         const offset = Math.max(200, maxShort.price * 0.002);
         const newEntry = maxShort.price - offset;
-        console.log(`[TowerScheduler] CG空单检查: 清算价=${maxShort.price}, 入场=${newEntry.toFixed(0)}, P=${dailyHL.pStart.toFixed(0)}, 满足=${newEntry >= dailyHL.pStart}`);
+
         if (newEntry >= dailyHL.pStart) {
-          return { shouldUpdate: true, reason: `CG空单可用: 入场=${newEntry.toFixed(0)} >= P` };
+          if (!hasCGShort) {
+            // 没有 CG 空单，新建
+            console.log(`[TowerScheduler] CG空单检查: 清算价=${maxShort.price}, 入场=${newEntry.toFixed(0)}, P=${dailyHL.pStart.toFixed(0)}, 满足`);
+            return { shouldUpdate: true, reason: `CG空单可用: 入场=${newEntry.toFixed(0)} >= P` };
+          } else {
+            // 已有 CG 空单，检查是否更优（新入场价更高）
+            const existingEntry = cgShortOrder!.price;
+            const improvement = newEntry - existingEntry;
+            console.log(`[TowerScheduler] CG空单检查: 新入场=${newEntry.toFixed(0)}, 现有=${existingEntry.toFixed(0)}, 改善=${improvement.toFixed(0)}点`);
+            if (improvement >= CG_BETTER_THRESHOLD) {
+              return { shouldUpdate: true, reason: `CG空单更优: ${newEntry.toFixed(0)} 比现有 ${existingEntry.toFixed(0)} 高 ${improvement.toFixed(0)}点` };
+            }
+          }
+        } else {
+          console.log(`[TowerScheduler] CG空单检查: 入场=${newEntry.toFixed(0)} < P=${dailyHL.pStart.toFixed(0)}, 不满足`);
         }
       } else {
         console.log(`[TowerScheduler] CG空单检查: 无清算价 > P`);
