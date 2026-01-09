@@ -671,8 +671,9 @@ async function cancelAllTowerOrders(
 }
 
 /**
- * 获取K线前高前低 - 优先使用 4D，不存在则回退到 1D
- * 从当前价格向左扫描K线，找到包含当前价格的锚定K线
+ * 获取K线前高前低 - 同时计算 4D 和 1D，取更保守的 P/D 值
+ * P = max(4D.P, 1D.P) → 卖得更高
+ * D = min(4D.D, 1D.D) → 买得更低
  */
 async function getDailyHL(symbol: string, currentPrice: number): Promise<DailyHL | null> {
   // 通用的锚定K线查找函数
@@ -688,7 +689,6 @@ async function getDailyHL(symbol: string, currentPrice: number): Promise<DailyHL
     for (let i = klines.length - 2; i >= 0; i--) {
       const { high, low } = klines[i];
       if (currentPrice >= low && currentPrice <= high) {
-        // 找到锚定K线
         return {
           high: Math.max(high, latestCandle.high),
           low: Math.min(low, latestCandle.low),
@@ -699,7 +699,7 @@ async function getDailyHL(symbol: string, currentPrice: number): Promise<DailyHL
   };
 
   // 计算 P/D 区域
-  const calculatePD = (high: number, low: number): DailyHL => {
+  const calculatePD = (high: number, low: number) => {
     const range = high - low;
     const quarterRange = range / 4;
     return {
@@ -711,7 +711,10 @@ async function getDailyHL(symbol: string, currentPrice: number): Promise<DailyHL
   };
 
   try {
-    // 1. 优先尝试从 kline-server 获取 4D K线
+    let pd4d: { high: number; low: number; pStart: number; dStart: number } | null = null;
+    let pd1d: { high: number; low: number; pStart: number; dStart: number } | null = null;
+
+    // 1. 尝试从 kline-server 获取 4D K线
     try {
       const klineApiUrl = process.env.KLINE_API_URL || 'http://127.0.0.1:3001';
       const response4d = await fetch(
@@ -723,35 +726,49 @@ async function getDailyHL(symbol: string, currentPrice: number): Promise<DailyHL
         if (data4d.klines && data4d.klines.length >= 2) {
           const anchor = findAnchor(data4d.klines, currentPrice);
           if (anchor) {
-            console.log('[TowerScheduler] HLPD 使用 4D K线');
-            return calculatePD(anchor.high, anchor.low);
+            pd4d = calculatePD(anchor.high, anchor.low);
           }
         }
       }
     } catch (e) {
-      console.log('[TowerScheduler] 4D K线不可用，回退到 1D');
+      // 4D 不可用，继续
     }
 
-    // 2. 回退到 1D (从 Binance API)
+    // 2. 获取 1D K线 (从 Binance API)
     const response1d = await fetch(
       `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1d&limit=100`
     );
 
-    if (!response1d.ok) {
-      console.error('[TowerScheduler] 获取日K数据失败');
-      return null;
+    if (response1d.ok) {
+      const klines1d = await response1d.json() as Array<[number, string, string, string, string, ...unknown[]]>;
+      const parsed1d = klines1d.map(k => ({
+        high: parseFloat(k[2]),
+        low: parseFloat(k[3]),
+      }));
+
+      const anchor = findAnchor(parsed1d, currentPrice);
+      if (anchor) {
+        pd1d = calculatePD(anchor.high, anchor.low);
+      }
     }
 
-    const klines1d = await response1d.json() as Array<[number, string, string, string, string, ...unknown[]]>;
-    const parsed1d = klines1d.map(k => ({
-      high: parseFloat(k[2]),
-      low: parseFloat(k[3]),
-    }));
-
-    const anchor = findAnchor(parsed1d, currentPrice);
-    if (anchor) {
-      console.log('[TowerScheduler] HLPD 使用 1D K线');
-      return calculatePD(anchor.high, anchor.low);
+    // 3. 合并结果：取更保守的值
+    if (pd4d && pd1d) {
+      // 两者都有，取 P 的最大值，D 的最小值
+      const result: DailyHL = {
+        high: Math.max(pd4d.high, pd1d.high),
+        low: Math.min(pd4d.low, pd1d.low),
+        pStart: Math.max(pd4d.pStart, pd1d.pStart),  // P 取大值，卖得更高
+        dStart: Math.min(pd4d.dStart, pd1d.dStart),  // D 取小值，买得更低
+      };
+      console.log(`[TowerScheduler] HLPD 合并 4D+1D: P=${result.pStart.toFixed(0)} (4D:${pd4d.pStart.toFixed(0)}, 1D:${pd1d.pStart.toFixed(0)}), D=${result.dStart.toFixed(0)} (4D:${pd4d.dStart.toFixed(0)}, 1D:${pd1d.dStart.toFixed(0)})`);
+      return result;
+    } else if (pd4d) {
+      console.log('[TowerScheduler] HLPD 仅使用 4D K线');
+      return pd4d;
+    } else if (pd1d) {
+      console.log('[TowerScheduler] HLPD 仅使用 1D K线');
+      return pd1d;
     }
 
     return null;
