@@ -899,10 +899,10 @@ function calculateOrders(
         cgFirstShort = {
           liqPrice: maxShort.price,
           entry,
-          stopLoss: maxShort.price,
+          stopLoss: entry + 300,  // 入场价 + 300 点
           takeProfit: entry * (1 - MIN_TP_RATIO),  // 入场价 - 2.5%
         };
-        console.log(`[TowerScheduler] CG 首空单: P=${dailyHL.pStart.toFixed(0)}, 清算价=${maxShort.price}, 偏移=${offset.toFixed(0)}, 入场=${cgFirstShort.entry.toFixed(0)}, 止损=${cgFirstShort.stopLoss.toFixed(0)}`);
+        console.log(`[TowerScheduler] CG 首空单: P=${dailyHL.pStart.toFixed(0)}, 清算价=${maxShort.price}, 入场=${cgFirstShort.entry.toFixed(0)}, 止损=${cgFirstShort.stopLoss.toFixed(0)}`);
       } else {
         console.log(`[TowerScheduler] CG 首空单舍弃: 入场=${entry.toFixed(0)} < P=${dailyHL.pStart.toFixed(0)}`);
       }
@@ -920,10 +920,10 @@ function calculateOrders(
         cgFirstLong = {
           liqPrice: maxLong.price,
           entry,
-          stopLoss: maxLong.price,
+          stopLoss: entry - 300,  // 入场价 - 300 点
           takeProfit: entry * (1 + MIN_TP_RATIO),  // 入场价 + 2.5%
         };
-        console.log(`[TowerScheduler] CG 首多单: D=${dailyHL.dStart.toFixed(0)}, 清算价=${maxLong.price}, 偏移=${offset.toFixed(0)}, 入场=${cgFirstLong.entry.toFixed(0)}, 止损=${cgFirstLong.stopLoss.toFixed(0)}`);
+        console.log(`[TowerScheduler] CG 首多单: D=${dailyHL.dStart.toFixed(0)}, 清算价=${maxLong.price}, 入场=${cgFirstLong.entry.toFixed(0)}, 止损=${cgFirstLong.stopLoss.toFixed(0)}`);
       } else {
         console.log(`[TowerScheduler] CG 首多单舍弃: 入场=${entry.toFixed(0)} > D=${dailyHL.dStart.toFixed(0)}`);
       }
