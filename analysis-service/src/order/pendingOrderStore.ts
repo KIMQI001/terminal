@@ -390,17 +390,20 @@ export function markSlTpPlaced(
 
 /**
  * 更新订单状态为已取消
+ * 只更新 pending 状态的订单，避免把新下的订单误标记为 canceled
  */
 export function markOrderCanceled(clientOrderId: string): void {
   const db = getDatabase();
 
-  db.prepare(`
+  const result = db.prepare(`
     UPDATE pending_entry_orders
     SET status = 'canceled'
-    WHERE client_order_id = ?
+    WHERE client_order_id = ? AND status = 'pending'
   `).run(clientOrderId);
 
-  console.log(`[PendingOrderStore] 订单已取消: ${clientOrderId}`);
+  if (result.changes > 0) {
+    console.log(`[PendingOrderStore] 订单已取消: ${clientOrderId}`);
+  }
 }
 
 /**
