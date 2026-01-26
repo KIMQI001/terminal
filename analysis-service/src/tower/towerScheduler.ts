@@ -896,13 +896,16 @@ function calculateOrders(
       const entry = maxShort.price - offset;
       // 入场价也必须 >= P（溢价区）
       if (entry >= dailyHL.pStart) {
+        // 止盈 = min(固定止盈 2.5%, D区)，取更低的价格
+        const fixedTp = entry * (1 - MIN_TP_RATIO);
+        const takeProfit = Math.min(fixedTp, dailyHL.dStart);
         cgFirstShort = {
           liqPrice: maxShort.price,
           entry,
           stopLoss: entry + 300,  // 入场价 + 300 点
-          takeProfit: entry * (1 - MIN_TP_RATIO),  // 入场价 - 2.5%
+          takeProfit,
         };
-        console.log(`[TowerScheduler] CG 首空单: P=${dailyHL.pStart.toFixed(0)}, 清算价=${maxShort.price}, 入场=${cgFirstShort.entry.toFixed(0)}, 止损=${cgFirstShort.stopLoss.toFixed(0)}`);
+        console.log(`[TowerScheduler] CG 首空单: P=${dailyHL.pStart.toFixed(0)}, 清算价=${maxShort.price}, 入场=${cgFirstShort.entry.toFixed(0)}, 止损=${cgFirstShort.stopLoss.toFixed(0)}, 止盈=${takeProfit.toFixed(0)} (固定=${fixedTp.toFixed(0)}, D=${dailyHL.dStart.toFixed(0)})`);
       } else {
         console.log(`[TowerScheduler] CG 首空单舍弃: 入场=${entry.toFixed(0)} < P=${dailyHL.pStart.toFixed(0)}`);
       }
@@ -917,13 +920,16 @@ function calculateOrders(
       const entry = maxLong.price + offset;
       // 入场价也必须 <= D（折扣区）
       if (entry <= dailyHL.dStart) {
+        // 止盈 = max(固定止盈 2.5%, P区)，取更高的价格
+        const fixedTp = entry * (1 + MIN_TP_RATIO);
+        const takeProfit = Math.max(fixedTp, dailyHL.pStart);
         cgFirstLong = {
           liqPrice: maxLong.price,
           entry,
           stopLoss: entry - 300,  // 入场价 - 300 点
-          takeProfit: entry * (1 + MIN_TP_RATIO),  // 入场价 + 2.5%
+          takeProfit,
         };
-        console.log(`[TowerScheduler] CG 首多单: D=${dailyHL.dStart.toFixed(0)}, 清算价=${maxLong.price}, 入场=${cgFirstLong.entry.toFixed(0)}, 止损=${cgFirstLong.stopLoss.toFixed(0)}`);
+        console.log(`[TowerScheduler] CG 首多单: D=${dailyHL.dStart.toFixed(0)}, 清算价=${maxLong.price}, 入场=${cgFirstLong.entry.toFixed(0)}, 止损=${cgFirstLong.stopLoss.toFixed(0)}, 止盈=${takeProfit.toFixed(0)} (固定=${fixedTp.toFixed(0)}, P=${dailyHL.pStart.toFixed(0)})`);
       } else {
         console.log(`[TowerScheduler] CG 首多单舍弃: 入场=${entry.toFixed(0)} > D=${dailyHL.dStart.toFixed(0)}`);
       }
@@ -963,7 +969,9 @@ function calculateOrders(
       block.stopLoss = boundary;
     }
 
-    // 止盈 = 最近的对立塔块，最小 2.5%
+    // 止盈 = max(固定止盈 2.5%, P/D 距离)
+    // 多单：止盈 = max(入场价 × 1.025, P)
+    // 空单：止盈 = min(入场价 × 0.975, D)
     const minTpDistance = block.entry * MIN_TP_RATIO;
     let target: typeof block | undefined;
 
@@ -975,19 +983,34 @@ function calculateOrders(
       target = candidates[candidates.length - 1];
     }
 
+    // 先计算基础止盈（对立塔块或固定 2.5%）
+    let baseTp: number;
     if (target) {
       const tpDistance = Math.abs(target.entry - block.entry);
       if (tpDistance >= minTpDistance) {
-        block.takeProfit = target.entry;
+        baseTp = target.entry;
       } else {
-        block.takeProfit = block.type === 'bearish'
+        baseTp = block.type === 'bearish'
           ? block.entry * (1 - MIN_TP_RATIO)
           : block.entry * (1 + MIN_TP_RATIO);
       }
     } else {
-      block.takeProfit = block.type === 'bearish'
+      baseTp = block.type === 'bearish'
         ? block.entry * (1 - MIN_TP_RATIO)
         : block.entry * (1 + MIN_TP_RATIO);
+    }
+
+    // 与 P/D 比较，取更优的止盈
+    if (dailyHL) {
+      if (block.type === 'bearish') {
+        // 空单：止盈 = min(baseTp, D)，取更低的价格
+        block.takeProfit = Math.min(baseTp, dailyHL.dStart);
+      } else {
+        // 多单：止盈 = max(baseTp, P)，取更高的价格
+        block.takeProfit = Math.max(baseTp, dailyHL.pStart);
+      }
+    } else {
+      block.takeProfit = baseTp;
     }
   }
 
