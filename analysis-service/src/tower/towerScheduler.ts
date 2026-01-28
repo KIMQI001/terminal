@@ -273,7 +273,12 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
 
     // 2. 检查当前订单数量和位置
     const orderCheck = await checkOrdersCount(exchange, exchangeConfig, management.symbol, management.towerLayers);
-    if (orderCheck.sufficient || orderCheck.hasNearOrder) {
+
+    // 如果有订单在 P/D 中性区域，强制重新排列
+    if (orderCheck.hasOrderInNeutralZone) {
+      console.log(`[TowerScheduler] 中性区域有订单，强制重新排列`);
+      // 继续执行，不跳过
+    } else if (orderCheck.sufficient || orderCheck.hasNearOrder) {
       // 订单充足或有近距离订单时，检查是否有更优的 CG 首单机会
       const cgOpportunity = await checkCGUpdateOpportunity(exchange, exchangeConfig, management.symbol);
       console.log(`[TowerScheduler] CG检查结果: shouldUpdate=${cgOpportunity.shouldUpdate}, reason=${cgOpportunity.reason || '无'}`);
@@ -434,12 +439,12 @@ async function checkOrdersCount(
   exchangeConfig: exchangeAdapter.ExchangeApiConfig,
   symbol: string,
   requiredLayers: number
-): Promise<{ bullish: number; bearish: number; sufficient: boolean; hasNearOrder: boolean }> {
+): Promise<{ bullish: number; bearish: number; sufficient: boolean; hasNearOrder: boolean; hasOrderInNeutralZone: boolean }> {
   try {
     // 获取挂单
     const ordersResult = await exchangeAdapter.getOpenOrders(exchange, exchangeConfig, symbol);
     if (!ordersResult.success || !ordersResult.orders) {
-      return { bullish: 0, bearish: 0, sufficient: false, hasNearOrder: false };
+      return { bullish: 0, bearish: 0, sufficient: false, hasNearOrder: false, hasOrderInNeutralZone: false };
     }
 
     // 获取当前价格
@@ -474,10 +479,26 @@ async function checkOrdersCount(
       }
     }
 
-    return { bullish, bearish, sufficient, hasNearOrder };
+    // 检查是否有订单在 P/D 中性区域（需要重新排列）
+    let hasOrderInNeutralZone = false;
+    if (currentPrice > 0) {
+      const dailyHL = await getDailyHL(symbol, currentPrice);
+      if (dailyHL) {
+        // 中性区域：D < price < P
+        const neutralOrders = towerOrders.filter(o =>
+          o.price > dailyHL.dStart && o.price < dailyHL.pStart
+        );
+        if (neutralOrders.length > 0) {
+          hasOrderInNeutralZone = true;
+          console.log(`[TowerScheduler] 发现 ${neutralOrders.length} 个订单在中性区域 (D=${dailyHL.dStart.toFixed(0)} ~ P=${dailyHL.pStart.toFixed(0)}): ${neutralOrders.map(o => `${o.side}@${o.price.toFixed(0)}`).join(', ')}`);
+        }
+      }
+    }
+
+    return { bullish, bearish, sufficient, hasNearOrder, hasOrderInNeutralZone };
   } catch (error) {
     console.error('[TowerScheduler] 检查订单失败:', error);
-    return { bullish: 0, bearish: 0, sufficient: false, hasNearOrder: false };
+    return { bullish: 0, bearish: 0, sufficient: false, hasNearOrder: false, hasOrderInNeutralZone: false };
   }
 }
 
