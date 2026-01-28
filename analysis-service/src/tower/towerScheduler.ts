@@ -1134,6 +1134,63 @@ function calculateOrders(
     console.log(`[TowerScheduler] 空单塔块: ${selectedBearish.map(b => `${b.entry.toFixed(0)} ${b.source} ${b.timeframe}`).join(' | ')}`);
   }
 
+  // ===== P/D 边界补单 =====
+  // 如果 P/D 外 200 点内无订单，在该区域找一个最近的 ICT 塔块补上
+  // 因为进入 P/D 就是高概率区域，CG 首单可能有延迟
+  const PD_BOUNDARY_DISTANCE = 200;
+
+  if (dailyHL) {
+    // 多单：检查 D 到 D-200 区间内是否有订单
+    const dBoundaryLow = dailyHL.dStart - PD_BOUNDARY_DISTANCE;
+    const hasBullishNearD = cgFirstLong
+      ? (cgFirstLong.entry >= dBoundaryLow && cgFirstLong.entry <= dailyHL.dStart)
+      : false;
+    const hasBullishBlockNearD = selectedBullish.some(
+      b => b.entry >= dBoundaryLow && b.entry <= dailyHL.dStart
+    );
+
+    if (!hasBullishNearD && !hasBullishBlockNearD) {
+      // 在 D 到 D-200 区间内找一个最近的 ICT 塔块
+      const boundaryBullish = allBullish
+        .filter(b => b.entry >= dBoundaryLow && b.entry <= dailyHL.dStart)
+        .filter(b => !selectedBullish.some(s => s.entry === b.entry))  // 排除已选中的
+        .sort((a, b) => b.entry - a.entry);  // 价格从高到低（离 D 最近的优先）
+
+      if (boundaryBullish.length > 0) {
+        const boundaryBlock = boundaryBullish[0];
+        selectedBullish.unshift(boundaryBlock);  // 添加到最前面（第一层）
+        console.log(`[TowerScheduler] D边界补单: ${boundaryBlock.entry.toFixed(0)} ${boundaryBlock.source} ${boundaryBlock.timeframe} (D=${dailyHL.dStart.toFixed(0)}, 区间=${dBoundaryLow.toFixed(0)}~${dailyHL.dStart.toFixed(0)})`);
+      } else {
+        console.log(`[TowerScheduler] D边界无可用塔块 (区间=${dBoundaryLow.toFixed(0)}~${dailyHL.dStart.toFixed(0)})`);
+      }
+    }
+
+    // 空单：检查 P 到 P+200 区间内是否有订单
+    const pBoundaryHigh = dailyHL.pStart + PD_BOUNDARY_DISTANCE;
+    const hasBearishNearP = cgFirstShort
+      ? (cgFirstShort.entry >= dailyHL.pStart && cgFirstShort.entry <= pBoundaryHigh)
+      : false;
+    const hasBearishBlockNearP = selectedBearish.some(
+      b => b.entry >= dailyHL.pStart && b.entry <= pBoundaryHigh
+    );
+
+    if (!hasBearishNearP && !hasBearishBlockNearP) {
+      // 在 P 到 P+200 区间内找一个最近的 ICT 塔块
+      const boundaryBearish = allBearish
+        .filter(b => b.entry >= dailyHL.pStart && b.entry <= pBoundaryHigh)
+        .filter(b => !selectedBearish.some(s => s.entry === b.entry))  // 排除已选中的
+        .sort((a, b) => a.entry - b.entry);  // 价格从低到高（离 P 最近的优先）
+
+      if (boundaryBearish.length > 0) {
+        const boundaryBlock = boundaryBearish[0];
+        selectedBearish.unshift(boundaryBlock);  // 添加到最前面（第一层）
+        console.log(`[TowerScheduler] P边界补单: ${boundaryBlock.entry.toFixed(0)} ${boundaryBlock.source} ${boundaryBlock.timeframe} (P=${dailyHL.pStart.toFixed(0)}, 区间=${dailyHL.pStart.toFixed(0)}~${pBoundaryHigh.toFixed(0)})`);
+      } else {
+        console.log(`[TowerScheduler] P边界无可用塔块 (区间=${dailyHL.pStart.toFixed(0)}~${pBoundaryHigh.toFixed(0)})`);
+      }
+    }
+  }
+
   // 下单前按价格排序（离当前价格近的分配小保证金）
   // 多单：价格从高到低（近 → 远）
   // 空单：价格从低到高（近 → 远）
