@@ -51,8 +51,12 @@ async function main(): Promise<void> {
   // 启动复盘调度器（每日/每周）
   startReviewScheduler();
 
-  // 启动主调度器
-  startScheduler();
+  // 启动主调度器（AI 分析）
+  if (config.ai.enabled) {
+    startScheduler();
+  } else {
+    console.log('⏸️  AI 分析已关闭 (AI_ANALYSIS_ENABLED=false)');
+  }
 
   // 启动订单监控器（守塔订单成交后自动下止盈止损）
   const apiConfig = getFirstBinanceApiConfig();

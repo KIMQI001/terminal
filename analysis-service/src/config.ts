@@ -31,6 +31,7 @@ export const config = {
 
   // AI 配置
   ai: {
+    enabled: process.env.AI_ANALYSIS_ENABLED !== 'false',  // 默认开启，设 false 关闭
     provider: (process.env.AI_PROVIDER || 'gemini') as 'gemini' | 'claude' | 'openai' | 'deepseek',
     apiKey: process.env.AI_API_KEY || '',
     model: process.env.AI_MODEL || '', // 留空则使用默认模型
@@ -71,7 +72,7 @@ export const config = {
 export function validateConfig(): void {
   const errors: string[] = [];
 
-  if (!config.ai.apiKey) {
+  if (config.ai.enabled && !config.ai.apiKey) {
     errors.push('AI_API_KEY 未配置');
   }
 
