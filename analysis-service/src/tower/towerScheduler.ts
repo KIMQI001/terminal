@@ -1126,26 +1126,9 @@ function calculateOrders(
     console.log(`[TowerScheduler] 未获取到日K数据，跳过区域过滤`);
   }
 
-  // CG 清算价位置过滤：ICT 塔块必须在清算价的外侧
-  // 多单：ICT 塔块必须在最大多头清算价以下
-  // 空单：ICT 塔块必须在最大空头清算价以上
-  if (cgFirstLong) {
-    const before = bullishCandidates.length;
-    bullishCandidates = bullishCandidates.filter(b => b.entry < cgFirstLong.liqPrice);
-    console.log(`[TowerScheduler] CG 多单过滤: ${before} -> ${bullishCandidates.length} (需 < 清算价 ${cgFirstLong.liqPrice.toFixed(0)})`);
-  }
-  if (cgFirstShort) {
-    const before = bearishCandidates.length;
-    bearishCandidates = bearishCandidates.filter(b => b.entry > cgFirstShort.liqPrice);
-    console.log(`[TowerScheduler] CG 空单过滤: ${before} -> ${bearishCandidates.length} (需 > 清算价 ${cgFirstShort.liqPrice.toFixed(0)})`);
-  }
-
-  // 如果有 CG 首单，ICT 塔块只需要 towerLayers - 1 个
-  const bullishLayersNeeded = cgFirstLong ? towerLayers - 1 : towerLayers;
-  const bearishLayersNeeded = cgFirstShort ? towerLayers - 1 : towerLayers;
-
-  const selectedBullish = filterWithSpacing(bullishCandidates, bullishStartLayer, bullishLayersNeeded);
-  const selectedBearish = filterWithSpacing(bearishCandidates, bearishStartLayer, bearishLayersNeeded);
+  // ICT 塔块独立选取，不受 CG 影响
+  const selectedBullish = filterWithSpacing(bullishCandidates, bullishStartLayer, towerLayers);
+  const selectedBearish = filterWithSpacing(bearishCandidates, bearishStartLayer, towerLayers);
 
   // 日志：显示选中的塔块
   if (selectedBullish.length > 0) {
@@ -1163,14 +1146,11 @@ function calculateOrders(
   if (dailyHL) {
     // 多单：检查 D 到 D-200 区间内是否有订单
     const dBoundaryLow = dailyHL.dStart - PD_BOUNDARY_DISTANCE;
-    const hasBullishNearD = cgFirstLong
-      ? (cgFirstLong.entry >= dBoundaryLow && cgFirstLong.entry <= dailyHL.dStart)
-      : false;
     const hasBullishBlockNearD = selectedBullish.some(
       b => b.entry >= dBoundaryLow && b.entry <= dailyHL.dStart
     );
 
-    if (!hasBullishNearD && !hasBullishBlockNearD) {
+    if (!hasBullishBlockNearD) {
       // 在 D 到 D-200 区间内找一个最近的 ICT 塔块
       const boundaryBullish = allBullish
         .filter(b => b.entry >= dBoundaryLow && b.entry <= dailyHL.dStart)
@@ -1188,14 +1168,11 @@ function calculateOrders(
 
     // 空单：检查 P 到 P+200 区间内是否有订单
     const pBoundaryHigh = dailyHL.pStart + PD_BOUNDARY_DISTANCE;
-    const hasBearishNearP = cgFirstShort
-      ? (cgFirstShort.entry >= dailyHL.pStart && cgFirstShort.entry <= pBoundaryHigh)
-      : false;
     const hasBearishBlockNearP = selectedBearish.some(
       b => b.entry >= dailyHL.pStart && b.entry <= pBoundaryHigh
     );
 
-    if (!hasBearishNearP && !hasBearishBlockNearP) {
+    if (!hasBearishBlockNearP) {
       // 在 P 到 P+200 区间内找一个最近的 ICT 塔块
       const boundaryBearish = allBearish
         .filter(b => b.entry >= dailyHL.pStart && b.entry <= pBoundaryHigh)
@@ -1221,12 +1198,49 @@ function calculateOrders(
   // 转换为订单
   const orders: TowerOrder[] = [];
 
-  // ===== 多单：首单用 CG，后续用 ICT =====
-  let bullishIndex = 0;
+  // ===== ICT 多单 =====
+  for (let i = 0; i < orderedBullish.length; i++) {
+    const block = orderedBullish[i];
+    const margin = baseMargin + i * marginIncrement;
+    const positionValue = margin * leverage;
+    const quantity = Math.floor((positionValue / block.entry) * 1000) / 1000;
 
-  // 1. CG 首多单
+    orders.push({
+      side: 'BUY',
+      positionSide: 'LONG',
+      price: block.entry,
+      quantity,
+      stopLoss: block.stopLoss,
+      takeProfit: block.takeProfit,
+      margin,
+      timeframe: block.timeframe,
+      source: block.source,
+    });
+  }
+
+  // ===== ICT 空单 =====
+  for (let i = 0; i < orderedBearish.length; i++) {
+    const block = orderedBearish[i];
+    const margin = baseMargin + i * marginIncrement;
+    const positionValue = margin * leverage;
+    const quantity = Math.floor((positionValue / block.entry) * 1000) / 1000;
+
+    orders.push({
+      side: 'SELL',
+      positionSide: 'SHORT',
+      price: block.entry,
+      quantity,
+      stopLoss: block.stopLoss,
+      takeProfit: block.takeProfit,
+      margin,
+      timeframe: block.timeframe,
+      source: block.source,
+    });
+  }
+
+  // ===== CG/LIQ 额外单（独立于 ICT，不占层数）=====
   if (cgFirstLong) {
-    const margin = baseMargin + bullishIndex * marginIncrement;
+    const margin = baseMargin;
     const positionValue = margin * leverage;
     const quantity = Math.floor((positionValue / cgFirstLong.entry) * 1000) / 1000;
 
@@ -1241,36 +1255,11 @@ function calculateOrders(
       timeframe: 'CG',
       source: 'LIQ',
     });
-    bullishIndex++;
+    console.log(`[TowerScheduler] CG额外多单: 入场=${cgFirstLong.entry.toFixed(0)}, 止损=${cgFirstLong.stopLoss.toFixed(0)}, 止盈=${cgFirstLong.takeProfit.toFixed(0)}`);
   }
 
-  // 2. ICT 塔块多单
-  for (let i = 0; i < orderedBullish.length; i++) {
-    const block = orderedBullish[i];
-    const margin = baseMargin + bullishIndex * marginIncrement;
-    const positionValue = margin * leverage;
-    const quantity = Math.floor((positionValue / block.entry) * 1000) / 1000;
-
-    orders.push({
-      side: 'BUY',
-      positionSide: 'LONG',
-      price: block.entry,
-      quantity,
-      stopLoss: block.stopLoss,
-      takeProfit: block.takeProfit,
-      margin,
-      timeframe: block.timeframe,
-      source: block.source,
-    });
-    bullishIndex++;
-  }
-
-  // ===== 空单：首单用 CG，后续用 ICT =====
-  let bearishIndex = 0;
-
-  // 1. CG 首空单
   if (cgFirstShort) {
-    const margin = baseMargin + bearishIndex * marginIncrement;
+    const margin = baseMargin;
     const positionValue = margin * leverage;
     const quantity = Math.floor((positionValue / cgFirstShort.entry) * 1000) / 1000;
 
@@ -1285,28 +1274,7 @@ function calculateOrders(
       timeframe: 'CG',
       source: 'LIQ',
     });
-    bearishIndex++;
-  }
-
-  // 2. ICT 塔块空单
-  for (let i = 0; i < orderedBearish.length; i++) {
-    const block = orderedBearish[i];
-    const margin = baseMargin + bearishIndex * marginIncrement;
-    const positionValue = margin * leverage;
-    const quantity = Math.floor((positionValue / block.entry) * 1000) / 1000;
-
-    orders.push({
-      side: 'SELL',
-      positionSide: 'SHORT',
-      price: block.entry,
-      quantity,
-      stopLoss: block.stopLoss,
-      takeProfit: block.takeProfit,
-      margin,
-      timeframe: block.timeframe,
-      source: block.source,
-    });
-    bearishIndex++;
+    console.log(`[TowerScheduler] CG额外空单: 入场=${cgFirstShort.entry.toFixed(0)}, 止损=${cgFirstShort.stopLoss.toFixed(0)}, 止盈=${cgFirstShort.takeProfit.toFixed(0)}`);
   }
 
   return orders;
