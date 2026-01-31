@@ -1271,7 +1271,7 @@ async function placeOrders(
 
       // 2. 下止损单（STOP_MARKET）
       await delay(100);
-      const slResult = await exchangeAdapter.placeStopLossOrder(exchange, exchangeConfig, {
+      let slResult = await exchangeAdapter.placeStopLossOrder(exchange, exchangeConfig, {
         symbol,
         side: closeSide,
         positionSide: order.positionSide,
@@ -1280,7 +1280,30 @@ async function placeOrders(
         clientOrderId: `${clientOrderId}_sl`,
       });
 
-      if (!slResult.success) {
+      // 如果止损单失败（立即触发），改用当前价 ± 200 点保护性止损
+      if (!slResult.success && slResult.error?.includes('would immediately trigger')) {
+        console.warn(`[TowerScheduler] 原始止损单失败（${order.stopLoss.toFixed(1)}会立即触发），改用保护性止损`);
+
+        // 使用入场价 ± 200 点作为保护性止损
+        const protectiveStopLoss = order.side === 'BUY'
+          ? order.price - 200
+          : order.price + 200;
+
+        slResult = await exchangeAdapter.placeStopLossOrder(exchange, exchangeConfig, {
+          symbol,
+          side: closeSide,
+          positionSide: order.positionSide,
+          quantity: order.quantity,
+          stopPrice: protectiveStopLoss,
+          clientOrderId: `${clientOrderId}_sl`,
+        });
+
+        if (!slResult.success) {
+          console.error(`[TowerScheduler] 保护性止损单也失败: ${slResult.error}`);
+        } else {
+          console.log(`[TowerScheduler] 保护性止损单成功: ${protectiveStopLoss.toFixed(1)} (入场价±200点)`);
+        }
+      } else if (!slResult.success) {
         console.warn(`[TowerScheduler] 止损单失败: ${slResult.error}`);
       } else {
         console.log(`[TowerScheduler] 止损单下单成功: ${clientOrderId}_sl`);
