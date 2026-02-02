@@ -92,26 +92,42 @@ async function fetchSymbol(symbol) {
     }
 }
 
+// 抓取超时保护（秒）
+const FETCH_TIMEOUT = 60;
+let fetchStartTime = 0;
+
 // 抓取所有币种
 async function fetchAll() {
+    // 看门狗：如果上次抓取超过 FETCH_TIMEOUT 秒还没结束，强制重置
     if (isFetching) {
-        console.log('[Fetch] 正在抓取中，跳过...');
-        return;
-    }
-
-    isFetching = true;
-    console.log('\n[Fetch] 开始抓取 ' + new Date().toISOString());
-
-    for (const symbol of ['BTC']) {
-        const data = await fetchSymbol(symbol);
-        if (data) {
-            dataStore[symbol] = data;
+        const elapsed = (Date.now() - fetchStartTime) / 1000;
+        if (elapsed > FETCH_TIMEOUT) {
+            console.warn(`[Fetch] 上次抓取已卡住 ${elapsed.toFixed(0)}s，强制重置`);
+            isFetching = false;
+        } else {
+            console.log('[Fetch] 正在抓取中，跳过...');
+            return;
         }
     }
 
-    lastFetchTime = new Date().toISOString();
-    isFetching = false;
-    console.log('[Fetch] 抓取完成\n');
+    isFetching = true;
+    fetchStartTime = Date.now();
+    console.log('\n[Fetch] 开始抓取 ' + new Date().toISOString());
+
+    try {
+        for (const symbol of ['BTC']) {
+            const data = await fetchSymbol(symbol);
+            if (data) {
+                dataStore[symbol] = data;
+            }
+        }
+        lastFetchTime = new Date().toISOString();
+        console.log('[Fetch] 抓取完成\n');
+    } catch (error) {
+        console.error('[Fetch] 抓取异常:', error.message);
+    } finally {
+        isFetching = false;
+    }
 }
 
 // API: 获取清算地图数据
