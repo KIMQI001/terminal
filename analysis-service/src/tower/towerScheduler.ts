@@ -770,7 +770,7 @@ async function getDailyHL(symbol: string, currentPrice: number): Promise<DailyHL
     try {
       const klineApiUrl = process.env.KLINE_API_URL || 'http://127.0.0.1:3001';
       const response4d = await fetch(
-        `${klineApiUrl}/api/klines/${symbol}/4d?limit=100`
+        `${klineApiUrl}/api/klines/${symbol}/4d?limit=200`
       );
 
       if (response4d.ok) {
@@ -788,7 +788,7 @@ async function getDailyHL(symbol: string, currentPrice: number): Promise<DailyHL
 
     // 2. 获取 1D K线 (从 Binance API)
     const response1d = await fetch(
-      `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1d&limit=100`
+      `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1d&limit=200`
     );
 
     if (response1d.ok) {

@@ -577,7 +577,7 @@ export function TradingChart() {
     const calculateDailyHL = async () => {
       try {
         // 获取1D数据
-        const dailyData = await fetchKlines(symbol, '1d', 100);
+        const dailyData = await fetchKlines(symbol, '1d', 200);
         if (isCancelled || dailyData.length < 2) return;
 
         const currentPrice = dailyData[dailyData.length - 1].close;
@@ -587,7 +587,7 @@ export function TradingChart() {
 
         // 1. 尝试获取 4D K线
         try {
-          const fourDayData = await fetchKlines(symbol, '4d', 100);
+          const fourDayData = await fetchKlines(symbol, '4d', 200);
           if (!isCancelled && fourDayData.length >= 2) {
             hl4d = findAnchorAndCalculateHL(fourDayData, currentPrice);
           }
