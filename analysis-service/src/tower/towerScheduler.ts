@@ -1189,7 +1189,7 @@ function calculateOrders(
 
   // ===== CG/LIQ 额外单（独立于 ICT，不占层数）=====
   if (cgFirstLong) {
-    const margin = baseMargin;
+    const margin = baseMargin * 3;
     const positionValue = margin * leverage;
     const quantity = Math.floor((positionValue / cgFirstLong.entry) * 1000) / 1000;
 
@@ -1208,7 +1208,7 @@ function calculateOrders(
   }
 
   if (cgFirstShort) {
-    const margin = baseMargin;
+    const margin = baseMargin * 3;
     const positionValue = margin * leverage;
     const quantity = Math.floor((positionValue / cgFirstShort.entry) * 1000) / 1000;
 
