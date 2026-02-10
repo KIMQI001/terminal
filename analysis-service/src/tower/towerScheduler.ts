@@ -1141,6 +1141,28 @@ function calculateOrders(
       selectedBullish = selectedBullish.filter(b => b.entry <= cgFirstLong.entry || b === toKeep);
       console.log(`[TowerScheduler] CG多单过滤: 保留 ICT 多单 ${toKeep.entry.toFixed(0)} (> CG ${cgFirstLong.entry.toFixed(0)})，移除其他 ${worseThanCG.length - 1} 个`);
     }
+
+    // 过滤后数量不足，从剩余候选中补充（价格 <= CG 的）
+    if (selectedBullish.length < towerLayers) {
+      const needed = towerLayers - selectedBullish.length;
+      const remaining = bullishCandidates.filter(
+        b => b.entry <= cgFirstLong.entry && !selectedBullish.includes(b)
+      );
+
+      for (const block of remaining) {
+        // 检查间距
+        const tooClose = selectedBullish.some(selected => {
+          const spacing = Math.abs(block.entry - selected.entry);
+          return spacing < minSpacing;
+        });
+        if (tooClose) continue;
+
+        selectedBullish.push(block);
+        console.log(`[TowerScheduler] CG多单补充: 添加 ICT 多单 ${block.entry.toFixed(0)} (<= CG ${cgFirstLong.entry.toFixed(0)})`);
+
+        if (selectedBullish.length >= towerLayers) break;
+      }
+    }
   }
 
   if (cgFirstShort) {
@@ -1152,6 +1174,28 @@ function calculateOrders(
       const toKeep = worseThanCG[0];
       selectedBearish = selectedBearish.filter(b => b.entry >= cgFirstShort.entry || b === toKeep);
       console.log(`[TowerScheduler] CG空单过滤: 保留 ICT 空单 ${toKeep.entry.toFixed(0)} (< CG ${cgFirstShort.entry.toFixed(0)})，移除其他 ${worseThanCG.length - 1} 个`);
+    }
+
+    // 过滤后数量不足，从剩余候选中补充（价格 >= CG 的）
+    if (selectedBearish.length < towerLayers) {
+      const needed = towerLayers - selectedBearish.length;
+      const remaining = bearishCandidates.filter(
+        b => b.entry >= cgFirstShort.entry && !selectedBearish.includes(b)
+      );
+
+      for (const block of remaining) {
+        // 检查间距
+        const tooClose = selectedBearish.some(selected => {
+          const spacing = Math.abs(block.entry - selected.entry);
+          return spacing < minSpacing;
+        });
+        if (tooClose) continue;
+
+        selectedBearish.push(block);
+        console.log(`[TowerScheduler] CG空单补充: 添加 ICT 空单 ${block.entry.toFixed(0)} (>= CG ${cgFirstShort.entry.toFixed(0)})`);
+
+        if (selectedBearish.length >= towerLayers) break;
+      }
     }
   }
 
