@@ -1127,8 +1127,33 @@ function calculateOrders(
   }
 
   // ICT 塔块独立选取，不受 CG 影响
-  const selectedBullish = filterWithSpacing(bullishCandidates, bullishStartLayer, towerLayers);
-  const selectedBearish = filterWithSpacing(bearishCandidates, bearishStartLayer, towerLayers);
+  let selectedBullish = filterWithSpacing(bullishCandidates, bullishStartLayer, towerLayers);
+  let selectedBearish = filterWithSpacing(bearishCandidates, bearishStartLayer, towerLayers);
+
+  // 如果有 CG/LIQ 单，ICT 塔块单最多保留一个价格更差的
+  if (cgFirstLong) {
+    // 多单：最多保留一个入场价 > CG 多单的 ICT 塔块（价格更差，在上方）
+    const worseThanCG = selectedBullish.filter(b => b.entry > cgFirstLong.entry);
+    if (worseThanCG.length > 1) {
+      // 按距离排序，保留距离 CG 最近的一个
+      worseThanCG.sort((a, b) => Math.abs(a.entry - cgFirstLong.entry) - Math.abs(b.entry - cgFirstLong.entry));
+      const toKeep = worseThanCG[0];
+      selectedBullish = selectedBullish.filter(b => b.entry <= cgFirstLong.entry || b === toKeep);
+      console.log(`[TowerScheduler] CG多单过滤: 保留 ICT 多单 ${toKeep.entry.toFixed(0)} (> CG ${cgFirstLong.entry.toFixed(0)})，移除其他 ${worseThanCG.length - 1} 个`);
+    }
+  }
+
+  if (cgFirstShort) {
+    // 空单：最多保留一个入场价 < CG 空单的 ICT 塔块（价格更差，在下方）
+    const worseThanCG = selectedBearish.filter(b => b.entry < cgFirstShort.entry);
+    if (worseThanCG.length > 1) {
+      // 按距离排序，保留距离 CG 最近的一个
+      worseThanCG.sort((a, b) => Math.abs(cgFirstShort.entry - a.entry) - Math.abs(cgFirstShort.entry - b.entry));
+      const toKeep = worseThanCG[0];
+      selectedBearish = selectedBearish.filter(b => b.entry >= cgFirstShort.entry || b === toKeep);
+      console.log(`[TowerScheduler] CG空单过滤: 保留 ICT 空单 ${toKeep.entry.toFixed(0)} (< CG ${cgFirstShort.entry.toFixed(0)})，移除其他 ${worseThanCG.length - 1} 个`);
+    }
+  }
 
   // 日志：显示选中的塔块
   if (selectedBullish.length > 0) {
