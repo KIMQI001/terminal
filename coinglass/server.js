@@ -5,9 +5,18 @@
 
 const express = require('express');
 const { chromium } = require('playwright');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const PORT = 3004;
+
+// Cookies 文件路径
+const COOKIES_FILE = path.join(__dirname, 'cookies.json');
+
+// 登录配置
+const LOGIN_EMAIL = '297511521@qq.com';
+const LOGIN_PASSWORD = '123456lzy';
 
 // 内存存储最新数据（目前只支持 BTC）
 const dataStore = {
@@ -35,15 +44,75 @@ const INJECT_SCRIPT = `
 })();
 `;
 
+// 保存 cookies 到文件
+function saveCookies(context) {
+    return context.cookies().then(cookies => {
+        fs.writeFileSync(COOKIES_FILE, JSON.stringify(cookies, null, 2));
+    });
+}
+
+// 登录并返回 cookies
+async function login() {
+    console.log('[Auth] 登录中...');
+    const browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+
+    await page.goto('https://www.coinglass.com/zh/login', { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForTimeout(2000);
+
+    await page.locator('input[placeholder="邮箱"]').fill(LOGIN_EMAIL);
+    await page.waitForTimeout(300);
+    await page.locator('input[type="password"]').fill(LOGIN_PASSWORD);
+    await page.waitForTimeout(300);
+    await page.locator('button:has-text("登录")').nth(1).click();
+
+    await page.waitForTimeout(5000);
+
+    if (page.url().includes('account')) {
+        console.log('[Auth] 登录成功!');
+        await saveCookies(context);
+    } else {
+        console.error('[Auth] 登录失败!');
+    }
+
+    await browser.close();
+
+    // 返回保存的 cookies
+    return JSON.parse(fs.readFileSync(COOKIES_FILE, 'utf-8'));
+}
+
+// 获取 cookies（优先使用保存的，无效则重新登录）
+async function getCookies() {
+    if (fs.existsSync(COOKIES_FILE)) {
+        try {
+            const cookies = JSON.parse(fs.readFileSync(COOKIES_FILE, 'utf-8'));
+            // 简单验证
+            if (cookies.length > 0) {
+                console.log('[Auth] 使用保存的 cookies');
+                return cookies;
+            }
+        } catch (e) {
+            console.log('[Auth] cookies 文件无效');
+        }
+    }
+    // 需要登录
+    return await login();
+}
+
 // 抓取单个币种数据
 async function fetchSymbol(symbol) {
-    const url = `https://www.coinglass.com/zh/pro/futures/LiquidationMap?exchange=Binance&symbol=${symbol}`;
+    const url = `https://www.coinglass.com/pro/futures/LiquidationMap?exchange=Binance&symbol=${symbol}`;
     console.log(`[Fetch] 抓取 ${symbol}...`);
+
+    // 获取登录 cookies
+    const cookies = await getCookies();
 
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
     });
+    await context.addCookies(cookies);
 
     const page = await context.newPage();
     await page.addInitScript(INJECT_SCRIPT);
