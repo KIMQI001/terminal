@@ -51,35 +51,62 @@ function saveCookies(context) {
     });
 }
 
+// 验证 cookies 是否有效
+async function verifyCookies(cookies) {
+    try {
+        const browser = await chromium.launch({ headless: true });
+        const context = await browser.newContext();
+        await context.addCookies(cookies);
+        const page = await context.newPage();
+
+        await page.goto('https://www.coinglass.com/zh/account', { waitUntil: 'networkidle', timeout: 15000 });
+        await page.waitForTimeout(3000);
+
+        const valid = page.url().includes('account');
+        await browser.close();
+        return valid;
+    } catch (e) {
+        return false;
+    }
+}
+
 // 登录并返回 cookies
 async function login() {
     console.log('[Auth] 登录中...');
-    const browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext();
-    const page = await context.newPage();
 
-    await page.goto('https://www.coinglass.com/zh/login', { waitUntil: 'networkidle', timeout: 30000 });
-    await page.waitForTimeout(2000);
+    for (let retry = 0; retry < 3; retry++) {
+        try {
+            const browser = await chromium.launch({ headless: true });
+            const context = await browser.newContext();
+            const page = await context.newPage();
 
-    await page.locator('input[placeholder="邮箱"]').fill(LOGIN_EMAIL);
-    await page.waitForTimeout(300);
-    await page.locator('input[type="password"]').fill(LOGIN_PASSWORD);
-    await page.waitForTimeout(300);
-    await page.locator('button:has-text("登录")').nth(1).click();
+            await page.goto('https://www.coinglass.com/zh/login', { waitUntil: 'networkidle', timeout: 60000 });
+            await page.waitForTimeout(5000);
 
-    await page.waitForTimeout(5000);
+            // 等待输入框出现
+            await page.waitForSelector('input[placeholder="邮箱"]', { timeout: 30000 });
+            await page.fill('input[placeholder="邮箱"]', LOGIN_EMAIL);
+            await page.waitForTimeout(500);
+            await page.fill('input[type="password"]', LOGIN_PASSWORD);
+            await page.waitForTimeout(500);
+            await page.click('button:has-text("登录")');
+            await page.waitForTimeout(8000);
 
-    if (page.url().includes('account')) {
-        console.log('[Auth] 登录成功!');
-        await saveCookies(context);
-    } else {
-        console.error('[Auth] 登录失败!');
+            if (page.url().includes('account')) {
+                console.log('[Auth] 登录成功!');
+                await saveCookies(context);
+                await browser.close();
+                return JSON.parse(fs.readFileSync(COOKIES_FILE, 'utf-8'));
+            }
+
+            await browser.close();
+            console.log('[Auth] 登录失败，重试...');
+        } catch (e) {
+            console.log('[Auth] 登录异常:', e.message);
+        }
     }
 
-    await browser.close();
-
-    // 返回保存的 cookies
-    return JSON.parse(fs.readFileSync(COOKIES_FILE, 'utf-8'));
+    throw new Error('登录失败');
 }
 
 // 获取 cookies（优先使用保存的，无效则重新登录）
@@ -87,10 +114,14 @@ async function getCookies() {
     if (fs.existsSync(COOKIES_FILE)) {
         try {
             const cookies = JSON.parse(fs.readFileSync(COOKIES_FILE, 'utf-8'));
-            // 简单验证
             if (cookies.length > 0) {
-                console.log('[Auth] 使用保存的 cookies');
-                return cookies;
+                console.log('[Auth] 验证保存的 cookies...');
+                const valid = await verifyCookies(cookies);
+                if (valid) {
+                    console.log('[Auth] Cookies 有效');
+                    return cookies;
+                }
+                console.log('[Auth] Cookies 无效，需要重新登录');
             }
         } catch (e) {
             console.log('[Auth] cookies 文件无效');
