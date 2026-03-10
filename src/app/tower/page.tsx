@@ -170,7 +170,7 @@ function parseIctInfo(clientOrderId: string): { timeframe: string; source: strin
 export default function TowerPage() {
   const { symbol, dailyHL } = useChartStore();
   const { placeOrder, cancelAllOrders } = useOrderStore();
-  const { currentLeverage, fetchLeverage } = usePositionStore();
+  const { currentLeverage, fetchLeverage, balances, fetchBalances } = usePositionStore();
   const { user } = useUserStore();
   const queryClient = useQueryClient();
   const [selectedBlock, setSelectedBlock] = useState<TowerBlock | null>(null);
@@ -686,11 +686,30 @@ export default function TowerPage() {
       return;
     }
 
+    // 处理自动模式：如果 baseMargin 为 0，则使用账户余额/10
+    let effectiveBaseMargin = baseMargin;
+    if (baseMargin === 0) {
+      await fetchBalances();
+      const usdtBalance = balances.find(b => b.asset === 'USDT');
+      const usdcBalance = balances.find(b => b.asset === 'USDC');
+      const balance = usdtBalance ? usdtBalance.free : usdcBalance ? usdcBalance.free : 0;
+      
+      if (balance > 0) {
+        effectiveBaseMargin = Math.floor(balance / 10);
+        effectiveBaseMargin = Math.max(10, effectiveBaseMargin);  // 至少 10U
+        effectiveBaseMargin = Math.floor(effectiveBaseMargin / 10) * 10;  // 取整到 10
+        console.log(`[守塔] 自动模式: 账户余额=${balance.toFixed(2)}, 计算保证金=${effectiveBaseMargin}`);
+      } else {
+        console.warn('[守塔] 自动模式获取余额失败，使用默认 100U');
+        effectiveBaseMargin = 100;
+      }
+    }
+
     // 计算总保证金（考虑递增）
     const calcTotalMargin = (count: number) => {
       let total = 0;
       for (let i = 0; i < count; i++) {
-        total += baseMargin + i * marginIncrement;
+        total += effectiveBaseMargin + i * marginIncrement;
       }
       return total;
     };
@@ -698,17 +717,18 @@ export default function TowerPage() {
 
     // 非静默模式下弹窗确认
     if (!silent) {
+      const marginDisplay = baseMargin === 0 ? '自动(账户/10)' : `${baseMargin} USDT`;
       const confirmed = confirm(
         `即将下 ${selectedBlocks.length} 个塔单\n` +
           `多塔: ${bullishBlocks.length} 个（第${bullishStartLayer}层起），空塔: ${bearishBlocks.length} 个（第${bearishStartLayer}层起）\n` +
-          `基础保证金: ${baseMargin} USDT，递增: ${marginIncrement} USDT\n` +
-          `总保证金: ${totalMargin} USDT\n` +
+          `基础保证金: ${marginDisplay}，递增: ${marginIncrement} USDT\n` +
+          `总保证金: ${baseMargin === 0 ? '自动计算' : totalMargin + ' USDT'}\n` +
           `确定继续吗？`
       );
 
       if (!confirmed) return;
     } else {
-      console.log(`[托管] 下单: ${selectedBlocks.length} 个塔单，总保证金: ${totalMargin} USDT`);
+      console.log(`[托管] 下单: ${selectedBlocks.length} 个塔单，总保证金: ${baseMargin === 0 ? '自动计算' : totalMargin + ' USDT'}`);
     }
 
     setIsAutoOrdering(true);
@@ -727,14 +747,14 @@ export default function TowerPage() {
     for (let i = 0; i < bullishBlocks.length; i++) {
       ordersToPlace.push({
         block: bullishBlocks[i],
-        margin: baseMargin + i * marginIncrement,
+        margin: effectiveBaseMargin + i * marginIncrement,
       });
     }
 
     for (let i = 0; i < bearishBlocks.length; i++) {
       ordersToPlace.push({
         block: bearishBlocks[i],
-        margin: baseMargin + i * marginIncrement,
+        margin: effectiveBaseMargin + i * marginIncrement,
       });
     }
 
@@ -804,7 +824,7 @@ export default function TowerPage() {
     }
 
     setOrderProgress(null);
-  }, [data, towerLayers, bullishStartLayer, bearishStartLayer, minSpacingRatio, baseMargin, marginIncrement, calculateQuantity, placeOrder, symbol, cgData, pPrice, dPrice]);
+  }, [data, towerLayers, bullishStartLayer, bearishStartLayer, minSpacingRatio, baseMargin, marginIncrement, calculateQuantity, placeOrder, symbol, cgData, pPrice, dPrice, balances, fetchBalances]);
 
   // 更新守塔：取消所有订单后重新下单
   const handleRefreshTower = useCallback(async () => {
@@ -996,16 +1016,24 @@ export default function TowerPage() {
             {/* 第一行：保证金和层数设置 */}
             <div className="flex items-center gap-2 flex-wrap">
               <div className="flex items-center gap-1">
-                <span className="text-xs text-[var(--text-tertiary)]">保证金</span>
+                <span className="text-xs text-[var(--text-tertiary)]" title="设为0启用自动模式：账户资金/10">保证金</span>
                 <input
                   type="number"
                   value={baseMargin}
                   onChange={(e) => handleMarginChange(Number(e.target.value))}
-                  className="w-14 px-1.5 py-1 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
-                  min={10}
+                  className={`w-14 px-1.5 py-1 text-xs border rounded text-center focus:outline-none focus:border-blue-500 ${
+                    baseMargin === 0 
+                      ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' 
+                      : 'bg-[var(--bg-tertiary)] border-[var(--border)] text-[var(--text-primary)]'
+                  }`}
+                  min={0}
                   max={10000}
                   step={10}
+                  title="设为0启用自动模式：使用账户总资金/10"
                 />
+                {baseMargin === 0 && (
+                  <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">自动</span>
+                )}
                 <span className="text-xs text-[var(--text-tertiary)]">+</span>
                 <input
                   type="number"

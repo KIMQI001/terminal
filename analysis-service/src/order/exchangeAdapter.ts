@@ -145,6 +145,66 @@ export async function getPositions(
 }
 
 /**
+ * 获取合约账户余额 (USDT/USDC)
+ * 返回可用于下单的总保证金金额
+ */
+export async function getFuturesBalance(
+  exchange: ExchangeType,
+  config: ExchangeApiConfig
+): Promise<{ success: boolean; balance?: number; error?: string }> {
+  if (exchange === 'aster') {
+    // Aster: 通过持仓接口估算，或使用特定接口
+    // 暂时返回一个保守估计值，或者可以通过其他方式获取
+    console.warn('[ExchangeAdapter] Aster 余额获取暂未实现，使用默认值');
+    return { success: true, balance: 1000 }; // 默认 1000U
+  }
+
+  // Binance
+  const baseUrl = getBinanceBaseUrl(config.isTestnet);
+  const timestamp = Date.now();
+  const queryString = `timestamp=${timestamp}`;
+  const signature = generateSignature(queryString, config.apiSecret);
+
+  try {
+    const response = await fetch(
+      `${baseUrl}/fapi/v2/account?${queryString}&signature=${signature}`,
+      { headers: { 'X-MBX-APIKEY': config.apiKey } }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json() as { msg?: string };
+      return { success: false, error: errorData.msg || `HTTP ${response.status}` };
+    }
+
+    const data = await response.json() as {
+      totalWalletBalance: string;
+      availableBalance: string;
+      totalMarginBalance: string;
+      assets?: Array<{
+        asset: string;
+        walletBalance: string;
+        availableBalance: string;
+      }>;
+    };
+
+    // 使用可用余额（USDT 或 USDC）
+    const usdtAsset = data.assets?.find(a => a.asset === 'USDT');
+    const usdcAsset = data.assets?.find(a => a.asset === 'USDC');
+    
+    const balance = usdtAsset 
+      ? parseFloat(usdtAsset.availableBalance)
+      : usdcAsset 
+        ? parseFloat(usdcAsset.availableBalance)
+        : parseFloat(data.availableBalance);
+
+    console.log(`[ExchangeAdapter] 获取余额: ${balance.toFixed(2)} USDT/USDC`);
+    return { success: true, balance };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : '网络错误' };
+  }
+}
+
+/**
  * 获取挂单
  */
 export async function getOpenOrders(

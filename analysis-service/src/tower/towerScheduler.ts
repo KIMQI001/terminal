@@ -343,14 +343,37 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     // 5. 获取杠杆
     const leverage = await getLeverage(exchange, exchangeConfig, management.symbol);
 
-    // 6. 获取日K前高前低（用于区域过滤）
+    // 6. 处理自动模式：如果 baseMargin 为 0，则使用账户余额/10
+    let effectiveBaseMargin = management.baseMargin;
+    if (effectiveBaseMargin === 0) {
+      const balanceResult = await exchangeAdapter.getFuturesBalance(exchange, exchangeConfig);
+      if (balanceResult.success && balanceResult.balance) {
+        effectiveBaseMargin = Math.floor(balanceResult.balance / 10);
+        // 确保至少 10U
+        effectiveBaseMargin = Math.max(10, effectiveBaseMargin);
+        // 向下取整到最近的 10
+        effectiveBaseMargin = Math.floor(effectiveBaseMargin / 10) * 10;
+        console.log(`[TowerScheduler] 自动模式: 账户余额=${balanceResult.balance.toFixed(2)}, 计算保证金=${effectiveBaseMargin}`);
+      } else {
+        console.warn('[TowerScheduler] 自动模式获取余额失败，使用默认 100U');
+        effectiveBaseMargin = 100;
+      }
+    }
+
+    // 创建临时的 management 配置（使用计算后的 baseMargin）
+    const effectiveManagement = {
+      ...management,
+      baseMargin: effectiveBaseMargin,
+    };
+
+    // 7. 获取日K前高前低（用于区域过滤）
     const dailyHL = await getDailyHL(management.symbol, towerData.currentPrice);
 
-    // 7. 获取 Coinglass 清算数据
+    // 8. 获取 Coinglass 清算数据
     const cgData = await fetchCGLiqData(management.symbol);
 
-    // 8. 计算要下的订单
-    const orders = calculateOrders(towerData, management, leverage, dailyHL, cgData);
+    // 9. 计算要下的订单
+    const orders = calculateOrders(towerData, effectiveManagement, leverage, dailyHL, cgData);
     if (orders.length === 0) {
       console.log('[TowerScheduler] 没有符合条件的塔块');
       addRecord({
@@ -366,13 +389,13 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
       return;
     }
 
-    // 9. 下单
+    // 10. 下单
     const result = await placeOrders(exchange, exchangeConfig, management.symbol, orders, {
       activationRatio: management.trailingActivationRatio,
       callbackRate: management.trailingCallbackRate,
     });
 
-    // 10. 记录结果
+    // 11. 记录结果
     const bullishCount = orders.filter(o => o.side === 'BUY').length;
     const bearishCount = orders.filter(o => o.side === 'SELL').length;
     const totalMargin = orders.reduce((sum, o) => sum + o.margin, 0);
@@ -391,7 +414,8 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     updateRunTime(management.id);
 
     const duration = Date.now() - startTime;
-    console.log(`[TowerScheduler] 执行完成: ${orders.length}单(入场+止盈止损), 杠杆=${leverage}x, 总保证金=${totalMargin} USDT, ${result.errors.length}错误, 耗时${duration}ms`);
+    const autoModeInfo = management.baseMargin === 0 ? `(自动模式:${effectiveBaseMargin}U) ` : '';
+    console.log(`[TowerScheduler] 执行完成: ${orders.length}单(入场+止盈止损), 杠杆=${leverage}x, ${autoModeInfo}总保证金=${totalMargin} USDT, ${result.errors.length}错误, 耗时${duration}ms`);
 
     // 发送钉钉通知（如果有错误）
     if (result.errors.length > 0) {
