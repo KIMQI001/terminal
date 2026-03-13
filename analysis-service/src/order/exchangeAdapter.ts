@@ -165,6 +165,9 @@ export async function getFuturesBalance(
   const queryString = `timestamp=${timestamp}`;
   const signature = generateSignature(queryString, config.apiSecret);
 
+  console.log(`[ExchangeAdapter] 获取余额: baseUrl=${baseUrl}, isTestnet=${config.isTestnet}`);
+  console.log(`[ExchangeAdapter] API Key: ${config.apiKey.substring(0, 8)}...`);
+
   try {
     const response = await fetch(
       `${baseUrl}/fapi/v2/account?${queryString}&signature=${signature}`,
@@ -173,6 +176,7 @@ export async function getFuturesBalance(
 
     if (!response.ok) {
       const errorData = await response.json() as { msg?: string };
+      console.error(`[ExchangeAdapter] 获取余额失败: ${errorData.msg || `HTTP ${response.status}`}`);
       return { success: false, error: errorData.msg || `HTTP ${response.status}` };
     }
 
@@ -187,17 +191,37 @@ export async function getFuturesBalance(
       }>;
     };
 
+    console.log(`[ExchangeAdapter] 账户数据返回:`, JSON.stringify({
+      totalWalletBalance: data.totalWalletBalance,
+      availableBalance: data.availableBalance,
+      totalMarginBalance: data.totalMarginBalance,
+      assetsCount: data.assets?.length || 0,
+    }));
+    
+    if (data.assets && data.assets.length > 0) {
+      console.log(`[ExchangeAdapter] 资产列表:`, data.assets.map(a => `${a.asset}:wallet=${a.walletBalance},available=${a.availableBalance}`).join('; '));
+    } else {
+      console.log(`[ExchangeAdapter] 警告: 资产列表为空`);
+    }
+
     // 使用可用余额（USDT 或 USDC）
+    let balance = 0;
     const usdtAsset = data.assets?.find(a => a.asset === 'USDT');
     const usdcAsset = data.assets?.find(a => a.asset === 'USDC');
     
-    const balance = usdtAsset 
-      ? parseFloat(usdtAsset.availableBalance)
-      : usdcAsset 
-        ? parseFloat(usdcAsset.availableBalance)
-        : parseFloat(data.availableBalance);
+    if (usdtAsset) {
+      balance = parseFloat(usdtAsset.availableBalance);
+      console.log(`[ExchangeAdapter] 使用 USDT 可用余额: ${balance.toFixed(2)}`);
+    } else if (usdcAsset) {
+      balance = parseFloat(usdcAsset.availableBalance);
+      console.log(`[ExchangeAdapter] 使用 USDC 可用余额: ${balance.toFixed(2)}`);
+    } else {
+      // 如果没有 USDT/USDC 资产，使用总的 availableBalance
+      balance = parseFloat(data.availableBalance);
+      console.log(`[ExchangeAdapter] 使用总可用余额: ${balance.toFixed(2)}`);
+    }
 
-    console.log(`[ExchangeAdapter] 获取余额: ${balance.toFixed(2)} USDT/USDC`);
+    console.log(`[ExchangeAdapter] 最终余额: ${balance.toFixed(2)} USDT/USDC`);
     return { success: true, balance };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : '网络错误' };
