@@ -692,13 +692,17 @@ export default function TowerPage() {
       await fetchBalances();
       const usdtBalance = balances.find(b => b.asset === 'USDT');
       const usdcBalance = balances.find(b => b.asset === 'USDC');
-      const balance = usdtBalance ? usdtBalance.free : usdcBalance ? usdcBalance.free : 0;
+      
+      const usdtAmount = usdtBalance ? usdtBalance.free : 0;
+      const usdcAmount = usdcBalance ? usdcBalance.free : 0;
+      // 优先使用有余额的（USDT 优先，如果为0则用 USDC）
+      const balance = usdtAmount > 0 ? usdtAmount : usdcAmount;
       
       if (balance > 0) {
         effectiveBaseMargin = Math.floor(balance / 10);
         effectiveBaseMargin = Math.max(10, effectiveBaseMargin);  // 至少 10U
         effectiveBaseMargin = Math.floor(effectiveBaseMargin / 10) * 10;  // 取整到 10
-        console.log(`[守塔] 自动模式: 账户余额=${balance.toFixed(2)}, 计算保证金=${effectiveBaseMargin}`);
+        console.log(`[守塔] 自动模式: USDT=${usdtAmount}, USDC=${usdcAmount}, 使用=${balance.toFixed(2)}, 计算保证金=${effectiveBaseMargin}`);
       } else {
         console.warn('[守塔] 自动模式获取余额失败，使用默认 100U');
         effectiveBaseMargin = 100;

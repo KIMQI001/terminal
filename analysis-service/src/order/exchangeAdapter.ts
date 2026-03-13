@@ -204,21 +204,24 @@ export async function getFuturesBalance(
       console.log(`[ExchangeAdapter] 警告: 资产列表为空`);
     }
 
-    // 使用可用余额（USDT 或 USDC）
+    // 使用可用余额（优先有余额的 USDT 或 USDC）
     let balance = 0;
     const usdtAsset = data.assets?.find(a => a.asset === 'USDT');
     const usdcAsset = data.assets?.find(a => a.asset === 'USDC');
     
-    if (usdtAsset) {
-      balance = parseFloat(usdtAsset.availableBalance);
-      console.log(`[ExchangeAdapter] 使用 USDT 可用余额: ${balance.toFixed(2)}`);
-    } else if (usdcAsset) {
-      balance = parseFloat(usdcAsset.availableBalance);
-      console.log(`[ExchangeAdapter] 使用 USDC 可用余额: ${balance.toFixed(2)}`);
+    const usdtBalance = usdtAsset ? parseFloat(usdtAsset.availableBalance) : 0;
+    const usdcBalance = usdcAsset ? parseFloat(usdcAsset.availableBalance) : 0;
+    
+    if (usdtBalance > 0) {
+      balance = usdtBalance;
+      console.log(`[ExchangeAdapter] 使用 USDT 余额: ${balance.toFixed(2)}`);
+    } else if (usdcBalance > 0) {
+      balance = usdcBalance;
+      console.log(`[ExchangeAdapter] 使用 USDC 余额: ${balance.toFixed(2)}`);
     } else {
-      // 如果没有 USDT/USDC 资产，使用总的 availableBalance
+      // 如果 USDT/USDC 都没有余额，使用总的 availableBalance
       balance = parseFloat(data.availableBalance);
-      console.log(`[ExchangeAdapter] 使用总可用余额: ${balance.toFixed(2)}`);
+      console.log(`[ExchangeAdapter] USDT/USDC 余额为0，使用总可用余额: ${balance.toFixed(2)}`);
     }
 
     console.log(`[ExchangeAdapter] 最终余额: ${balance.toFixed(2)} USDT/USDC`);
