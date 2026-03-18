@@ -456,13 +456,25 @@ ${liquidationInfo}
 
 function parseAIResponse(text: string): TradeSignal | null {
   try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error('[AI] 无法提取 JSON');
-      return null;
+    // MiniMax thinking 模型会在文本中输出 ```json ... ``` 代码块
+    // 优先从代码块中提取 JSON
+    let jsonText = '';
+
+    // 尝试从 ```json 代码块中提取
+    const codeBlockMatch = text.match(/```json\s*([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      jsonText = codeBlockMatch[1].trim();
+    } else {
+      // 如果没有代码块，尝试直接匹配 JSON 对象
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        console.error('[AI] 无法提取 JSON');
+        return null;
+      }
+      jsonText = jsonMatch[0];
     }
 
-    const parsed = JSON.parse(jsonMatch[0]);
+    const parsed = JSON.parse(jsonText);
 
     if (!parsed.direction || !parsed.confidence) {
       console.error('[AI] 响应缺少必要字段');
