@@ -692,7 +692,9 @@ ${keyLevels.shortLiquidation.map(l => `- $${l.price.toFixed(2)}: ${(l.amount / 1
 - 时间框架对齐度: ${mtf.alignment}%
 - 可交易: ${mtf.tradeable ? '是' : '否'}
 
-### 高时间框架 (HTF: 1D + 4H) - 确定方向
+### 高时间框架 (HTF: 4D + 1D + 4H) - 确定方向
+- 4D趋势: ${mtf.htf.fourDay.trend}
+- 4D结构: ${mtf.htf.fourDay.structure}${mtf.htf.fourDay.structureType ? ` (${mtf.htf.fourDay.structureType})` : ''}
 - 日线趋势: ${mtf.htf.daily.trend}
 - 日线结构: ${mtf.htf.daily.structure}${mtf.htf.daily.structureType ? ` (${mtf.htf.daily.structureType})` : ''}
 - 4H趋势: ${mtf.htf.h4.trend}
@@ -714,6 +716,8 @@ ${entryInfo}
 ${liquidationInfo}
 
 ## K线数据（用于形态分析）
+
+${formatKlines(mtf.klines.fd, '4D')}
 
 ${formatKlines(mtf.klines.h1, '1H')}
 
@@ -745,11 +749,13 @@ ${formatKlines(mtf.klines.m5, '5M')}
   "warnings": ["风险提示1", "风险提示2"]
 }
 
-## 交易偏好（请参考）
+## 守塔止盈止损规则（必须严格遵守）
 
-- FVG 入场: 0.22 位置，止损放边界
-- OB 入场: 0.22 位置，止损放边界
-- OTE 入场: 0.675 位置，止损放 0.786 外侧
+- **止损规则**：多单止损 = 入场价 × 0.997 ~ 0.998，空单止损 = 入场价 × 1.002 ~ 1.003，止损最大不能超过入场价的 ±0.3%
+- **止盈规则**：止盈目标 = 入场价 ± 5%（多单 +, 空单 -）
+- **RR 要求**：止盈距离 / 止损距离，必须 >= 15
+- **入场优先**：OTE 0.675 位置（止损放 0.786 外侧）、FVG 填充区（止损放边界）、OB 0.22 位置（止损放边界）
+- **重要**：如果计算出的止损距离导致 RR < 15，必须调整入场位置或放弃该交易
 
 ## 重要规则
 
@@ -758,6 +764,7 @@ ${formatKlines(mtf.klines.m5, '5M')}
 2. MTF（1H）结构确认 HTF 方向
 3. LTF 出现有效入场机会（OTE 或 FVG）
 4. 对齐度 >= 50%
+5. **RR >= 15**
 
 如果以上条件**任一不满足**，必须返回 direction: "neutral"。
 
@@ -897,6 +904,8 @@ ${extremeInfo}
 
 ## K线数据（用于形态分析）
 
+${formatKlines(mtf.klines.fd, '4D')}
+
 ${formatKlines(mtf.klines.h1, '1H')}
 
 ${formatKlines(mtf.klines.m15, '15M')}
@@ -932,12 +941,14 @@ ${formatKlines(mtf.klines.m5, '5M')}
 1. **方向**: 应该与 LTF 方向一致（${mtf.reversal.ltfBias === 'bullish' ? 'long' : 'short'}）
 2. **置信度上限**: 反转交易最高只能是 "medium"
 3. **必须有有效的入场点**: 需要 OTE 或 FVG 支撑
-4. **盈亏比要求**: 至少 1:2
-5. **必须添加以下风险警告**:
+4. **止损规则**: 多单止损 = 入场价 × 0.997 ~ 0.998，空单止损 = 入场价 × 1.002 ~ 1.003，止损最大不能超过入场价的 ±0.3%
+5. **止盈规则**: 止盈目标 = 入场价 ± 5%（多单 +, 空单 -）
+6. **盈亏比要求**: RR >= 15
+7. **必须添加以下风险警告**:
    - "逆势交易，风险较高"
    - "HTF 趋势仍为 ${mtf.htf.bias}"
 
-如果无法确认反转有效性，返回 direction: "neutral"。
+如果无法确认反转有效性或 RR < 15，返回 direction: "neutral"。
 
 注意：优先使用上面预计算好的入场和止损价格。`;
 }

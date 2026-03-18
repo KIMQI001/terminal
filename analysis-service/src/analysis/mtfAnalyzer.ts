@@ -49,6 +49,7 @@ export interface EntrySetup {
 export interface TrendsByTimeframe {
   '1d': Bias;
   '4h': Bias;
+  '4d': Bias;
   '1h': Bias;
   '15m': Bias;
   '5m': Bias;
@@ -63,6 +64,7 @@ export interface MTFAnalysis {
   htf: {
     daily: TimeframeAnalysis;
     h4: TimeframeAnalysis;
+    fourDay: TimeframeAnalysis;  // 4D 分析结果
     bias: Bias;
     aligned: boolean;
   };
@@ -81,6 +83,7 @@ export interface MTFAnalysis {
     h1: Candle[];   // 最近 24 根
     m15: Candle[];  // 最近 16 根
     m5: Candle[];   // 最近 12 根
+    fd: Candle[];   // 4D 最近 20 根
   };
 
   // 各周期趋势（用于多数投票）
@@ -390,9 +393,10 @@ export async function analyzeMultiTimeframe(
   console.log(`[MTF] 开始分析 ${symbol}...`);
 
   // 1. 并行获取所有时间框架的 K 线数据（数量与前端一致，确保 trend 判断相同）
-  const [dailyCandles, h4Candles, h1Candles, m15Candles, m5Candles] = await Promise.all([
+  const [dailyCandles, h4Candles, fdCandles, h1Candles, m15Candles, m5Candles] = await Promise.all([
     fetchKlines(symbol, '1d', 500),
     fetchKlines(symbol, '4h', 1000),
+    fetchKlines(symbol, '4d', 200),   // 4D K 线
     fetchKlines(symbol, '1h', 2000),
     fetchKlines(symbol, '15m', 2000),
     fetchKlines(symbol, '5m', 2000),
@@ -411,20 +415,23 @@ export async function analyzeMultiTimeframe(
   // 2. 分析各个时间框架
   const dailyICT = analyzeICT(dailyCandles, symbol, '1d');
   const h4ICT = analyzeICT(h4Candles, symbol, '4h');
+  const fdICT = analyzeICT(fdCandles, symbol, '4d');  // 4D 分析
   const h1ICT = analyzeICT(h1Candles, symbol, '1h');
   const m15ICT = analyzeICT(m15Candles, symbol, '15m');
   const m5ICT = analyzeICT(m5Candles, symbol, '5m');
 
   const dailyTF = analyzeTimeframe(dailyICT);
   const h4TF = analyzeTimeframe(h4ICT);
+  const fdTF = analyzeTimeframe(fdICT);  // 4D 分析结果
   const h1TF = analyzeTimeframe(h1ICT);
   const m15TF = analyzeTimeframe(m15ICT);
   const m5TF = analyzeTimeframe(m5ICT);
 
-  // 3. 收集所有周期趋势
+  // 3. 收集所有周期趋势（包含 4D）
   const trends: TrendsByTimeframe = {
     '1d': dailyTF.trend,
     '4h': h4TF.trend,
+    '4d': fdTF.trend,
     '1h': h1TF.trend,
     '15m': m15TF.trend,
     '5m': m5TF.trend,
@@ -442,10 +449,10 @@ export async function analyzeMultiTimeframe(
   if (bullishCount > bearishCount) overallBias = 'bullish';
   else if (bearishCount > bullishCount) overallBias = 'bearish';
 
-  // 计算对齐度 = 多数方向的百分比
-  const alignment = Math.round((Math.max(bullishCount, bearishCount) / 5) * 100);
+  // 计算对齐度 = 多数方向的百分比（6 个周期）
+  const alignment = Math.round((Math.max(bullishCount, bearishCount) / 6) * 100);
 
-  console.log(`[MTF] 趋势: 1d=${trends['1d']}, 4h=${trends['4h']}, 1h=${trends['1h']}, 15m=${trends['15m']}, 5m=${trends['5m']}`);
+  console.log(`[MTF] 趋势: 1d=${trends['1d']}, 4h=${trends['4h']}, 4d=${trends['4d']}, 1h=${trends['1h']}, 15m=${trends['15m']}, 5m=${trends['5m']}`);
   console.log(`[MTF] 多数投票: bullish=${bullishCount}, bearish=${bearishCount} → ${overallBias}, 对齐度=${alignment}%`);
 
   // 5. HTF 分析（保留用于结构判断）
@@ -502,6 +509,7 @@ export async function analyzeMultiTimeframe(
     htf: {
       daily: dailyTF,
       h4: h4TF,
+      fourDay: fdTF,  // 4D 分析结果
       bias: htfResult.bias,
       aligned: htfResult.aligned,
     },
@@ -519,6 +527,7 @@ export async function analyzeMultiTimeframe(
       h1: h1Candles.slice(-24),    // 最近 24 根 (24 小时)
       m15: m15Candles.slice(-16),  // 最近 16 根 (4 小时)
       m5: m5Candles.slice(-12),    // 最近 12 根 (1 小时)
+      fd: fdCandles.slice(-20),    // 4D 最近 20 根
     },
     trends,
     overallBias,
@@ -605,10 +614,14 @@ export async function analyzeReversal(
   const trends: TrendsByTimeframe = {
     '1d': 'neutral',
     '4h': 'neutral',
+    '4d': 'neutral',
     '1h': h1TF.trend,
     '15m': m15TF.trend,
     '5m': m5TF.trend,
   };
+
+  // 4D 简化分析（反转分析不获取 4D）
+  const fdTF: TimeframeAnalysis = { timeframe: '4d', trend: 'neutral', structure: 'none', swingPoints: [] };
 
   return {
     symbol,
@@ -617,6 +630,7 @@ export async function analyzeReversal(
     htf: {
       daily: { timeframe: '1d', trend: 'neutral', structure: 'none', swingPoints: [] },
       h4: { timeframe: '4h', trend: 'neutral', structure: 'none', swingPoints: [] },
+      fourDay: fdTF,
       bias: forcedBias === 'bearish' ? 'bullish' : 'bearish', // HTF 与反转方向相反
       aligned: false,
     },
@@ -633,6 +647,7 @@ export async function analyzeReversal(
       h1: h1Candles.slice(-24),
       m15: m15Candles.slice(-16),
       m5: m5Candles.slice(-12),
+      fd: [],  // 反转分析不使用 4D
     },
     trends,
     overallBias: 'neutral',
