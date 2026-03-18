@@ -40,7 +40,7 @@ export const config = {
     provider: (process.env.AI_PROVIDER || 'gemini') as 'gemini' | 'claude' | 'openai' | 'deepseek' | 'minimax',
     apiKey: process.env.AI_API_KEY || '',
     model: process.env.AI_MODEL || '', // 留空则使用默认模型
-    maxTokens: 1500,
+    maxTokens: 4000, // thinking 模型需要更多 tokens
     // 成本控制 (MTF 模式每次分析只调用 1 次 AI，成本大幅降低)
     maxCallsPerHour: 10,
     maxCallsPerDay: 200,

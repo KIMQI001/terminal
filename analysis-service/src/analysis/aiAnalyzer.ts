@@ -474,7 +474,20 @@ function parseAIResponse(text: string): TradeSignal | null {
       jsonText = jsonMatch[0];
     }
 
-    const parsed = JSON.parse(jsonText);
+    // 尝试解析，如果失败则尝试修复截断的 JSON
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch (e) {
+      // JSON 可能被截断，尝试修复
+      const fixed = fixTruncatedJSON(jsonText);
+      if (fixed) {
+        console.log('[AI] JSON 被截断，已自动修复');
+        parsed = JSON.parse(fixed);
+      } else {
+        throw e;
+      }
+    }
 
     if (!parsed.direction || !parsed.confidence) {
       console.error('[AI] 响应缺少必要字段');
@@ -506,6 +519,94 @@ function parseAIResponse(text: string): TradeSignal | null {
     };
   } catch (error) {
     console.error('[AI] 解析响应失败:', error);
+    return null;
+  }
+}
+
+/**
+ * 修复被截断的 JSON
+ * 补全缺失的括号、引号等
+ */
+function fixTruncatedJSON(jsonText: string): string | null {
+  try {
+    // 统计括号深度
+    let braceCount = 0;
+    let bracketCount = 0;
+    let parenCount = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = 0; i < jsonText.length; i++) {
+      const char = jsonText[i];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (char === '"' && !escaped) {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+
+      if (char === '{') braceCount++;
+      else if (char === '}') braceCount--;
+      else if (char === '[') bracketCount++;
+      else if (char === ']') bracketCount--;
+      else if (char === '(') parenCount++;
+      else if (char === ')') parenCount--;
+    }
+
+    // 如果括号平衡，不需要修复
+    if (braceCount === 0 && bracketCount === 0 && parenCount === 0) {
+      return jsonText;
+    }
+
+    // 移除末尾不完整的部分（最后一个不完整的对象或数组元素）
+    let fixed = jsonText;
+
+    // 移除末尾截断的字符串（最后一个不完整的引号内容）
+    const lastQuoteIndex = jsonText.lastIndexOf('"');
+    const lastColonIndex = jsonText.lastIndexOf(':');
+    const lastCommaIndex = jsonText.lastIndexOf(',');
+    const lastBraceIndex = jsonText.lastIndexOf('}');
+    const lastBracketIndex = jsonText.lastIndexOf(']');
+
+    // 如果最后一个字符不是 } 或 ]，说明 JSON 被截断
+    const trimmed = jsonText.trim();
+    const lastChar = trimmed[trimmed.length - 1];
+
+    if (lastChar !== '}' && lastChar !== ']') {
+      // 找到最后一个完整的数组元素或对象属性
+      // 移除不完整的部分
+      const lastCompleteIndex = Math.max(
+        trimmed.lastIndexOf(',"'),
+        trimmed.lastIndexOf(']}'),
+        trimmed.lastIndexOf(']')
+      );
+
+      if (lastCompleteIndex > 0) {
+        fixed = trimmed.substring(0, lastCompleteIndex + 1);
+      }
+    }
+
+    // 补全缺失的括号
+    while (braceCount > 0) {
+      fixed += '}';
+      braceCount--;
+    }
+    while (bracketCount > 0) {
+      fixed += ']';
+      bracketCount--;
+    }
+
+    // 验证修复后的 JSON 是否有效
+    JSON.parse(fixed);
+    return fixed;
+  } catch {
     return null;
   }
 }
