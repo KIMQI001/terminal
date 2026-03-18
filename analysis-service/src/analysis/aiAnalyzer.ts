@@ -152,6 +152,71 @@ class OpenAIClient implements AIClient {
 }
 
 // ============================================
+// MiniMax 客户端
+// ============================================
+
+class MiniMaxClient implements AIClient {
+  private apiKey: string;
+
+  constructor() {
+    this.apiKey = config.ai.apiKey;
+  }
+
+  async generateContent(prompt: string): Promise<string> {
+    const maxRetries = 2;
+    let lastError: Error | null = null;
+
+    // MiniMax Token Plan 使用 Anthropic 兼容 API
+    const url = 'https://api.minimaxi.com/anthropic/v1/messages';
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': this.apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: config.ai.model || config.ai.defaultModels.minimax,
+            max_tokens: config.ai.maxTokens,
+            messages: [{ role: 'user', content: prompt }],
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`MiniMax API error: ${response.status} - ${errorText}`);
+        }
+
+        const data = await response.json() as {
+          content?: Array<{ text?: string }>;
+          error?: { message?: string };
+        };
+
+        if (data.error) {
+          throw new Error(data.error.message || 'MiniMax API error');
+        }
+
+        return data.content?.[0]?.text || '';
+      } catch (error) {
+        lastError = error as Error;
+        if (attempt < maxRetries) {
+          console.log(`[AI] MiniMax 请求失败，第 ${attempt + 1} 次重试...`);
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        }
+      }
+    }
+    throw lastError;
+  }
+
+  getName(): string {
+    return `MiniMax (${config.ai.model || config.ai.defaultModels.minimax})`;
+  }
+}
+
+// ============================================
 // AI 客户端工厂
 // ============================================
 
@@ -165,6 +230,8 @@ function createAIClient(): AIClient {
       return new OpenAIClient('openai');
     case 'deepseek':
       return new OpenAIClient('deepseek');
+    case 'minimax':
+      return new MiniMaxClient();
     default:
       throw new Error(`不支持的 AI 提供商: ${config.ai.provider}`);
   }

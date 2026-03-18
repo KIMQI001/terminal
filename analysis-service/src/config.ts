@@ -32,7 +32,7 @@ export const config = {
   // AI 配置
   ai: {
     enabled: process.env.AI_ANALYSIS_ENABLED !== 'false',  // 默认开启，设 false 关闭
-    provider: (process.env.AI_PROVIDER || 'gemini') as 'gemini' | 'claude' | 'openai' | 'deepseek',
+    provider: (process.env.AI_PROVIDER || 'gemini') as 'gemini' | 'claude' | 'openai' | 'deepseek' | 'minimax',
     apiKey: process.env.AI_API_KEY || '',
     model: process.env.AI_MODEL || '', // 留空则使用默认模型
     maxTokens: 1500,
@@ -45,6 +45,7 @@ export const config = {
       claude: 'claude-3-sonnet-20240229',
       openai: 'gpt-4o-mini',
       deepseek: 'deepseek-chat',
+      minimax: 'MiniMax-M2.7',  // MiniMax Token Plan 默认模型
     } as Record<string, string>,
   },
 
