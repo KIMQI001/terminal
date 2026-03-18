@@ -7,6 +7,11 @@ export const config = {
     restUrl: process.env.KLINE_API_URL || 'http://127.0.0.1:3001',
   },
 
+  // 清算数据服务 (liquidation-service)
+  liqService: {
+    url: process.env.LIQ_SERVICE_URL || 'http://127.0.0.1:3004',
+  },
+
   // 监控的交易对
   watchlist: [
     { symbol: 'BTCUSDC' },
