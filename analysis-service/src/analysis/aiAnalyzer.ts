@@ -309,6 +309,7 @@ export async function generateTradeSignal(
     console.log(`[AI] 使用 ${client.getName()} 分析 ${ictResult.symbol}@${ictResult.timeframe}...`);
 
     const responseText = await client.generateContent(prompt);
+    console.log(`[AI] 原始返回: ${responseText.substring(0, 500)}`);
     return parseAIResponse(responseText);
   } catch (error) {
     console.error('[AI] 调用失败:', error);
