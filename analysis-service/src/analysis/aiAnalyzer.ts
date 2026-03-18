@@ -421,19 +421,21 @@ ${liquidationInfo}
   "confidence": "high" | "medium" | "low",
   "entry": {
     "price": 数字,
-    "zone": "入场区域说明"
+    "zone": "简短入场区域说明"
   },
   "stopLoss": {
     "price": 数字,
-    "reason": "止损原因"
+    "reason": "简短止损原因"
   },
   "takeProfit": [
-    { "price": 数字, "reason": "止盈原因" }
+    { "price": 数字, "reason": "简短止盈原因" }
   ],
   "riskReward": 风险回报比数字,
-  "reasoning": "详细分析理由",
-  "warnings": ["风险提示1", "风险提示2"]
+  "reasoning": "简短分析理由",
+  "warnings": ["简短风险提示"]
 }
+
+**重要：reason 字段必须简洁，不超过20个字符，确保 JSON 完整输出！**
 
 ## 交易偏好（请参考）
 
