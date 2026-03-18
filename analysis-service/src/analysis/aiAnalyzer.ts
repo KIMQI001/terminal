@@ -191,7 +191,8 @@ class MiniMaxClient implements AIClient {
         }
 
         const data = await response.json() as {
-          content?: Array<{ text?: string }>;
+          thinking?: string;
+          content?: Array<{ type?: string; text?: string; thinking?: string }>;
           error?: { message?: string };
         };
 
@@ -199,7 +200,26 @@ class MiniMaxClient implements AIClient {
           throw new Error(data.error.message || 'MiniMax API error');
         }
 
-        return data.content?.[0]?.text || '';
+        // 打印完整返回便于调试
+        console.log(`[AI] MiniMax 返回结构:`, JSON.stringify(data).substring(0, 2000));
+
+        // 尝试从不同字段提取文本
+        // 1. 优先从 content 数组中找 type='text' 的元素
+        // 2. 也可能直接有 thinking 字段
+        let text = data.content?.find(c => c.type === 'text')?.text || '';
+
+        // 如果没找到，尝试从第一个 content 元素获取
+        if (!text && data.content?.[0]?.text) {
+          text = data.content[0].text;
+        }
+
+        // 如果还是没有，尝试 thinking 字段（某些模型把思考过程放在这里）
+        // 但我们需要的是实际回答，不是思考过程
+        if (!text && data.thinking) {
+          console.log(`[AI] MiniMax 有 thinking 字段但没有 text，需要检查返回格式`);
+        }
+
+        return text;
       } catch (error) {
         lastError = error as Error;
         if (attempt < maxRetries) {
