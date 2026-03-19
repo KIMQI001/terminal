@@ -500,11 +500,17 @@ export function detectOrderBlocks(
 
   const result: OrderBlock[] = [];
 
+  // 小 OB 阈值（点数）
+  const SMALL_OB_THRESHOLD = 200;
+
   const activeBullish = bullishOBs.filter(ob => !ob.breaker).slice(0, showBull);
   for (const ob of activeBullish) {
     const obSize = ob.top - ob.btm;
     const fillPercentage = calculateFillPercentage(ob.top, ob.btm, ob.locIndex, 'bullish');
-    const fib22 = ob.top - obSize * 0.22;  // 看涨：顶部往下 22%
+    // OB 太小（< 200点）时用边界，否则用 22% 位置
+    const fib22 = obSize < SMALL_OB_THRESHOLD
+      ? ob.top  // 小 OB 用顶部
+      : ob.top - obSize * 0.22;  // 正常 OB 用 22% 位置
     result.push({
       type: 'bullish',
       high: ob.top,
@@ -521,7 +527,10 @@ export function detectOrderBlocks(
   for (const ob of activeBearish) {
     const obSize = ob.top - ob.btm;
     const fillPercentage = calculateFillPercentage(ob.top, ob.btm, ob.locIndex, 'bearish');
-    const fib22 = ob.btm + obSize * 0.22;  // 看跌：底部往上 22%
+    // OB 太小（< 200点）时用边界，否则用 22% 位置
+    const fib22 = obSize < SMALL_OB_THRESHOLD
+      ? ob.btm  // 小 OB 用底部
+      : ob.btm + obSize * 0.22;  // 正常 OB 用 22% 位置
     result.push({
       type: 'bearish',
       high: ob.top,
