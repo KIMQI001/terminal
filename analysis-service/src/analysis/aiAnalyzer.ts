@@ -11,6 +11,7 @@ import { ICTAnalysisResult } from './ictAnalyzer';
 import { LiquidationData, extractKeyLiquidationLevels } from '../data/liquidationClient';
 import { MTFAnalysis } from './mtfAnalyzer';
 import { Candle } from '../data/klineClient';
+import { getRecentPerformance, getAdjustedRRThreshold } from '../signals/signalStore';
 
 // ============================================
 // 类型定义
@@ -688,6 +689,22 @@ ${keyLevels.shortLiquidation.map(l => `- $${l.price.toFixed(2)}: ${(l.amount / 1
 - 时间框架对齐度: ${mtf.alignment}%
 - 可交易: ${mtf.tradeable ? '是' : '否'}
 
+${(() => {
+  const perf = getRecentPerformance(7);
+  const adjustedRR = getAdjustedRRThreshold(15, 7);
+  if (perf.total === 0) {
+    return `### 近期信号表现
+- 暂无历史数据`;
+  }
+  return `### 近期信号表现（过去7天）
+- 总信号数: ${perf.total}
+- 胜率: ${perf.winRate.toFixed(1)}%
+- 平均RR: ${perf.avgRR.toFixed(2)}
+- 平均盈亏: ${perf.avgPnL.toFixed(2)}%
+- 盈: ${perf.profitCount} / 亏: ${perf.lossCount}
+- **当前RR阈值: ${adjustedRR}**${adjustedRR > 15 ? ' (已提高，因近期胜率低)' : ''}`;
+})()}
+
 ### 高时间框架 (HTF: 4D + 1D + 4H) - 确定方向
 - 4D趋势: ${mtf.htf.fourDay.trend}
 - 4D结构: ${mtf.htf.fourDay.structure}${mtf.htf.fourDay.structureType ? ` (${mtf.htf.fourDay.structureType})` : ''}
@@ -749,9 +766,9 @@ ${formatKlines(mtf.klines.m5, '5M')}
 
 - **止损规则**：多单止损 = 入场价 × 0.997 ~ 0.998，空单止损 = 入场价 × 1.002 ~ 1.003，止损最大不能超过入场价的 ±0.3%
 - **止盈规则**：止盈目标 = 入场价 ± 5%（多单 +, 空单 -）
-- **RR 要求**：止盈距离 / 止损距离，必须 >= 15
+- **RR 要求**：止盈距离 / 止损距离，必须 >= ${getAdjustedRRThreshold(15, 7)}
 - **入场优先**：OTE 0.675 位置（止损放 0.786 外侧）、FVG 填充区（止损放边界）、OB 0.22 位置（止损放边界）
-- **重要**：如果计算出的止损距离导致 RR < 15，必须调整入场位置或放弃该交易
+- **重要**：如果计算出的止损距离导致 RR < ${getAdjustedRRThreshold(15, 7)}，必须调整入场位置或放弃该交易
 
 ## 重要规则
 
@@ -760,7 +777,7 @@ ${formatKlines(mtf.klines.m5, '5M')}
 2. MTF（1H）结构确认 HTF 方向
 3. LTF 出现有效入场机会（OTE 或 FVG）
 4. 对齐度 >= 50%
-5. **RR >= 15**
+5. **RR >= ${getAdjustedRRThreshold(15, 7)}**
 
 如果以上条件**任一不满足**，必须返回 direction: "neutral"。
 
@@ -939,12 +956,12 @@ ${formatKlines(mtf.klines.m5, '5M')}
 3. **必须有有效的入场点**: 需要 OTE 或 FVG 支撑
 4. **止损规则**: 多单止损 = 入场价 × 0.997 ~ 0.998，空单止损 = 入场价 × 1.002 ~ 1.003，止损最大不能超过入场价的 ±0.3%
 5. **止盈规则**: 止盈目标 = 入场价 ± 5%（多单 +, 空单 -）
-6. **盈亏比要求**: RR >= 15
+6. **盈亏比要求**: RR >= ${getAdjustedRRThreshold(15, 7)}
 7. **必须添加以下风险警告**:
    - "逆势交易，风险较高"
    - "HTF 趋势仍为 ${mtf.htf.bias}"
 
-如果无法确认反转有效性或 RR < 15，返回 direction: "neutral"。
+如果无法确认反转有效性或 RR < ${getAdjustedRRThreshold(15, 7)}，返回 direction: "neutral"。
 
 注意：优先使用上面预计算好的入场和止损价格。`;
 }

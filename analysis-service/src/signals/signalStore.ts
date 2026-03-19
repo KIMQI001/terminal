@@ -232,6 +232,88 @@ export function getSignalStats(start?: Date, end?: Date): {
 }
 
 /**
+ * 获取近期信号表现（用于 AI 自我进化）
+ * @param days 统计最近多少天的信号
+ */
+export function getRecentPerformance(days: number = 7): {
+  total: number;
+  winRate: number;
+  avgRR: number;
+  avgPnL: number;
+  profitCount: number;
+  lossCount: number;
+} {
+  const db = getDatabase();
+  const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  // 获取已完成的信号（止损或止盈）
+  const stmt = db.prepare(`
+    SELECT actual_rr, pnl_percent, status
+    FROM signals
+    WHERE created_at >= ?
+    AND status IN ('stopped', 'profit')
+  `);
+
+  const rows = stmt.all(startDate) as Array<{ actual_rr: number | null; pnl_percent: number | null; status: string }>;
+
+  if (rows.length === 0) {
+    return { total: 0, winRate: 0, avgRR: 0, avgPnL: 0, profitCount: 0, lossCount: 0 };
+  }
+
+  let profitCount = 0;
+  let lossCount = 0;
+  let totalRR = 0;
+  let totalPnL = 0;
+
+  for (const row of rows) {
+    if (row.status === 'profit') {
+      profitCount++;
+    } else if (row.status === 'stopped') {
+      lossCount++;
+    }
+    if (row.actual_rr !== null) {
+      totalRR += row.actual_rr;
+    }
+    if (row.pnl_percent !== null) {
+      totalPnL += row.pnl_percent;
+    }
+  }
+
+  const total = rows.length;
+  const winRate = total > 0 ? (profitCount / total) * 100 : 0;
+  const avgRR = total > 0 ? totalRR / total : 0;
+  const avgPnL = total > 0 ? totalPnL / total : 0;
+
+  return { total, winRate, avgRR, avgPnL, profitCount, lossCount };
+}
+
+/**
+ * 根据近期表现动态调整 RR 阈值
+ * 如果胜率低或平均 RR 低，自动提高 RR 要求
+ */
+export function getAdjustedRRThreshold(baseRR: number = 15, days: number = 7): number {
+  const perf = getRecentPerformance(days);
+
+  // 如果信号太少，使用基础阈值
+  if (perf.total < 5) {
+    return baseRR;
+  }
+
+  // 动态调整：如果胜率 < 40%，提高 RR 要求
+  if (perf.winRate < 40 && perf.winRate > 0) {
+    const adjustment = Math.min(5, (40 - perf.winRate) / 10);
+    return Math.min(25, baseRR + adjustment);
+  }
+
+  // 如果平均 RR 低于 10，提高要求
+  if (perf.avgRR < 10 && perf.avgRR > 0) {
+    return Math.min(25, baseRR + 2);
+  }
+
+  return baseRR;
+}
+
+/**
  * 根据 ID 获取信号
  */
 export function getSignalById(id: string): SignalRecord | null {
