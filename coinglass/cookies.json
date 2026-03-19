@@ -1,0 +1,72 @@
+[
+  {
+    "name": "rt",
+    "value": "l_xxx",
+    "domain": ".coinglass.com",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "at",
+    "value": "s_729b7c513ce7410788e1d101af526606",
+    "domain": ".coinglass.com",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "_ga_WLQ6T4NYLL",
+    "value": "GS2.1.s1772273560$o1$g0$t1772273560$j60$l0$h0",
+    "domain": ".coinglass.com",
+    "path": "/",
+    "expires": 1806833560.34359,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "_ga",
+    "value": "GA1.1.283393686.1772273560",
+    "domain": ".coinglass.com",
+    "path": "/",
+    "expires": 1806833560.343732,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "test_cookie",
+    "value": "CheckForPermission",
+    "domain": ".doubleclick.net",
+    "path": "/",
+    "expires": 1772274460.767737,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "None"
+  },
+  {
+    "name": "FCCDCF",
+    "value": "%5Bnull%2Cnull%2Cnull%2Cnull%2Cnull%2Cnull%2C%5B%5B32%2C%22%5B%5C%22de375431-5d8c-4698-8206-4fde1ea667da%5C%22%2C%5B1772273561%2C191000000%5D%5D%22%5D%5D%5D",
+    "domain": ".coinglass.com",
+    "path": "/",
+    "expires": 1805969561,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "FCNEC",
+    "value": "%5B%5B%22AKsRol-2Klspc97g5mPoUJFcp3Tf4evJDDgmSPFkBjB-SmEJpCmN89_Z6n4sM3pAaG98u8PM8lRWBjn1sTX1hMhDYJWLpuK95jf52fwj_5bGxMynnHyKyuX-VTnh3IiRGF5-Lm_7TH5ygMv1yy9srO6Yj2u3D0Pz7Q%3D%3D%22%5D%5D",
+    "domain": ".coinglass.com",
+    "path": "/",
+    "expires": 1803809562,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  }
+]
