@@ -1,14 +1,14 @@
 /**
  * 任务调度器
- * 定时分析守塔策略持仓
+ * 定时分析守塔策略挂单
  */
 
 import cron from 'node-cron';
 import { config } from '../config';
 import { fetchLiquidation } from '../data/liquidationClient';
 import { analyzeMultiTimeframe } from '../analysis/mtfAnalyzer';
-import { buildPositionAnalysisPrompt, analyzePositionsByRules, PositionAnalysis } from '../analysis/positionAnalyzer';
-import { getPositions } from '../order/exchangeAdapter';
+import { buildOrderAnalysisPrompt, analyzeOrdersByRules, OrderAnalysis } from '../analysis/orderAnalyzer';
+import { getOpenOrders } from '../order/exchangeAdapter';
 import { getFirstBinanceApiConfig } from '../order/apiConfigReader';
 import { sendDingtalkMarkdown } from '../notification/dingtalk';
 
@@ -17,41 +17,41 @@ import { sendDingtalkMarkdown } from '../notification/dingtalk';
  */
 export function startScheduler(): void {
   console.log('═══════════════════════════════════════');
-  console.log('🚀 持仓分析服务启动');
+  console.log('🚀 订单分析服务启动');
   console.log(`📊 监控: ${config.watchlist.map(w => w.symbol).join(', ')}`);
   console.log(`⏰ 间隔: ${config.schedule.interval}`);
   console.log('═══════════════════════════════════════');
 
   // 启动定时任务
   cron.schedule(config.schedule.interval, async () => {
-    console.log(`\n[${new Date().toISOString()}] 开始持仓分析...`);
-    await runPositionAnalysis();
+    console.log(`\n[${new Date().toISOString()}] 开始订单分析...`);
+    await runOrderAnalysis();
   });
 
   // 立即执行一次
-  console.log('\n[启动] 执行首次持仓分析...');
-  runPositionAnalysis();
+  console.log('\n[启动] 执行首次订单分析...');
+  runOrderAnalysis();
 }
 
 /**
- * 持仓分析
+ * 订单分析
  */
-async function runPositionAnalysis(): Promise<void> {
+async function runOrderAnalysis(): Promise<void> {
   for (const item of config.watchlist) {
-    await analyzeSymbolPosition(item.symbol);
+    await analyzeSymbolOrders(item.symbol);
     await sleep(2000);
   }
 }
 
 /**
- * 分析单个交易对的持仓
+ * 分析单个交易对的订单
  */
-async function analyzeSymbolPosition(symbol: string): Promise<void> {
-  const key = `${symbol}@POS`;
-  console.log(`\n[${key}] 开始持仓分析...`);
+async function analyzeSymbolOrders(symbol: string): Promise<void> {
+  const key = `${symbol}@ORDERS`;
+  console.log(`\n[${key}] 开始订单分析...`);
 
   try {
-    // 获取持仓
+    // 获取配置
     const result = getFirstBinanceApiConfig();
     if (!result) {
       console.log(`[${key}] 未找到 Binance API 配置`);
@@ -64,19 +64,24 @@ async function analyzeSymbolPosition(symbol: string): Promise<void> {
       isTestnet: result.config.isTestnet,
     };
 
-    const positionsResult = await getPositions('binance', exchangeConfig, symbol);
-    if (!positionsResult.success || !positionsResult.positions) {
-      console.log(`[${key}] 获取持仓失败: ${positionsResult.error}`);
+    // 获取挂单
+    const ordersResult = await getOpenOrders('binance', exchangeConfig, symbol);
+    if (!ordersResult.success || !ordersResult.orders) {
+      console.log(`[${key}] 获取订单失败: ${ordersResult.error}`);
       return;
     }
 
-    const positions = positionsResult.positions.filter(p => Math.abs(p.positionAmt) >= 0.001);
-    if (positions.length === 0) {
-      console.log(`[${key}] 无持仓`);
+    // 过滤守塔的订单（ict_tower 前缀）
+    const towerOrders = ordersResult.orders.filter(o =>
+      o.clientOrderId && o.clientOrderId.startsWith('ict_tower')
+    );
+
+    if (towerOrders.length === 0) {
+      console.log(`[${key}] 无守塔订单`);
       return;
     }
 
-    console.log(`[${key}] 发现持仓: ${positions.map(p => `${p.positionSide} ${p.positionAmt}`).join(', ')}`);
+    console.log(`[${key}] 发现守塔订单: ${towerOrders.length}个`);
 
     // 获取当前价格
     const { getCurrentPrice } = await import('../order/binanceOrderApi');
@@ -93,8 +98,8 @@ async function analyzeSymbolPosition(symbol: string): Promise<void> {
     const mtfResult = await analyzeMultiTimeframe(symbol, liquidation);
 
     // 构建分析 prompt
-    const prompt = buildPositionAnalysisPrompt(
-      positions,
+    const prompt = buildOrderAnalysisPrompt(
+      towerOrders,
       currentPrice,
       symbol,
       mtfResult.htf.bias,
@@ -105,8 +110,8 @@ async function analyzeSymbolPosition(symbol: string): Promise<void> {
     console.log(`[${key}] 分析 Prompt:\n${prompt}`);
 
     // 用规则简单分析
-    const analysis = analyzePositionsByRules(
-      positions,
+    const analysis = analyzeOrdersByRules(
+      towerOrders,
       currentPrice,
       symbol,
       mtfResult.htf.bias,
@@ -116,37 +121,46 @@ async function analyzeSymbolPosition(symbol: string): Promise<void> {
 
     console.log(`[${key}] 分析结果: ${analysis.recommendation?.action} - ${analysis.recommendation?.reason}`);
 
-    // 发送持仓分析消息
-    const message = formatPositionAnalysis(analysis);
-    await sendDingtalkMarkdown(`${symbol} 持仓分析`, message);
+    // 发送钉钉消息
+    const message = formatOrderAnalysis(analysis);
+    await sendDingtalkMarkdown(`${symbol} 订单分析`, message);
 
   } catch (error) {
-    console.error(`[${key}] 持仓分析失败:`, error);
+    console.error(`[${key}] 订单分析失败:`, error);
   }
 }
 
 /**
- * 格式化持仓分析消息
+ * 格式化订单分析消息
  */
-function formatPositionAnalysis(analysis: PositionAnalysis): string {
-  if (!analysis.hasPosition) {
-    return `## ${analysis.symbol} 持仓\n\n无持仓`;
+function formatOrderAnalysis(analysis: OrderAnalysis): string {
+  if (!analysis.hasOrders) {
+    return `## ${analysis.symbol} 订单分析\n\n无守塔订单`;
   }
 
-  const pos = analysis.positions[0];
-  const pnlEmoji = pos.pnl >= 0 ? '✅' : '❌';
+  const mkt = analysis.marketAnalysis;
+  const orders = analysis.orders;
 
-  return `## ${analysis.symbol} 持仓
+  // 按价格排序
+  const sorted = [...orders].sort((a, b) => a.price - b.price);
 
-${pnlEmoji} ${pos.side === 'long' ? '多' : '空'} ${pos.amount}张
-入场: $${pos.entryPrice.toFixed(2)}
-当前: $${pos.currentPrice.toFixed(2)}
-PnL: ${pos.pnl >= 0 ? '+' : ''}$${pos.pnl.toFixed(2)} (${pos.pnlPercent.toFixed(2)}%)
-杠杆: ${pos.leverage}x
+  const orderList = sorted.map(o => {
+    const side = o.side === 'buy' ? '多' : '空';
+    const pos = o.positionSide === 'long' ? '多' : o.positionSide === 'short' ? '空' : '双';
+    const dist = o.price > mkt.currentPrice
+      ? `+${((o.price - mkt.currentPrice) / mkt.currentPrice * 100).toFixed(2)}%`
+      : `${((o.price - mkt.currentPrice) / mkt.currentPrice * 100).toFixed(2)}%`;
+    return `${side}${pos}: $${o.price.toFixed(2)} (${dist})`;
+  }).join('\n');
+
+  return `## ${analysis.symbol} 订单
+
+价格: $${mkt.currentPrice.toFixed(2)} | HTF: ${mkt.htfDirection} | 对齐: ${mkt.alignment}%
+
+${orderList}
 
 ---
-建议: ${analysis.recommendation?.action}
-原因: ${analysis.recommendation?.reason}`;
+${analysis.recommendation?.action}: ${analysis.recommendation?.reason}`;
 }
 
 function sleep(ms: number): Promise<void> {
