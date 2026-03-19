@@ -648,145 +648,102 @@ ${lines.join('\n')}`;
 }
 
 /**
- * 构建 MTF 分析 Prompt
+ * 构建 MTF 分析 Prompt - 高 RR 机会寻找模式
  */
 function buildMTFPrompt(mtf: MTFAnalysis, liq: LiquidationData | null): string {
+  // 格式化清算数据（作为止盈目标参考）
   let liquidationInfo = '';
   if (liq) {
-    const keyLevels = extractKeyLiquidationLevels(liq, mtf.currentPrice, 3);
+    const keyLevels = extractKeyLiquidationLevels(liq, mtf.currentPrice, 5);
     liquidationInfo = `
-## 清算数据
-### 多头清算密集区（价格下方）
-${keyLevels.longLiquidation.map(l => `- $${l.price.toFixed(2)}: ${(l.amount / 1e6).toFixed(2)}M USD`).join('\n') || '无显著水平'}
-
-### 空头清算密集区（价格上方）
-${keyLevels.shortLiquidation.map(l => `- $${l.price.toFixed(2)}: ${(l.amount / 1e6).toFixed(2)}M USD`).join('\n') || '无显著水平'}
-`;
+## 清算数据（作为止盈目标参考，非入场依据）
+- 多头清算密集区（价格下方，空单止盈目标）:
+${keyLevels.longLiquidation.map(l => `  - $${l.price.toFixed(2)}: ${(l.amount / 1e6).toFixed(2)}M`).join('\n') || '  无'}
+- 空头清算密集区（价格上方，多单止盈目标）:
+${keyLevels.shortLiquidation.map(l => `  - $${l.price.toFixed(2)}: ${(l.amount / 1e6).toFixed(2)}M`).join('\n') || '  无'}`;
   }
 
-  // 格式化入场设置信息
-  let entryInfo = '无有效入场点';
-  if (mtf.ltf.entry) {
-    const e = mtf.ltf.entry;
-    entryInfo = `
-- 类型: ${e.type.toUpperCase()}
-- 方向: ${e.bias}
-- 入场区间: $${e.entryZone.low.toFixed(2)} - $${e.entryZone.high.toFixed(2)}
-- 建议入场: $${e.suggestedEntry.toFixed(2)}
-- 止损: $${e.stopLoss.toFixed(2)}
-- 止盈目标: ${e.takeProfits.map(tp => `$${tp.toFixed(2)}`).join(', ')}
-- 预期盈亏比: ${e.riskReward}`;
-  }
-
-  return `你是一位专业的 ICT (Inner Circle Trader) 交易分析师，使用自上而下的多时间框架分析方法。
-
-## 多时间框架分析结果
-
-### 当前市场状态
-- 交易对: ${mtf.symbol}
-- 当前价格: $${mtf.currentPrice.toFixed(2)}
-- 综合偏向: ${mtf.overallBias}
-- 时间框架对齐度: ${mtf.alignment}%
-- 可交易: ${mtf.tradeable ? '是' : '否'}
-
-${(() => {
-  const perf = getRecentPerformance(7);
   const adjustedRR = getAdjustedRRThreshold(15, 7);
-  if (perf.total === 0) {
-    return `### 近期信号表现
-- 暂无历史数据`;
-  }
-  return `### 近期信号表现（过去7天）
-- 总信号数: ${perf.total}
-- 胜率: ${perf.winRate.toFixed(1)}%
-- 平均RR: ${perf.avgRR.toFixed(2)}
-- 平均盈亏: ${perf.avgPnL.toFixed(2)}%
-- 盈: ${perf.profitCount} / 亏: ${perf.lossCount}
-- **当前RR阈值: ${adjustedRR}**${adjustedRR > 15 ? ' (已提高，因近期胜率低)' : ''}`;
-})()}
+  const perf = getRecentPerformance(7);
 
-### 高时间框架 (HTF: 4D + 1D + 4H) - 确定方向
-- 4D趋势: ${mtf.htf.fourDay.trend}
-- 4D结构: ${mtf.htf.fourDay.structure}${mtf.htf.fourDay.structureType ? ` (${mtf.htf.fourDay.structureType})` : ''}
-- 日线趋势: ${mtf.htf.daily.trend}
-- 日线结构: ${mtf.htf.daily.structure}${mtf.htf.daily.structureType ? ` (${mtf.htf.daily.structureType})` : ''}
-- 4H趋势: ${mtf.htf.h4.trend}
-- 4H结构: ${mtf.htf.h4.structure}${mtf.htf.h4.structureType ? ` (${mtf.htf.h4.structureType})` : ''}
-- HTF偏向: ${mtf.htf.bias}
-- 日线与4H对齐: ${mtf.htf.aligned ? '是' : '否'}
+  return `你是一位 ICT 交易分析师，专门寻找高风险回报比（RR >= ${adjustedRR}）的交易机会。
 
-### 中时间框架 (MTF: 1H) - 确认结构
-- 1H趋势: ${mtf.mtf.h1.trend}
-- 1H结构: ${mtf.mtf.h1.structure}${mtf.mtf.h1.structureType ? ` (${mtf.mtf.h1.structureType})` : ''}
-- 确认HTF方向: ${mtf.mtf.confirmed ? '是' : '否'}
+**核心原则：没有高 RR 机会就观望，不强行交易。**
 
-### 低时间框架 (LTF: 15M/5M) - 入场机会
-- 15M趋势: ${mtf.ltf.m15.trend}
-- 5M趋势: ${mtf.ltf.m5.trend}
-- 入场设置:
-${entryInfo}
+## Step 1: 确定 HTF 方向（4D + 1D + 4H）
+
+基于以下分析，判断市场的主要方向：
+- 4D 趋势: ${mtf.htf.fourDay.trend}，结构: ${mtf.htf.fourDay.structure}
+- 1D 趋势: ${mtf.htf.daily.trend}，结构: ${mtf.htf.daily.structure}
+- 4H 趋势: ${mtf.htf.h4.trend}，结构: ${mtf.htf.h4.structure}
+- HTF 偏向: ${mtf.htf.bias}
+- 对齐度: ${mtf.alignment}%
+
+## Step 2: 扫描 LTF 入场机会（15M/5M）
+
+扫描以下类型的入场点，计算每个点的 RR：
+${mtf.ltf.entry ? `
+- 找到 ${mtf.ltf.entry.type} 入场点:
+  - 入场区间: $${mtf.ltf.entry.entryZone.low.toFixed(2)} - $${mtf.ltf.entry.entryZone.high.toFixed(2)}
+  - 建议入场: $${mtf.ltf.entry.suggestedEntry.toFixed(2)}
+  - 止损（紧贴结构）: $${mtf.ltf.entry.stopLoss.toFixed(2)}
+  - 止盈候选: ${mtf.ltf.entry.takeProfits.map(tp => `$${tp.toFixed(2)}`).join(', ')}
+` : '- 当前 LTF 无有效入场信号'}
+
+## Step 3: 评估 RR 是否满足要求
+
+**止损规则（严格）**：
+- 多单止损 = 入场价 × 0.997（千分之3）
+- 空单止损 = 入场价 × 1.003（千分之3）
+- 止损必须紧贴关键结构位（FVG边界/OTE 0.786/OB边界）
+
+**止盈目标**：
+- 优先选择：清算密集区、前高/前低、流动性区域
+- 多单止盈 = 入场价 + 5% 以上
+- 空单止盈 = 入场价 - 5% 以下
+
+**RR 计算**：
+- RR = |止盈 - 入场| / |止损 - 入场|
+- **必须 >= ${adjustedRR}**
 
 ${liquidationInfo}
 
-## K线数据（用于形态分析）
+## Step 4: K线形态确认（辅助）
 
 ${formatKlines(mtf.klines.fd, '4D')}
-
-${formatKlines(mtf.klines.h1, '1H')}
 
 ${formatKlines(mtf.klines.m15, '15M')}
 
 ${formatKlines(mtf.klines.m5, '5M')}
 
-**请结合 K 线形态（如吞没、Pin Bar、内包、Doji、锤子线等）与 ICT 指标进行综合分析。**
+形态信号：关注吞没、Pin Bar、锤子线等反转形态。
 
-## 请提供交易建议
+${(() => {
+  if (perf.total === 0) return '';
+  return `## 近期表现（参考）
+- 过去7天: ${perf.total}个信号，胜率${perf.winRate.toFixed(1)}%，平均RR ${perf.avgRR.toFixed(1)}
+- 当前 RR 阈值: ${adjustedRR}${adjustedRR > 15 ? '（因近期胜率低已提高）' : ''}`;
+})()}
 
-基于以上多时间框架分析，请以 JSON 格式返回交易建议：
+## 输出要求
+
+请以 JSON 格式返回：
 {
   "direction": "long" | "short" | "neutral",
   "confidence": "high" | "medium" | "low",
-  "entry": {
-    "price": 数字,
-    "zone": "入场区域说明"
-  },
-  "stopLoss": {
-    "price": 数字,
-    "reason": "止损原因"
-  },
-  "takeProfit": [
-    { "price": 数字, "reason": "止盈原因" }
-  ],
-  "riskReward": 风险回报比数字,
-  "reasoning": "详细分析理由（包含各时间框架的分析）",
-  "warnings": ["风险提示1", "风险提示2"]
+  "entry": { "price": 数字, "zone": "说明" },
+  "stopLoss": { "price": 数字, "reason": "原因" },
+  "takeProfit": [{ "price": 数字, "reason": "原因" }],
+  "riskReward": 数字,
+  "reasoning": "分析理由（说明为什么RR满足/不满足）",
+  "warnings": ["风险提示"]
 }
 
-## 守塔止盈止损规则（必须严格遵守）
-
-- **止损规则**：多单止损 = 入场价 × 0.997 ~ 0.998，空单止损 = 入场价 × 1.002 ~ 1.003，止损最大不能超过入场价的 ±0.3%
-- **止盈规则**：止盈目标 = 入场价 ± 5%（多单 +, 空单 -）
-- **RR 要求**：止盈距离 / 止损距离，必须 >= ${getAdjustedRRThreshold(15, 7)}
-- **入场优先**：OTE 0.675 位置（止损放 0.786 外侧）、FVG 填充区（止损放边界）、OB 0.22 位置（止损放边界）
-- **重要**：如果计算出的止损距离导致 RR < ${getAdjustedRRThreshold(15, 7)}，必须调整入场位置或放弃该交易
-
-## 重要规则
-
-仅当以下条件**全部满足**时才建议交易（direction 设为 long 或 short）：
-1. HTF 方向明确（非 neutral）
-2. MTF（1H）结构确认 HTF 方向
-3. LTF 出现有效入场机会（OTE 或 FVG）
-4. 对齐度 >= 50%
-5. **RR >= ${getAdjustedRRThreshold(15, 7)}**
-
-如果以上条件**任一不满足**，必须返回 direction: "neutral"。
-
-置信度规则：
-- high: 对齐度 >= 80%，所有时间框架趋势一致
-- medium: 对齐度 50-79%，主要时间框架对齐
-- low: 对齐度 < 50%（此时应返回 neutral）
-
-注意：优先使用上面预计算好的入场和止损价格。`;
+**重要规则**：
+1. 如果没有找到 RR >= ${adjustedRR} 的机会，direction 必须设为 "neutral"
+2. 止损必须紧贴结构位（千分之3以内）
+3. 止盈优先选择清算密集区或前高/前低
+4. 入场点优先：OTE 0.675 > FVG（低填充）> OB 0.22`;
 }
 
 /**
@@ -881,89 +838,67 @@ ${keyLevels.shortLiquidation.map(l => `- $${l.price.toFixed(2)}: ${(l.amount / 1
 - 预期盈亏比: ${e.riskReward}`;
   }
 
-  return `你是一位专业的 ICT (Inner Circle Trader) 交易分析师，现在分析一个**反转交易机会**。
+  return `你是一位 ICT 交易分析师，专门寻找高风险回报比（RR >= ${getAdjustedRRThreshold(15, 7)}）的反转交易机会。
 
-⚠️ **重要：这是反转交易，风险较高，需要更严格的入场条件**
+⚠️ **重要：反转交易风险极高，RR 必须更高才能补偿风险**
 
-## 反转交易背景
+## 反转背景
+- HTF 方向: ${mtf.htf.bias}（日线/4H）
+- LTF 方向: ${mtf.reversal.ltfBias}（5m/15m/1h）
+- LTF 对齐度: ${mtf.reversal.ltfAlignment}%
+- HTF 与 LTF 方向相反，存在反转可能性
 
-当前市场处于多空分歧状态：
-- **HTF (日线/4H) 方向**: ${mtf.htf.bias}
-- **LTF (5m/15m/1h) 方向**: ${mtf.reversal.ltfBias}
-- **LTF 对齐度**: ${mtf.reversal.ltfAlignment}%
+## 近期极值
+- 最高: $${mtf.recentExtreme.high.toFixed(2)}
+- 最低: $${mtf.recentExtreme.low.toFixed(2)}
+- 当前: $${mtf.currentPrice.toFixed(2)}
 
-低级别时间框架正在逆转高级别趋势，这可能是：
-1. 短期回调/反弹（假反转）
-2. 趋势反转的早期信号（真反转）
+反转入场规则：
+- 做空: 必须突破 ${mtf.recentExtreme.high.toFixed(2)} 后回落
+- 做多: 必须跌破 ${mtf.recentExtreme.low.toFixed(2)} 后反弹
 
-## 当前市场状态
+## Step 1: LTF 入场点评估
 
-- 交易对: ${mtf.symbol}
-- 当前价格: $${mtf.currentPrice.toFixed(2)}
-
-### 各时间框架趋势
-- 日线: ${mtf.trends['1d']}
-- 4H: ${mtf.trends['4h']}
-- 1H: ${mtf.trends['1h']}
-- 15M: ${mtf.trends['15m']}
-- 5M: ${mtf.trends['5m']}
-
-### LTF 入场设置（基于 ${mtf.reversal.ltfBias} 方向）
 ${entryInfo}
 
+## Step 2: 计算 RR
+
+**止损规则（严格）**：
+- 多单止损 = 入场价 × 0.997（千分之3）
+- 空单止损 = 入场价 × 1.003（千分之3）
+
+**止盈目标**：
+- 清算密集区作为目标
 ${liquidationInfo}
 
-${extremeInfo}
-
-## K线数据（用于形态分析）
+## Step 3: K线形态确认
 
 ${formatKlines(mtf.klines.fd, '4D')}
-
-${formatKlines(mtf.klines.h1, '1H')}
 
 ${formatKlines(mtf.klines.m15, '15M')}
 
 ${formatKlines(mtf.klines.m5, '5M')}
 
-**请结合 K 线形态（如吞没、Pin Bar、内包、Doji、锤子线等）判断反转有效性。**
+## 输出要求
 
-## 请提供反转交易建议
-
-基于以上分析，请以 JSON 格式返回交易建议：
 {
   "direction": "long" | "short" | "neutral",
   "confidence": "high" | "medium" | "low",
-  "entry": {
-    "price": 数字,
-    "zone": "入场区域说明"
-  },
-  "stopLoss": {
-    "price": 数字,
-    "reason": "止损原因"
-  },
-  "takeProfit": [
-    { "price": 数字, "reason": "止盈原因" }
-  ],
-  "riskReward": 风险回报比数字,
-  "reasoning": "详细分析理由（必须包含反转有效性判断）",
-  "warnings": ["风险提示1", "风险提示2"]
+  "entry": { "price": 数字, "zone": "说明" },
+  "stopLoss": { "price": 数字, "reason": "原因" },
+  "takeProfit": [{ "price": 数字, "reason": "原因" }],
+  "riskReward": 数字,
+  "reasoning": "分析理由",
+  "warnings": ["风险提示"]
 }
 
-## 反转交易规则
+**重要规则**：
+1. 方向必须与 LTF 方向一致
+2. 反转交易置信度最高只能是 "medium"
+3. **RR 必须 >= ${getAdjustedRRThreshold(15, 7)}**，否则返回 neutral
+4. 止损紧贴结构位（千分之3以内）
+5. 必须有 OTE 或 FVG 确认`;
 
-1. **方向**: 应该与 LTF 方向一致（${mtf.reversal.ltfBias === 'bullish' ? 'long' : 'short'}）
-2. **置信度上限**: 反转交易最高只能是 "medium"
-3. **必须有有效的入场点**: 需要 OTE 或 FVG 支撑
-4. **止损规则**: 多单止损 = 入场价 × 0.997 ~ 0.998，空单止损 = 入场价 × 1.002 ~ 1.003，止损最大不能超过入场价的 ±0.3%
-5. **止盈规则**: 止盈目标 = 入场价 ± 5%（多单 +, 空单 -）
-6. **盈亏比要求**: RR >= ${getAdjustedRRThreshold(15, 7)}
-7. **必须添加以下风险警告**:
-   - "逆势交易，风险较高"
-   - "HTF 趋势仍为 ${mtf.htf.bias}"
-
-如果无法确认反转有效性或 RR < ${getAdjustedRRThreshold(15, 7)}，返回 direction: "neutral"。
-
-注意：优先使用上面预计算好的入场和止损价格。`;
 }
 
 /**
