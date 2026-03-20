@@ -939,6 +939,9 @@ P (溢价区): $${pdHigh.toFixed(0)} | D (折扣区): $${pdLow.toFixed(0)}
 ## 清算水平
 ${liquidationInfo}
 
+## 附近 ICT 块 (4H)
+${formatICTLevels(mtf.ict.h4, mtf.currentPrice)}
+
 ## 4H K线
 ${formatKlines(mtf.klines.fd?.slice(-10) || [], '4H')}
 
@@ -947,6 +950,7 @@ ${formatKlines(mtf.klines.fd?.slice(-10) || [], '4H')}
 2. 如果看多，找出适合做多的价格区间（应该在 D 位以下入场）
 3. 如果看空，找出适合做空的价格区间（应该在 P 位以上入场）
 4. 每个区间给出：入场区间、止损、止盈、RR
+5. 说明使用了哪个 ICT 块作为确认
 
 ## 守塔规则
 - 多单止损 = 入场价 × 0.003（约 0.3%）
@@ -957,7 +961,7 @@ ${formatKlines(mtf.klines.fd?.slice(-10) || [], '4H')}
 
 ## 输出格式
 输出 1-2 个最佳下单区间：
-{"recommendations":[{"direction":"long","entryZone":"$68000-$69000","stopLoss":"$67800","takeProfit":"$71500","rr":15,"reason":"回踩D位企稳"},{"direction":"short","entryZone":"$74000-$74500","stopLoss":"$74300","takeProfit":"$70500","rr":12,"reason":"P位附近反弹"}],"summary":"趋势描述"}
+{"recommendations":[{"direction":"long","entryZone":"$68000-$69000","stopLoss":"$67800","takeProfit":"$71500","rr":15,"reason":"回踩D位企稳","ictConfirm":"bullish OB at $68500"},{"direction":"short","entryZone":"$74000-$74500","stopLoss":"$74300","takeProfit":"$70500","rr":12,"reason":"P位附近反弹","ictConfirm":"bearish FVG at $74200"}],"summary":"趋势描述"}
 
 只输出 JSON，不要其他文字。`;
 
