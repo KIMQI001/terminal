@@ -21,7 +21,8 @@ let schedulerInterval: NodeJS.Timeout | null = null;
 let isRunning = false;
 
 // 止损止盈参数
-const MAX_SL_DISTANCE = 200;
+const SL_RATIO = 0.002;        // 止损比例：入场价 * 0.002（千分之2）
+const MAX_SL_DISTANCE = 200;    // 最大止损点数（备用）
 const MIN_TP_RATIO = 0.025;  // 止盈最小 2.5%
 
 // 日K前高前低接口
@@ -947,7 +948,7 @@ function calculateOrders(
         cgFirstShort = {
           liqPrice: maxShort.price,
           entry,
-          stopLoss: entry + 300,  // 入场价 + 300 点
+          stopLoss: entry * (1 + SL_RATIO),  // 入场价 * (1 + 千分之3)
           takeProfit,
         };
         console.log(`[TowerScheduler] CG 首空单: P=${dailyHL.pStart.toFixed(0)}, 清算价=${maxShort.price}, 入场=${cgFirstShort.entry.toFixed(0)}, 止损=${cgFirstShort.stopLoss.toFixed(0)}, 止盈=${takeProfit.toFixed(0)} (固定=${fixedTp.toFixed(0)}, D=${dailyHL.dStart.toFixed(0)})`);
@@ -971,7 +972,7 @@ function calculateOrders(
         cgFirstLong = {
           liqPrice: maxLong.price,
           entry,
-          stopLoss: entry - 300,  // 入场价 - 300 点
+          stopLoss: entry * (1 - SL_RATIO),  // 入场价 * (1 - 千分之3)
           takeProfit,
         };
         console.log(`[TowerScheduler] CG 首多单: D=${dailyHL.dStart.toFixed(0)}, 清算价=${maxLong.price}, 入场=${cgFirstLong.entry.toFixed(0)}, 止损=${cgFirstLong.stopLoss.toFixed(0)}, 止盈=${takeProfit.toFixed(0)} (固定=${fixedTp.toFixed(0)}, P=${dailyHL.pStart.toFixed(0)})`);
@@ -1002,16 +1003,19 @@ function calculateOrders(
 
   // 计算止损止盈
   for (const block of [...allBearish, ...allBullish]) {
-    // 止损 = 边界，最大 200 点
+    // 止损 = 边界与入场价*千分之3取最大值（紧贴结构但留有空间）
     const boundary = block.type === 'bearish' ? block.high : block.low;
+    const slByRatio = block.entry * SL_RATIO;
     const slDistance = Math.abs(block.entry - boundary);
 
-    if (slDistance > MAX_SL_DISTANCE) {
-      block.stopLoss = block.type === 'bearish'
-        ? block.entry + MAX_SL_DISTANCE
-        : block.entry - MAX_SL_DISTANCE;
-    } else {
+    if (slDistance > slByRatio) {
+      // 边界更远，用边界止损（更保守）
       block.stopLoss = boundary;
+    } else {
+      // 入场价*千分之3 更远，用它（紧贴结构）
+      block.stopLoss = block.type === 'bearish'
+        ? block.entry + slByRatio
+        : block.entry - slByRatio;
     }
 
     // 止盈 = max(固定止盈 2.5%, P/D 距离)
@@ -1373,14 +1377,14 @@ async function placeOrders(
         clientOrderId: `${clientOrderId}_sl`,
       });
 
-      // 如果止损单失败（立即触发），改用当前价 ± 200 点保护性止损
+      // 如果止损单失败（立即触发），改用入场价 * 千分之3 保护性止损
       if (!slResult.success && slResult.error?.includes('would immediately trigger')) {
         console.warn(`[TowerScheduler] 原始止损单失败（${order.stopLoss.toFixed(1)}会立即触发），改用保护性止损`);
 
-        // 使用入场价 ± 200 点作为保护性止损
+        // 使用入场价 * 千分之3 作为保护性止损
         const protectiveStopLoss = order.side === 'BUY'
-          ? order.price - 200
-          : order.price + 200;
+          ? order.price * (1 - SL_RATIO)
+          : order.price * (1 + SL_RATIO);
 
         slResult = await exchangeAdapter.placeStopLossOrder(exchange, exchangeConfig, {
           symbol,
@@ -1590,13 +1594,13 @@ function calculateSlTpForPosition(
   if (positionSide === 'LONG') {
     // 多单：止损在下方，止盈在上方 (2.5%)
     return {
-      stopLoss: entryPrice - MAX_SL_DISTANCE,
+      stopLoss: entryPrice * (1 - SL_RATIO),  // 入场价 * (1 - 千分之3)
       takeProfit: entryPrice * (1 + MIN_TP_RATIO),
     };
   } else {
     // 空单：止损在上方，止盈在下方 (2.5%)
     return {
-      stopLoss: entryPrice + MAX_SL_DISTANCE,
+      stopLoss: entryPrice * (1 + SL_RATIO),  // 入场价 * (1 + 千分之3)
       takeProfit: entryPrice * (1 - MIN_TP_RATIO),
     };
   }
