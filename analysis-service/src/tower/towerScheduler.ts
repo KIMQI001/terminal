@@ -942,52 +942,46 @@ function calculateOrders(
   let cgFirstLong: { entry: number; stopLoss: number; takeProfit: number; liqPrice: number } | null = null;
 
   if (cgData && dailyHL) {
-    // 空单首单：找 P 以上最大清算值
-    const shortAboveP = cgData.shortTop.filter(s => s.price > dailyHL.pStart);
-    if (shortAboveP.length > 0) {
-      const maxShort = shortAboveP.reduce((max, s) => s.amount > max.amount ? s : max, shortAboveP[0]);
+    // 空单首单：清算价 > High，在 HL 之外做空捕获流动性
+    const shortAboveHigh = cgData.shortTop.filter(s => s.price > dailyHL.high);
+    if (shortAboveHigh.length > 0) {
+      const maxShort = shortAboveHigh.reduce((max, s) => s.amount > max.amount ? s : max, shortAboveHigh[0]);
       // 入场偏移 = max(200, 清算价 * 0.2%)
       const offset = Math.max(200, maxShort.price * 0.002);
       const entry = maxShort.price - offset;
-      // 入场价也必须 >= P（溢价区）
-      if (entry >= dailyHL.pStart) {
-        // 止盈 = min(固定止盈 2.5%, D区)，取更低的价格
-        const fixedTp = entry * (1 - MIN_TP_RATIO);
-        const takeProfit = Math.min(fixedTp, dailyHL.dStart);
-        cgFirstShort = {
-          liqPrice: maxShort.price,
-          entry,
-          stopLoss: entry * (1 + SL_RATIO),  // 入场价 * (1 + 千分之3)
-          takeProfit,
-        };
-        console.log(`[TowerScheduler] CG 首空单: P=${dailyHL.pStart.toFixed(0)}, 清算价=${maxShort.price}, 入场=${cgFirstShort.entry.toFixed(0)}, 止损=${cgFirstShort.stopLoss.toFixed(0)}, 止盈=${takeProfit.toFixed(0)} (固定=${fixedTp.toFixed(0)}, D=${dailyHL.dStart.toFixed(0)})`);
-      } else {
-        console.log(`[TowerScheduler] CG 首空单舍弃: 入场=${entry.toFixed(0)} < P=${dailyHL.pStart.toFixed(0)}`);
-      }
+      // 止盈 = min(固定止盈 2.5%, D区)，取更低的价格
+      const fixedTp = entry * (1 - MIN_TP_RATIO);
+      const takeProfit = Math.min(fixedTp, dailyHL.dStart);
+      cgFirstShort = {
+        liqPrice: maxShort.price,
+        entry,
+        stopLoss: entry * (1 + SL_RATIO),  // 入场价 * (1 + 千分之3)
+        takeProfit,
+      };
+      console.log(`[TowerScheduler] CG 首空单: H=${dailyHL.high.toFixed(0)}, 清算价=${maxShort.price}, 入场=${cgFirstShort.entry.toFixed(0)}, 止损=${cgFirstShort.stopLoss.toFixed(0)}, 止盈=${takeProfit.toFixed(0)}`);
+    } else {
+      console.log(`[TowerScheduler] CG 首空单舍弃: 无清算价 > H=${dailyHL.high.toFixed(0)}`);
     }
 
-    // 多单首单：找 D 以下最大清算值
-    const longBelowD = cgData.longTop.filter(l => l.price < dailyHL.dStart);
-    if (longBelowD.length > 0) {
-      const maxLong = longBelowD.reduce((max, l) => l.amount > max.amount ? l : max, longBelowD[0]);
+    // 多单首单：清算价 < Low，在 HL 之外做多捕获流动性
+    const longBelowLow = cgData.longTop.filter(l => l.price < dailyHL.low);
+    if (longBelowLow.length > 0) {
+      const maxLong = longBelowLow.reduce((max, l) => l.amount > max.amount ? l : max, longBelowLow[0]);
       // 入场偏移 = max(200, 清算价 * 0.2%)
       const offset = Math.max(200, maxLong.price * 0.002);
       const entry = maxLong.price + offset;
-      // 入场价也必须 <= D（折扣区）
-      if (entry <= dailyHL.dStart) {
-        // 止盈 = max(固定止盈 2.5%, P区)，取更高的价格
-        const fixedTp = entry * (1 + MIN_TP_RATIO);
-        const takeProfit = Math.max(fixedTp, dailyHL.pStart);
-        cgFirstLong = {
-          liqPrice: maxLong.price,
-          entry,
-          stopLoss: entry * (1 - SL_RATIO),  // 入场价 * (1 - 千分之3)
-          takeProfit,
-        };
-        console.log(`[TowerScheduler] CG 首多单: D=${dailyHL.dStart.toFixed(0)}, 清算价=${maxLong.price}, 入场=${cgFirstLong.entry.toFixed(0)}, 止损=${cgFirstLong.stopLoss.toFixed(0)}, 止盈=${takeProfit.toFixed(0)} (固定=${fixedTp.toFixed(0)}, P=${dailyHL.pStart.toFixed(0)})`);
-      } else {
-        console.log(`[TowerScheduler] CG 首多单舍弃: 入场=${entry.toFixed(0)} > D=${dailyHL.dStart.toFixed(0)}`);
-      }
+      // 止盈 = max(固定止盈 2.5%, P区)，取更高的价格
+      const fixedTp = entry * (1 + MIN_TP_RATIO);
+      const takeProfit = Math.max(fixedTp, dailyHL.pStart);
+      cgFirstLong = {
+        liqPrice: maxLong.price,
+        entry,
+        stopLoss: entry * (1 - SL_RATIO),  // 入场价 * (1 - 千分之3)
+        takeProfit,
+      };
+      console.log(`[TowerScheduler] CG 首多单: L=${dailyHL.low.toFixed(0)}, 清算价=${maxLong.price}, 入场=${cgFirstLong.entry.toFixed(0)}, 止损=${cgFirstLong.stopLoss.toFixed(0)}, 止盈=${takeProfit.toFixed(0)}`);
+    } else {
+      console.log(`[TowerScheduler] CG 首多单舍弃: 无清算价 < L=${dailyHL.low.toFixed(0)}`);
     }
   }
 
