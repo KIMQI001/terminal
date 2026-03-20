@@ -234,24 +234,13 @@ class MiniMaxClient implements AIClient {
         // - content 中包含多个元素，每个元素有 type 字段
         // - type='thinking': 包含 AI 的推理过程（中文解释）
         // - type='text': 包含实际的 JSON 输出
-        // 重要：必须跳过 thinking 类型的内容，找到 text 类型的内容
 
         let text = '';
-
-        // 调试：打印 content 数组结构
-        console.log(`[AI] MiniMax content 元素数量: ${data.content?.length || 0}`);
-        if (data.content) {
-          data.content.forEach((item: any, idx: number) => {
-            console.log(`[AI] content[${idx}] type=${item.type}, text长度=${item.text?.length || 0}, thinking长度=${item.thinking?.length || 0}`);
-          });
-        }
 
         // 1. 从 content 数组中找所有 type='text' 的元素
         const textContents = data.content?.filter(c => c.type === 'text');
         if (textContents && textContents.length > 0) {
-          // 如果有多个 text 元素，用最后一个（通常是最终答案）
           text = textContents[textContents.length - 1].text || '';
-          console.log(`[AI] 找到 ${textContents.length} 个 text 元素，使用最后一个`);
         }
 
         // 2. 如果没找到，尝试直接从 content 数组中找任何有 text 字段的元素
@@ -259,21 +248,7 @@ class MiniMaxClient implements AIClient {
           for (const item of data.content) {
             if (item.text) {
               text = item.text;
-              console.log(`[AI] 从 content[${data.content.indexOf(item)}] 获取到 text`);
               break;
-            }
-          }
-        }
-
-        // 3. 如果还是没有，检查是否有 thinking 元素包含 JSON（备用方案）
-        if (!text && data.content) {
-          const thinkingItem = data.content.find((c: any) => c.type === 'thinking');
-          if (thinkingItem?.thinking) {
-            // 从 thinking 中尝试提取 JSON
-            const jsonMatch = thinkingItem.thinking.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-              text = jsonMatch[0];
-              console.log(`[AI] 从 thinking 中提取到 JSON，长度: ${text.length}`);
             }
           }
         }
@@ -544,24 +519,51 @@ function parseAIResponse(text: string): TradeSignal | null {
 
       // 新格式：有 summary 和 recommendations
       if (parsed.summary || parsed.recommendations) {
-        // 从 avoid 或 recommendations 推断方向
+        // 从 recommendations 推断方向
         let direction: 'long' | 'short' | 'neutral' = 'neutral';
-        if (parsed.avoid?.direction) {
-          direction = parsed.avoid.direction;
-        } else if (parsed.recommendations?.length > 0) {
+        if (parsed.recommendations?.length > 0) {
           direction = parsed.recommendations[0].direction || 'neutral';
         }
+
+        // 解析 recommendations 中的入场区间
+        const recommendations = parsed.recommendations?.map((rec: any) => {
+          // entryZone 可能是 "$68000-$69000" 格式
+          let entryZone = { low: 0, high: 0 };
+          if (typeof rec.entryZone === 'string') {
+            const match = rec.entryZone.match(/\$(\d+)[-,]?\s*\$?(\d+)?/);
+            if (match) {
+              entryZone.low = parseInt(match[1]);
+              entryZone.high = match[2] ? parseInt(match[2]) : entryZone.low;
+            }
+          } else if (rec.entryZone?.low && rec.entryZone?.high) {
+            entryZone = rec.entryZone;
+          }
+
+          return {
+            rank: rec.rank || 1,
+            direction: rec.direction || 'neutral',
+            entryZone,
+            entryCondition: rec.entryCondition || rec.reason || '',
+            stopLoss: { price: parseFloat(String(rec.stopLoss).replace(/[$,]/g, '')) || 0, reason: rec.stopLossReason || rec.reason || '' },
+            takeProfit: { price: parseFloat(String(rec.takeProfit).replace(/[$,]/g, '')) || 0, reason: rec.takeProfitReason || rec.reason || '' },
+            riskReward: rec.rr || rec.riskReward || 0,
+            htfBias: rec.htfBias || '',
+            ictConfirmation: rec.ictConfirmation || [],
+            liquidationTarget: rec.liquidationTarget || '',
+          };
+        }) || [];
+
         return {
           direction,
-          confidence: parsed.confidence || (parsed.recommendations?.length > 0 ? 'medium' : 'low'),
-          entry: { price: 0, zone: '见推荐' },
+          confidence: parsed.confidence || (recommendations.length > 0 ? 'medium' : 'low'),
+          entry: { price: 0, zone: parsed.summary || '见推荐' },
           stopLoss: { price: 0, reason: '见推荐' },
           takeProfit: [],
-          riskReward: parsed.recommendations?.[0]?.riskReward || 0,
-          reasoning: parsed.avoid?.reason || '',
+          riskReward: recommendations[0]?.riskReward || 0,
+          reasoning: parsed.summary || '',
           warnings: [],
           summary: parsed.summary || '',
-          recommendations: parsed.recommendations,
+          recommendations,
           avoid: parsed.avoid,
           keyLevels: parsed.keyLevels,
         };
@@ -830,30 +832,41 @@ function buildMTFPrompt(mtf: MTFAnalysis, liq: LiquidationData | null): string {
     liquidationInfo = `清算: 多头${keyLevels.longLiquidation.slice(0,2).map(l => `$${l.price.toFixed(0)}`).join(',') || '无'} | 空头${keyLevels.shortLiquidation.slice(0,2).map(l => `$${l.price.toFixed(0)}`).join(',') || '无'}`;
   }
 
-  const prompt = `BTC 分析。简洁输出 JSON。
+  const prompt = `BTC 交易分析。分析趋势和最佳下单区间。
 
+## 当前状态
 价格: $${mtf.currentPrice.toFixed(2)}
-P: $${pdHigh.toFixed(0)} | D: $${pdLow.toFixed(0)}
-10日高: $${recentHigh.toFixed(0)} | 10日低: $${recentLow.toFixed(0)}
+P (高估区): $${pdHigh.toFixed(0)} | D (低估区): $${pdLow.toFixed(0)}
 偏离D: ${((mtf.currentPrice - pdLow) / pdLow * 100).toFixed(1)}%
 
-HTF: 4D=${mtf.htf.fourDay.trend} 1D=${mtf.htf.daily.trend} 4H=${mtf.htf.h4.trend}
-对齐: ${mtf.alignment}%
+## HTF 趋势
+4D=${mtf.htf.fourDay.trend} | 1D=${mtf.htf.daily.trend} | 4H=${mtf.htf.h4.trend}
+对齐度: ${mtf.alignment}%
 
+## 清算水平
 ${liquidationInfo}
 
-K线:
+## 4H K线
 ${formatKlines(mtf.klines.fd?.slice(-10) || [], '4H')}
 
-规则:
-- 多SL = 入场 × 0.003，空SL = 入场 × 1.003
-- 多在D位以下入场，空在P位以上
+## 分析任务
+1. 给出趋势判断（看多/看空/震荡）
+2. 如果看多，找出适合做多的价格区间（应该在 D 位以下）
+3. 如果看空，找出适合做空的价格区间（应该在 P 位以上）
+4. 每个区间给出：入场区间、止损、止盈、RR
+
+## 守塔规则
+- 多单止损 = 入场价 × 0.003（约 0.3%）
+- 空单止损 = 入场价 × 1.003（约 0.3%）
+- 多单止盈 = 入场价 × 1.05（+5%）
+- 空单止盈 = 入场价 × 0.95（-5%）
 - RR >= ${adjustedRR}
 
-输出:
-{"direction":"long|short|neutral","entry":"价格","stopLoss":"价格","takeProfit":"价格","rr":数字,"reason":"理由"}
+## 输出格式
+输出 1-2 个最佳下单区间：
+{"recommendations":[{"direction":"long","entryZone":"$68000-$69000","stopLoss":"$67800","takeProfit":"$71500","rr":15,"reason":"回踩D位企稳"},{"direction":"short","entryZone":"$74000-$74500","stopLoss":"$74300","takeProfit":"$70500","rr":12,"reason":"P位附近反弹"}],"summary":"趋势描述"}
 
-只输出JSON。`;
+只输出 JSON，不要其他文字。`;
 
   return prompt;
 }
