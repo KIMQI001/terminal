@@ -21,7 +21,7 @@ let schedulerInterval: NodeJS.Timeout | null = null;
 let isRunning = false;
 
 // 止损止盈参数
-const SL_RATIO = 0.002;        // 止损比例：入场价 * 0.002（千分之2）
+const SL_RATIO = 0.003;        // 止损比例：入场价 * 0.003（千分之3）
 const MAX_SL_DISTANCE = 200;    // 最大止损点数（备用）
 const MIN_TP_RATIO = 0.025;  // 止盈最小 2.5%
 
