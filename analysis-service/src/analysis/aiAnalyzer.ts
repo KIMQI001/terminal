@@ -240,10 +240,14 @@ class MiniMaxClient implements AIClient {
           text = data.content[0].text;
         }
 
-        // 如果还是没有，尝试 thinking 字段（某些模型把思考过程放在这里）
-        // 但我们需要的是实际回答，不是思考过程
+        // MiniMax thinking 模型：content[0].thinking 包含实际回答
+        if (!text && data.content?.[0]?.thinking) {
+          text = data.content[0].thinking;
+        }
+
+        // 如果还是没有，尝试 thinking 字段
         if (!text && data.thinking) {
-          console.log(`[AI] MiniMax 有 thinking 字段但没有 text，需要检查返回格式`);
+          text = data.thinking;
         }
 
         return text;
@@ -488,47 +492,72 @@ function parseAIResponse(text: string): TradeSignal | null {
     if (codeBlockMatch) {
       jsonText = codeBlockMatch[1].trim();
     } else {
+      // 尝试匹配 JSON 对象
       const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        console.error('[AI] 无法提取 JSON');
-        return null;
-      }
-      jsonText = jsonMatch[0];
-    }
-
-    // 尝试解析，如果失败则尝试修复截断的 JSON
-    let parsed;
-    try {
-      parsed = JSON.parse(jsonText);
-    } catch (e) {
-      const fixed = fixTruncatedJSON(jsonText);
-      if (fixed) {
-        console.log('[AI] JSON 被截断，已自动修复');
-        parsed = JSON.parse(fixed);
-      } else {
-        throw e;
+      if (jsonMatch) {
+        jsonText = jsonMatch[0];
       }
     }
 
-    if (!parsed.direction || !parsed.confidence) {
-      console.error('[AI] 响应缺少必要字段');
-      return null;
+    if (jsonText) {
+      // 尝试解析，如果失败则尝试修复截断的 JSON
+      let parsed;
+      try {
+        parsed = JSON.parse(jsonText);
+      } catch (e) {
+        const fixed = fixTruncatedJSON(jsonText);
+        if (fixed) {
+          console.log('[AI] JSON 被截断，已自动修复');
+          parsed = JSON.parse(fixed);
+        } else {
+          throw e;
+        }
+      }
+
+      if (parsed.direction && parsed.confidence) {
+        return {
+          direction: parsed.direction || 'neutral',
+          confidence: parsed.confidence || 'low',
+          entry: parsed.entryZone ? {
+            price: (parsed.entryZone.low + parsed.entryZone.high) / 2,
+            zone: `$${parsed.entryZone.low.toFixed(0)}-$ ${parsed.entryZone.high.toFixed(0)}`,
+          } : parsed.entry || { price: 0, zone: '观望' },
+          stopLoss: parsed.stopLoss || { price: 0, reason: '无' },
+          takeProfit: parsed.takeProfit || [],
+          riskReward: parsed.riskReward || 0,
+          reasoning: parsed.reasoning || '',
+          warnings: parsed.warnings || [],
+          entryCondition: parsed.entryZone?.condition || '',
+          keyLevels: parsed.keyLevels || undefined,
+          summary: parsed.summary || '',
+          recommendations: parsed.recommendations,
+          avoid: parsed.avoid,
+        };
+      }
+    }
+
+    // 如果没有 JSON，尝试从文本中提取关键信息
+    console.log('[AI] 未找到有效 JSON，尝试从文本提取...');
+    const summary = text.substring(0, 500);
+
+    // 尝试提取方向关键词
+    let direction: 'long' | 'short' | 'neutral' = 'neutral';
+    if (/做多|long|买入|buy/i.test(text) && !/不做多|不做多|不要多|别多/i.test(text)) {
+      direction = 'long';
+    } else if (/做空|short|卖出|sell/i.test(text) && !/不做空|不做空|不要空|别空/i.test(text)) {
+      direction = 'short';
     }
 
     return {
-      direction: parsed.direction || 'neutral',
-      confidence: parsed.confidence || 'low',
-      entry: parsed.entryZone ? {
-        price: (parsed.entryZone.low + parsed.entryZone.high) / 2,
-        zone: `$${parsed.entryZone.low.toFixed(0)}-$ ${parsed.entryZone.high.toFixed(0)}`,
-      } : parsed.entry || { price: 0, zone: '观望' },
-      stopLoss: parsed.stopLoss || { price: 0, reason: '无' },
-      takeProfit: parsed.takeProfit || [],
-      riskReward: parsed.riskReward || 0,
-      reasoning: parsed.reasoning || '',
-      warnings: parsed.warnings || [],
-      entryCondition: parsed.entryZone?.condition || '',
-      keyLevels: parsed.keyLevels || undefined,
+      direction,
+      confidence: 'low',
+      entry: { price: 0, zone: '需人工确认' },
+      stopLoss: { price: 0, reason: '无' },
+      takeProfit: [],
+      riskReward: 0,
+      reasoning: summary,
+      warnings: ['AI 未返回标准 JSON，建议人工确认'],
+      summary: summary,
     };
   } catch (error) {
     console.error('[AI] 解析响应失败:', error);
