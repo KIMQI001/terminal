@@ -819,17 +819,64 @@ function formatICTLevels(ict: ICTAnalysisResult, currentPrice: number): string {
   return parts.length > 0 ? parts.join('\n') : '无';
 }
 
+/**
+ * 找到包含当前价格的锚定K线（与守塔策略一致）
+ */
+function findAnchorCandle(klines: Candle[], currentPrice: number): { high: number; low: number } | null {
+  if (klines.length < 2) return null;
+  const latestCandle = klines[klines.length - 1];
+
+  // 从倒数第二根向左扫描，找到包含当前价格的K线
+  for (let i = klines.length - 2; i >= 0; i--) {
+    const { high, low } = klines[i];
+    if (currentPrice >= low && currentPrice <= high) {
+      return {
+        high: Math.max(high, latestCandle.high),
+        low: Math.min(low, latestCandle.low),
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * 计算 P/D 区域（与守塔策略一致）
+ * P = 高 - 区间/4 (溢价区)
+ * D = 低 + 区间/4 (折扣区)
+ */
+function calculatePD(high: number, low: number): { pdHigh: number; pdLow: number } {
+  const range = high - low;
+  const quarterRange = range / 4;
+  return {
+    pdHigh: high - quarterRange,
+    pdLow: low + quarterRange,
+  };
+}
+
 function buildMTFPrompt(mtf: MTFAnalysis, liq: LiquidationData | null): string {
   const adjustedRR = getAdjustedRRThreshold(15, 7);
 
-  // P/D 计算
-  const dailySwingHighs = mtf.ict.daily.swingPoints.filter(s => s.type === 'high');
-  const dailySwingLows = mtf.ict.daily.swingPoints.filter(s => s.type === 'low');
-  const recentHigh = dailySwingHighs.length > 0 ? dailySwingHighs[dailySwingHighs.length - 1].price : mtf.currentPrice;
-  const recentLow = dailySwingLows.length > 0 ? dailySwingLows[dailySwingLows.length - 1].price : mtf.currentPrice;
-  const dailyRange = recentHigh - recentLow;
-  const pdHigh = recentHigh - dailyRange / 4;
-  const pdLow = recentLow + dailyRange / 4;
+  // P/D 计算 - 使用守塔策略的锚定K线逻辑
+  // 从 4D K 线找锚定
+  const fdKlines = mtf.klines.fd || [];
+  const anchor = findAnchorCandle(fdKlines, mtf.currentPrice);
+
+  let pdHigh: number, pdLow: number;
+  if (anchor) {
+    // 有锚定K线，用锚定计算
+    const pd = calculatePD(anchor.high, anchor.low);
+    pdHigh = pd.pdHigh;
+    pdLow = pd.pdLow;
+  } else {
+    // 没有锚定K线，用 swing points（降级方案）
+    const dailySwingHighs = mtf.ict.daily.swingPoints.filter(s => s.type === 'high');
+    const dailySwingLows = mtf.ict.daily.swingPoints.filter(s => s.type === 'low');
+    const recentHigh = dailySwingHighs.length > 0 ? dailySwingHighs[dailySwingHighs.length - 1].price : mtf.currentPrice;
+    const recentLow = dailySwingLows.length > 0 ? dailySwingLows[dailySwingLows.length - 1].price : mtf.currentPrice;
+    const pd = calculatePD(recentHigh, recentLow);
+    pdHigh = pd.pdHigh;
+    pdLow = pd.pdLow;
+  }
 
   // 清算数据
   let liquidationInfo = '';
@@ -842,7 +889,7 @@ function buildMTFPrompt(mtf: MTFAnalysis, liq: LiquidationData | null): string {
 
 ## 当前状态
 价格: $${mtf.currentPrice.toFixed(2)}
-P (高估区): $${pdHigh.toFixed(0)} | D (低估区): $${pdLow.toFixed(0)}
+P (溢价区): $${pdHigh.toFixed(0)} | D (折扣区): $${pdLow.toFixed(0)}
 偏离D: ${((mtf.currentPrice - pdLow) / pdLow * 100).toFixed(1)}%
 
 ## HTF 趋势
@@ -857,8 +904,8 @@ ${formatKlines(mtf.klines.fd?.slice(-10) || [], '4H')}
 
 ## 分析任务
 1. 给出趋势判断（看多/看空/震荡）
-2. 如果看多，找出适合做多的价格区间（应该在 D 位以下）
-3. 如果看空，找出适合做空的价格区间（应该在 P 位以上）
+2. 如果看多，找出适合做多的价格区间（应该在 D 位以下入场）
+3. 如果看空，找出适合做空的价格区间（应该在 P 位以上入场）
 4. 每个区间给出：入场区间、止损、止盈、RR
 
 ## 守塔规则
