@@ -238,11 +238,20 @@ class MiniMaxClient implements AIClient {
 
         let text = '';
 
+        // 调试：打印 content 数组结构
+        console.log(`[AI] MiniMax content 元素数量: ${data.content?.length || 0}`);
+        if (data.content) {
+          data.content.forEach((item: any, idx: number) => {
+            console.log(`[AI] content[${idx}] type=${item.type}, text长度=${item.text?.length || 0}, thinking长度=${item.thinking?.length || 0}`);
+          });
+        }
+
         // 1. 从 content 数组中找所有 type='text' 的元素
         const textContents = data.content?.filter(c => c.type === 'text');
         if (textContents && textContents.length > 0) {
           // 如果有多个 text 元素，用最后一个（通常是最终答案）
           text = textContents[textContents.length - 1].text || '';
+          console.log(`[AI] 找到 ${textContents.length} 个 text 元素，使用最后一个`);
         }
 
         // 2. 如果没找到，尝试直接从 content 数组中找任何有 text 字段的元素
@@ -250,14 +259,24 @@ class MiniMaxClient implements AIClient {
           for (const item of data.content) {
             if (item.text) {
               text = item.text;
+              console.log(`[AI] 从 content[${data.content.indexOf(item)}] 获取到 text`);
               break;
             }
           }
         }
 
-        // 3. MiniMax thinking 模型可能在 thinking 字段中放入详细推理
-        // 但我们需要的是最终答案（text 字段），不是推理过程
-        // 不再使用 thinking 字段作为答案
+        // 3. 如果还是没有，检查是否有 thinking 元素包含 JSON（备用方案）
+        if (!text && data.content) {
+          const thinkingItem = data.content.find((c: any) => c.type === 'thinking');
+          if (thinkingItem?.thinking) {
+            // 从 thinking 中尝试提取 JSON
+            const jsonMatch = thinkingItem.thinking.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              text = jsonMatch[0];
+              console.log(`[AI] 从 thinking 中提取到 JSON，长度: ${text.length}`);
+            }
+          }
+        }
 
         return text;
       } catch (error) {
