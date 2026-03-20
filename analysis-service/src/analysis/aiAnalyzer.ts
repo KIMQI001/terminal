@@ -10,7 +10,7 @@ import { config } from '../config';
 import { ICTAnalysisResult } from './ictAnalyzer';
 import { LiquidationData, extractKeyLiquidationLevels } from '../data/liquidationClient';
 import { MTFAnalysis } from './mtfAnalyzer';
-import { Candle } from '../data/klineClient';
+import { Candle, fetchKlines } from '../data/klineClient';
 import { getRecentPerformance, getAdjustedRRThreshold } from '../signals/signalStore';
 
 // ============================================
@@ -853,30 +853,70 @@ function calculatePD(high: number, low: number): { pdHigh: number; pdLow: number
   };
 }
 
-function buildMTFPrompt(mtf: MTFAnalysis, liq: LiquidationData | null): string {
+/**
+ * 计算 P/D（使用 4D 和 1D，取更保守的值）
+ * P = max(4D.P, 1D.P) → 卖得更高
+ * D = min(4D.D, 1D.D) → 买得更低
+ */
+interface PDPair {
+  pdHigh: number;
+  pdLow: number;
+  source: string;
+}
+
+function computeConservativePD(
+  fdKlines: Candle[],  // 4D K 线
+  dailyKlines: Candle[], // 1D K 线
+  currentPrice: number
+): PDPair {
+  // 尝试 4D 锚定
+  const fdAnchor = findAnchorCandle(fdKlines, currentPrice);
+  // 尝试 1D 锚定
+  const dailyAnchor = findAnchorCandle(dailyKlines, currentPrice);
+
+  let fdPD: PDPair | null = null;
+  let dailyPD: PDPair | null = null;
+
+  if (fdAnchor) {
+    const pd = calculatePD(fdAnchor.high, fdAnchor.low);
+    fdPD = { pdHigh: pd.pdHigh, pdLow: pd.pdLow, source: '4D' };
+    console.log(`[AI] 4D锚定: high=${fdAnchor.high.toFixed(0)} low=${fdAnchor.low.toFixed(0)} P=${pd.pdHigh.toFixed(0)} D=${pd.pdLow.toFixed(0)}`);
+  }
+
+  if (dailyAnchor) {
+    const pd = calculatePD(dailyAnchor.high, dailyAnchor.low);
+    dailyPD = { pdHigh: pd.pdHigh, pdLow: pd.pdLow, source: '1D' };
+    console.log(`[AI] 1D锚定: high=${dailyAnchor.high.toFixed(0)} low=${dailyAnchor.low.toFixed(0)} P=${pd.pdHigh.toFixed(0)} D=${pd.pdLow.toFixed(0)}`);
+  }
+
+  // 取更保守的值
+  if (fdPD && dailyPD) {
+    return {
+      pdHigh: Math.max(fdPD.pdHigh, dailyPD.pdHigh),
+      pdLow: Math.min(fdPD.pdLow, dailyPD.pdLow),
+      source: `${fdPD.source}+${dailyPD.source}`,
+    };
+  } else if (fdPD) {
+    return fdPD;
+  } else if (dailyPD) {
+    return dailyPD;
+  }
+
+  // 没有锚定，用 swing points 降级
+  return { pdHigh: currentPrice * 1.05, pdLow: currentPrice * 0.95, source: 'fallback' };
+}
+
+function buildMTFPrompt(mtf: MTFAnalysis, dailyKlines: Candle[], liq: LiquidationData | null): string {
   const adjustedRR = getAdjustedRRThreshold(15, 7);
 
   // P/D 计算 - 使用守塔策略的锚定K线逻辑
-  // 从 4D K 线找锚定
+  // 使用 4D 和 1D，取更保守的值
   const fdKlines = mtf.klines.fd || [];
-  const anchor = findAnchorCandle(fdKlines, mtf.currentPrice);
+  const pd = computeConservativePD(fdKlines, dailyKlines, mtf.currentPrice);
+  const pdHigh = pd.pdHigh;
+  const pdLow = pd.pdLow;
 
-  let pdHigh: number, pdLow: number;
-  if (anchor) {
-    // 有锚定K线，用锚定计算
-    const pd = calculatePD(anchor.high, anchor.low);
-    pdHigh = pd.pdHigh;
-    pdLow = pd.pdLow;
-  } else {
-    // 没有锚定K线，用 swing points（降级方案）
-    const dailySwingHighs = mtf.ict.daily.swingPoints.filter(s => s.type === 'high');
-    const dailySwingLows = mtf.ict.daily.swingPoints.filter(s => s.type === 'low');
-    const recentHigh = dailySwingHighs.length > 0 ? dailySwingHighs[dailySwingHighs.length - 1].price : mtf.currentPrice;
-    const recentLow = dailySwingLows.length > 0 ? dailySwingLows[dailySwingLows.length - 1].price : mtf.currentPrice;
-    const pd = calculatePD(recentHigh, recentLow);
-    pdHigh = pd.pdHigh;
-    pdLow = pd.pdLow;
-  }
+  console.log(`[AI] P/D 计算 (${pd.source}): P=${pdHigh.toFixed(0)} D=${pdLow.toFixed(0)}`);
 
   // 清算数据
   let liquidationInfo = '';
@@ -956,8 +996,11 @@ export async function generateMTFSignal(
   dailyCallCount++;
 
   try {
+    // 获取 1D K 线用于 P/D 计算
+    const dailyKlines = await fetchKlines(mtfAnalysis.symbol, '1d', 200);
+
     const client = getAIClient();
-    const prompt = buildMTFPrompt(mtfAnalysis, liquidationData);
+    const prompt = buildMTFPrompt(mtfAnalysis, dailyKlines, liquidationData);
 
     console.log(`[AI] 使用 ${client.getName()} 执行 MTF 分析 ${mtfAnalysis.symbol}...`);
 
