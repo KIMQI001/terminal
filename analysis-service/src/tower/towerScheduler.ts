@@ -15,6 +15,7 @@ import { getBinanceApiConfig, getAsterApiConfig } from '../order/apiConfigReader
 import { fetchTowerBlocks } from './towerBlocksFetcher';
 import { sendDingtalkMarkdownToUser } from '../notification/dingtalk';
 import * as exchangeAdapter from '../order/exchangeAdapter';
+import { config } from '../config';
 
 // 调度器状态
 let schedulerInterval: NodeJS.Timeout | null = null;
@@ -60,6 +61,14 @@ export function startTowerScheduler(): void {
   initTowerManagementTables();
 
   console.log('[TowerScheduler] 启动托管调度器...');
+
+  // 显示距离过滤配置
+  const { orderDistanceFilter, orderDistanceThreshold } = config.tower;
+  if (orderDistanceFilter) {
+    console.log(`[TowerScheduler] 距离过滤: 开启 (阈值 ${orderDistanceThreshold * 100}%)`);
+  } else {
+    console.log(`[TowerScheduler] 距离过滤: 关闭`);
+  }
 
   // 每 30 秒检查一次
   schedulerInterval = setInterval(async () => {
@@ -1152,6 +1161,28 @@ function calculateOrders(
     console.log(`[TowerScheduler] 空单: ${originalBearishCount} -> ${bearishCandidates.length} (需 >= P=${dailyHL.pStart.toFixed(0)})`);
   } else {
     console.log(`[TowerScheduler] 未获取到日K数据，跳过区域过滤`);
+  }
+
+  // 距离过滤: 价格远离 P/D 超过阈值时不下单
+  const { orderDistanceFilter, orderDistanceThreshold } = config.tower;
+  if (orderDistanceFilter) {
+    const distanceFilter = (b: typeof allBullish[0], type: 'bullish' | 'bearish') => {
+      if (!dailyHL) return true;
+      const pdStart = type === 'bullish' ? dailyHL.dStart : dailyHL.pStart;
+      const distance = Math.abs(b.entry - pdStart);
+      const priceRatio = distance / currentPrice;
+      if (priceRatio > orderDistanceThreshold) {
+        console.log(`[TowerScheduler] 距离过滤跳过: ${type} ${b.entry.toFixed(0)} (距${type === 'bullish' ? 'D' : 'P'} ${(priceRatio * 100).toFixed(2)}% > ${orderDistanceThreshold * 100}%)`);
+        return false;
+      }
+      return true;
+    };
+
+    const beforeBullish = bullishCandidates.length;
+    const beforeBearish = bearishCandidates.length;
+    bullishCandidates = bullishCandidates.filter(b => distanceFilter(b, 'bullish'));
+    bearishCandidates = bearishCandidates.filter(b => distanceFilter(b, 'bearish'));
+    console.log(`[TowerScheduler] 距离过滤: 多单 ${beforeBullish} -> ${bullishCandidates.length}, 空单 ${beforeBearish} -> ${bearishCandidates.length}`);
   }
 
   // ICT 塔块独立选取，不受 CG 影响

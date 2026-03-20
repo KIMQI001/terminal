@@ -68,6 +68,13 @@ export const config = {
     triggerMode: (process.env.TRIGGER_MODE || 'scheduled') as 'scheduled' | 'signal',
   },
 
+  // 守塔策略配置
+  tower: {
+    // 订单距离过滤：价格远离 P/D 超过此比例时不下单 (默认 1%)
+    orderDistanceFilter: process.env.TOWER_ORDER_DISTANCE_FILTER === 'true',
+    orderDistanceThreshold: 0.01,  // 1%
+  },
+
   // 日志
   debug: process.env.DEBUG === 'true',
 };
