@@ -241,7 +241,6 @@ class MiniMaxClient implements AIClient {
         const textContents = data.content?.filter(c => c.type === 'text');
         if (textContents && textContents.length > 0) {
           text = textContents[textContents.length - 1].text || '';
-          console.log(`[AI] text 内容: ${text.substring(0, 200)}...`);
         }
 
         // 2. 如果没找到，尝试直接从 content 数组中找任何有 text 字段的元素
@@ -253,6 +252,8 @@ class MiniMaxClient implements AIClient {
             }
           }
         }
+
+        console.log(`[AI] text 长度: ${text.length}`);
 
         return text;
       } catch (error) {
