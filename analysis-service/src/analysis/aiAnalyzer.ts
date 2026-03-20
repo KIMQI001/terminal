@@ -514,6 +514,32 @@ function parseAIResponse(text: string): TradeSignal | null {
         }
       }
 
+      // 新格式：有 summary 和 recommendations
+      if (parsed.summary || parsed.recommendations) {
+        // 从 avoid 或 recommendations 推断方向
+        let direction: 'long' | 'short' | 'neutral' = 'neutral';
+        if (parsed.avoid?.direction) {
+          direction = parsed.avoid.direction;
+        } else if (parsed.recommendations?.length > 0) {
+          direction = parsed.recommendations[0].direction || 'neutral';
+        }
+        return {
+          direction,
+          confidence: parsed.confidence || (parsed.recommendations?.length > 0 ? 'medium' : 'low'),
+          entry: { price: 0, zone: '见推荐' },
+          stopLoss: { price: 0, reason: '见推荐' },
+          takeProfit: [],
+          riskReward: parsed.recommendations?.[0]?.riskReward || 0,
+          reasoning: parsed.avoid?.reason || '',
+          warnings: [],
+          summary: parsed.summary || '',
+          recommendations: parsed.recommendations,
+          avoid: parsed.avoid,
+          keyLevels: parsed.keyLevels,
+        };
+      }
+
+      // 旧格式：有 direction 和 confidence
       if (parsed.direction && parsed.confidence) {
         return {
           direction: parsed.direction || 'neutral',
