@@ -495,11 +495,15 @@ function parseAIResponse(text: string): TradeSignal | null {
     const codeBlockMatch = text.match(/```json\s*([\s\S]*?)```/);
     if (codeBlockMatch) {
       jsonText = codeBlockMatch[1].trim();
+      console.log('[AI] 从代码块提取到 JSON，长度:', jsonText.length);
     } else {
       // 尝试匹配 JSON 对象
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         jsonText = jsonMatch[0];
+        console.log('[AI] 从文本提取到 JSON，长度:', jsonText.length);
+      } else {
+        console.log('[AI] 未找到 JSON 格式，text 内容:', text.substring(0, 200));
       }
     }
 
