@@ -230,25 +230,27 @@ class MiniMaxClient implements AIClient {
         // 打印完整返回便于调试
         console.log(`[AI] MiniMax 返回结构:`, JSON.stringify(data).substring(0, 2000));
 
-        // 尝试从不同字段提取文本
-        // 1. 优先从 content 数组中找 type='text' 的元素
-        // 2. 也可能直接有 thinking 字段
-        let text = data.content?.find(c => c.type === 'text')?.text || '';
+        // MiniMax thinking 模型的响应结构:
+        // - content[0].thinking: 包含 AI 的推理过程（中文解释）
+        // - content[0].text: 包含实际的 JSON 输出（如果模型直接输出文本）
+        // 重要：thinking 字段包含的是推理过程，不是有效 JSON，不能作为答案返回
 
-        // 如果没找到，尝试从第一个 content 元素获取
+        let text = '';
+
+        // 1. 优先从 content 数组中找 type='text' 的元素（这是实际的文本输出）
+        const textContent = data.content?.find(c => c.type === 'text');
+        if (textContent?.text) {
+          text = textContent.text;
+        }
+
+        // 2. 如果没找到 type='text' 的元素，尝试从第一个 content 元素获取 text 字段
         if (!text && data.content?.[0]?.text) {
           text = data.content[0].text;
         }
 
-        // MiniMax thinking 模型：content[0].thinking 包含实际回答
-        if (!text && data.content?.[0]?.thinking) {
-          text = data.content[0].thinking;
-        }
-
-        // 如果还是没有，尝试 thinking 字段
-        if (!text && data.thinking) {
-          text = data.thinking;
-        }
+        // 3. MiniMax thinking 模型在 thinking 字段中放入详细推理，text 可能是空的
+        // 但我们需要的是最终答案，不是推理过程
+        // 只有当 text 完全为空时才用 thinking（但 thinking 也不是 JSON，所以帮助有限）
 
         return text;
       } catch (error) {
