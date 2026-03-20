@@ -86,6 +86,13 @@ export interface MTFAnalysis {
     fd: Candle[];   // 4D 最近 20 根
   };
 
+  // ICT 详细数据（供 AI 分析）
+  ict: {
+    daily: ICTAnalysisResult;
+    h4: ICTAnalysisResult;
+    m15: ICTAnalysisResult;
+  };
+
   // 各周期趋势（用于多数投票）
   trends: TrendsByTimeframe;
 
@@ -541,6 +548,12 @@ export async function analyzeMultiTimeframe(
       entry: reversalEntry,
     },
     recentExtreme,
+    // ICT 详细数据
+    ict: {
+      daily: dailyICT,
+      h4: h4ICT,
+      m15: m15ICT,
+    },
   };
 
   analysis.summary = generateSummary(analysis);
@@ -661,5 +674,31 @@ export async function analyzeReversal(
       entry: reversalEntry,
     },
     recentExtreme,
+    ict: {
+      daily: createEmptyICT(symbol, '1d'),
+      h4: createEmptyICT(symbol, '4h'),
+      m15: m15ICT,
+    },
+  };
+}
+
+/**
+ * 创建空的 ICT 分析结果（用于反转分析等不完整场景）
+ */
+function createEmptyICT(symbol: string, timeframe: Timeframe): ICTAnalysisResult {
+  return {
+    symbol,
+    timeframe,
+    timestamp: Date.now(),
+    currentPrice: 0,
+    swingPoints: [],
+    orderBlocks: [],
+    fvgs: [],
+    oteZones: [],
+    bos: [],
+    choch: [],
+    liquidityZones: [],
+    trend: 'neutral',
+    keyLevels: [],
   };
 }

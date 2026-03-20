@@ -22,7 +22,7 @@ export interface TradeSignal {
   confidence: 'high' | 'medium' | 'low';
   entry: {
     price: number;
-    zone: string;
+    zone: string;  // 现在包含 range，如 "$69,000-$70,000"
   };
   stopLoss: {
     price: number;
@@ -35,6 +35,14 @@ export interface TradeSignal {
   riskReward: number;
   reasoning: string;
   warnings: string[];
+  // 新增字段
+  entryCondition?: string;  // 入场条件
+  keyLevels?: {
+    support: number[];
+    resistance: number[];
+    pdHigh: number;
+    pdLow: number;
+  };
 }
 
 // ============================================
@@ -455,8 +463,6 @@ ${liquidationInfo}
 
 function parseAIResponse(text: string): TradeSignal | null {
   try {
-    // MiniMax thinking 模型会在文本中输出 ```json ... ``` 代码块
-    // 优先从代码块中提取 JSON
     let jsonText = '';
 
     // 尝试从 ```json 代码块中提取
@@ -464,7 +470,6 @@ function parseAIResponse(text: string): TradeSignal | null {
     if (codeBlockMatch) {
       jsonText = codeBlockMatch[1].trim();
     } else {
-      // 如果没有代码块，尝试直接匹配 JSON 对象
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         console.error('[AI] 无法提取 JSON');
@@ -478,7 +483,6 @@ function parseAIResponse(text: string): TradeSignal | null {
     try {
       parsed = JSON.parse(jsonText);
     } catch (e) {
-      // JSON 可能被截断，尝试修复
       const fixed = fixTruncatedJSON(jsonText);
       if (fixed) {
         console.log('[AI] JSON 被截断，已自动修复');
@@ -493,28 +497,20 @@ function parseAIResponse(text: string): TradeSignal | null {
       return null;
     }
 
-    if (parsed.direction === 'neutral') {
-      return {
-        direction: 'neutral',
-        confidence: parsed.confidence,
-        entry: { price: 0, zone: '观望' },
-        stopLoss: { price: 0, reason: '无' },
-        takeProfit: [],
-        riskReward: 0,
-        reasoning: parsed.reasoning || '当前没有明确的交易机会',
-        warnings: parsed.warnings || [],
-      };
-    }
-
     return {
-      direction: parsed.direction,
-      confidence: parsed.confidence,
-      entry: parsed.entry || { price: 0, zone: '未指定' },
-      stopLoss: parsed.stopLoss || { price: 0, reason: '未指定' },
+      direction: parsed.direction || 'neutral',
+      confidence: parsed.confidence || 'low',
+      entry: parsed.entryZone ? {
+        price: (parsed.entryZone.low + parsed.entryZone.high) / 2,
+        zone: `$${parsed.entryZone.low.toFixed(0)}-$ ${parsed.entryZone.high.toFixed(0)}`,
+      } : parsed.entry || { price: 0, zone: '观望' },
+      stopLoss: parsed.stopLoss || { price: 0, reason: '无' },
       takeProfit: parsed.takeProfit || [],
       riskReward: parsed.riskReward || 0,
       reasoning: parsed.reasoning || '',
       warnings: parsed.warnings || [],
+      entryCondition: parsed.entryZone?.condition || '',
+      keyLevels: parsed.keyLevels || undefined,
     };
   } catch (error) {
     console.error('[AI] 解析响应失败:', error);
@@ -650,100 +646,195 @@ ${lines.join('\n')}`;
 /**
  * 构建 MTF 分析 Prompt - 高 RR 机会寻找模式
  */
+/**
+ * 格式化 ICT 关键价位
+ */
+function formatICTLevels(ict: ICTAnalysisResult, currentPrice: number): string {
+  const parts: string[] = [];
+
+  // Order Blocks（过滤离当前价格 5% 以内的）
+  const nearbyOBs = ict.orderBlocks.filter(ob => {
+    const obMid = (ob.high + ob.low) / 2;
+    return Math.abs(obMid - currentPrice) / currentPrice < 0.05;
+  });
+  if (nearbyOBs.length > 0) {
+    parts.push('### 附近 Order Blocks:');
+    for (const ob of nearbyOBs.slice(0, 3)) {
+      const mid = (ob.high + ob.low) / 2;
+      const dist = ((mid - currentPrice) / currentPrice * 100).toFixed(2);
+      const dir = ob.type === 'bullish' ? '多' : '空';
+      parts.push(`  - ${dir}OB: $${ob.low.toFixed(2)} - $${ob.high.toFixed(2)} (中${~~mid}, ${dist}%)`);
+    }
+  }
+
+  // FVGs（过滤离当前价格 3% 以内的）
+  const nearbyFVGs = ict.fvgs.filter(fvg => {
+    const fvgMid = (fvg.high + fvg.low) / 2;
+    return Math.abs(fvgMid - currentPrice) / currentPrice < 0.03;
+  });
+  if (nearbyFVGs.length > 0) {
+    parts.push('### 附近 FVGs:');
+    for (const fvg of nearbyFVGs.slice(0, 3)) {
+      const mid = (fvg.high + fvg.low) / 2;
+      const dist = ((mid - currentPrice) / currentPrice * 100).toFixed(2);
+      const fillType = fvg.type === 'bullish' ? '低填' : '高填';
+      parts.push(`  - ${fvg.type === 'bullish' ? '多' : '空'}FVG(${fillType}): $${fvg.low.toFixed(2)} - $${fvg.high.toFixed(2)} (中${~~mid}, ${dist}%)`);
+    }
+  }
+
+  // OTE Zones（过滤离当前价格 3% 以内的）
+  const nearbyOTE = ict.oteZones.filter(ote => {
+    return Math.abs(ote.fib675 - currentPrice) / currentPrice < 0.03;
+  });
+  if (nearbyOTE.length > 0) {
+    parts.push('### 附近 OTE 入场区:');
+    for (const ote of nearbyOTE.slice(0, 3)) {
+      const dist = ((ote.fib675 - currentPrice) / currentPrice * 100).toFixed(2);
+      parts.push(`  - ${ote.type === 'bullish' ? '多' : '空'}OTE: 0.786=${ote.fib786.toFixed(2)}, 0.618=${ote.fib618.toFixed(2)} (0.675=${ote.fib675.toFixed(2)}, 偏离${dist}%)`);
+    }
+  }
+
+  // Swing Points
+  const recentHighs = ict.swingPoints.filter(s => s.type === 'high').slice(-3);
+  const recentLows = ict.swingPoints.filter(s => s.type === 'low').slice(-3);
+  if (recentHighs.length > 0 || recentLows.length > 0) {
+    parts.push('### 近期波段高低:');
+    for (const h of recentHighs) {
+      parts.push(`  - 高: $${h.price.toFixed(2)}`);
+    }
+    for (const l of recentLows) {
+      parts.push(`  - 低: $${l.price.toFixed(2)}`);
+    }
+  }
+
+  return parts.length > 0 ? parts.join('\n') : '无';
+}
+
 function buildMTFPrompt(mtf: MTFAnalysis, liq: LiquidationData | null): string {
-  // 格式化清算数据（作为止盈目标参考）
+  const adjustedRR = getAdjustedRRThreshold(15, 7);
+  const perf = getRecentPerformance(7);
+
+  // 格式化清算数据
   let liquidationInfo = '';
   if (liq) {
     const keyLevels = extractKeyLiquidationLevels(liq, mtf.currentPrice, 5);
     liquidationInfo = `
-## 清算数据（作为止盈目标参考，非入场依据）
-- 多头清算密集区（价格下方，空单止盈目标）:
+### 多头清算密集区（空单止盈目标）:
 ${keyLevels.longLiquidation.map(l => `  - $${l.price.toFixed(2)}: ${(l.amount / 1e6).toFixed(2)}M`).join('\n') || '  无'}
-- 空头清算密集区（价格上方，多单止盈目标）:
+### 空头清算密集区（多单止盈目标）:
 ${keyLevels.shortLiquidation.map(l => `  - $${l.price.toFixed(2)}: ${(l.amount / 1e6).toFixed(2)}M`).join('\n') || '  无'}`;
   }
 
-  const adjustedRR = getAdjustedRRThreshold(15, 7);
-  const perf = getRecentPerformance(7);
+  // P/D 区间计算（基于 1D swing points）
+  const dailySwingHighs = mtf.ict.daily.swingPoints.filter(s => s.type === 'high');
+  const dailySwingLows = mtf.ict.daily.swingPoints.filter(s => s.type === 'low');
+  const recentHigh = dailySwingHighs.length > 0 ? dailySwingHighs[dailySwingHighs.length - 1].price : mtf.currentPrice;
+  const recentLow = dailySwingLows.length > 0 ? dailySwingLows[dailySwingLows.length - 1].price : mtf.currentPrice;
+  const dailyRange = recentHigh - recentLow;
+  const pdHigh = recentHigh - dailyRange / 4;
+  const pdLow = recentLow + dailyRange / 4;
 
   return `你是一位 ICT 交易分析师，专门寻找高风险回报比（RR >= ${adjustedRR}）的交易机会。
 
 **核心原则：没有高 RR 机会就观望，不强行交易。**
 
-## Step 1: 确定 HTF 方向（4D + 1D + 4H）
+## 当前市场状态
 
-基于以下分析，判断市场的主要方向：
-- 4D 趋势: ${mtf.htf.fourDay.trend}，结构: ${mtf.htf.fourDay.structure}
-- 1D 趋势: ${mtf.htf.daily.trend}，结构: ${mtf.htf.daily.structure}
-- 4H 趋势: ${mtf.htf.h4.trend}，结构: ${mtf.htf.h4.structure}
-- HTF 偏向: ${mtf.htf.bias}
-- 对齐度: ${mtf.alignment}%
+当前价格: $${mtf.currentPrice.toFixed(2)}
+HTF 偏向: ${mtf.htf.bias} | 对齐度: ${mtf.alignment}%
+4D: ${mtf.htf.fourDay.trend}(${mtf.htf.fourDay.structure}) | 1D: ${mtf.htf.daily.trend}(${mtf.htf.daily.structure}) | 4H: ${mtf.htf.h4.trend}(${mtf.htf.h4.structure})
 
-## Step 2: 扫描 LTF 入场机会（15M/5M）
+## P/D 区间（1D）
 
-扫描以下类型的入场点，计算每个点的 RR：
-${mtf.ltf.entry ? `
-- 找到 ${mtf.ltf.entry.type} 入场点:
-  - 入场区间: $${mtf.ltf.entry.entryZone.low.toFixed(2)} - $${mtf.ltf.entry.entryZone.high.toFixed(2)}
-  - 建议入场: $${mtf.ltf.entry.suggestedEntry.toFixed(2)}
-  - 止损（紧贴结构）: $${mtf.ltf.entry.stopLoss.toFixed(2)}
-  - 止盈候选: ${mtf.ltf.entry.takeProfits.map(tp => `$${tp.toFixed(2)}`).join(', ')}
-` : '- 当前 LTF 无有效入场信号'}
+- 10日High: $${recentHigh.toFixed(2)}
+- 10日Low: $${recentLow.toFixed(2)}
+- Premium (P): $${pdHigh.toFixed(2)} - 高估区
+- Discount (D): $${pdLow.toFixed(2)} - 低估区
+- 当前价格相对D位: ${((mtf.currentPrice - pdLow) / pdLow * 100).toFixed(2)}%
 
-## Step 3: 评估 RR 是否满足要求
+## ICT 条件块（1D）
 
-**止损规则（严格）**：
-- 多单止损 = 入场价 × 0.997（千分之3）
-- 空单止损 = 入场价 × 1.003（千分之3）
-- 止损必须紧贴关键结构位（FVG边界/OTE 0.786/OB边界）
+${formatICTLevels(mtf.ict.daily, mtf.currentPrice)}
 
-**止盈目标**：
-- 优先选择：清算密集区、前高/前低、流动性区域
-- 多单止盈 = 入场价 + 5% 以上
-- 空单止盈 = 入场价 - 5% 以下
+## ICT 条件块（4H）
 
-**RR 计算**：
-- RR = |止盈 - 入场| / |止损 - 入场|
-- **必须 >= ${adjustedRR}**
+${formatICTLevels(mtf.ict.h4, mtf.currentPrice)}
+
+## ICT 条件块（15M）
+
+${formatICTLevels(mtf.ict.m15, mtf.currentPrice)}
 
 ${liquidationInfo}
 
-## Step 4: K线形态确认（辅助）
+## LTF 入场信号
 
-${formatKlines(mtf.klines.fd, '4D')}
+${mtf.ltf.entry ? `
+发现 ${mtf.ltf.entry.type} 入场:
+- 入场区间: $${mtf.ltf.entry.entryZone.low.toFixed(2)} - $${mtf.ltf.entry.entryZone.high.toFixed(2)}
+- 建议入场: $${mtf.ltf.entry.suggestedEntry.toFixed(2)}
+- 止损: $${mtf.ltf.entry.stopLoss.toFixed(2)}
+- 止盈: ${mtf.ltf.entry.takeProfits.map(tp => `$${tp.toFixed(2)}`).join(', ')}
+- RR: ${mtf.ltf.entry.riskReward.toFixed(1)}
+` : '无 LTF 入场信号'}
 
-${formatKlines(mtf.klines.m15, '15M')}
+## 规则
 
-${formatKlines(mtf.klines.m5, '5M')}
+- 多单止损 = 入场价 × 0.003（千分之3）
+- 空单止损 = 入场价 × 0.003（千分之3）
+- 止盈优先：清算密集区 > P/D 位 > 前高/前低
+- **RR 必须 >= ${adjustedRR}**
 
-形态信号：关注吞没、Pin Bar、锤子线等反转形态。
-
-${(() => {
-  if (perf.total === 0) return '';
-  return `## 近期表现（参考）
-- 过去7天: ${perf.total}个信号，胜率${perf.winRate.toFixed(1)}%，平均RR ${perf.avgRR.toFixed(1)}
-- 当前 RR 阈值: ${adjustedRR}${adjustedRR > 15 ? '（因近期胜率低已提高）' : ''}`;
-})()}
+${perf.total > 0 ? `
+## 近期表现
+- 过去7天: ${perf.total}个信号，胜率${perf.winRate.toFixed(1)}%
+- RR 阈值: ${adjustedRR}${adjustedRR > 15 ? '（已提高）' : ''}
+` : ''}
 
 ## 输出要求
 
-请以 JSON 格式返回：
+请分析并给出 **最佳入场点位推荐**：
+
+\`\`\`json
 {
-  "direction": "long" | "short" | "neutral",
-  "confidence": "high" | "medium" | "low",
-  "entry": { "price": 数字, "zone": "说明" },
-  "stopLoss": { "price": 数字, "reason": "原因" },
-  "takeProfit": [{ "price": 数字, "reason": "原因" }],
-  "riskReward": 数字,
-  "reasoning": "分析理由（说明为什么RR满足/不满足）",
-  "warnings": ["风险提示"]
+  "summary": "简要总结当前市场状态和机会",
+  "recommendations": [
+    {
+      "rank": 1,
+      "direction": "long|short",
+      "entryZone": { "low": 数字, "high": 数字 },
+      "entryCondition": "入场条件，如：回调到 D 位企稳后做多",
+      "stopLoss": { "price": 数字, "reason": "原因" },
+      "takeProfit": { "price": 数字, "reason": "原因" },
+      "riskReward": 数字,
+      "htfBias": "符合 HTF 方向",
+      "ictConfirmation": ["OB 在此区域", "OTE 回调到位"],
+      "liquidationTarget": "清算密集区参考"
+    }
+  ],
+  "avoid": {
+    "direction": "neutral|反方向",
+    "reason": "为什么不建议",
+    "filters": {
+      "rrTooLow": true,
+      "notNearKeyLevel": true
+    }
+  },
+  "keyLevels": {
+    "support": [数字],
+    "resistance": [数字],
+    "pdHigh": 数字,
+    "pdLow": 数字
+  }
 }
+\`\`\`
 
 **重要规则**：
-1. 如果没有找到 RR >= ${adjustedRR} 的机会，direction 必须设为 "neutral"
-2. 止损必须紧贴结构位（千分之3以内）
-3. 止盈优先选择清算密集区或前高/前低
-4. 入场点优先：OTE 0.675 > FVG（低填充）> OB 0.22`;
+1. 最多推荐 3 个入场点，按 RR 从高到低排序
+2. 只有 RR >= ${adjustedRR} 的才能推荐
+3. 多单必须在 D 位或以下、空单必须在 P 位或以上
+4. 必须有 ICT 条件确认（OB/FVG/OTE 在附近）
+5. 每个推荐要说明：HTF 方向、ICT 确认、清算目标
+6. 如果没有符合条件的入场点，recommendations 放空数组，avoid 说明原因`;
 }
 
 /**
