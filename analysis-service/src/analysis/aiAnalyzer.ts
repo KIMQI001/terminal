@@ -43,6 +43,24 @@ export interface TradeSignal {
     pdHigh: number;
     pdLow: number;
   };
+  // AI 推荐相关
+  summary?: string;
+  recommendations?: Array<{
+    rank: number;
+    direction: 'long' | 'short';
+    entryZone: { low: number; high: number };
+    entryCondition: string;
+    stopLoss: { price: number; reason: string };
+    takeProfit: { price: number; reason: string };
+    riskReward: number;
+    htfBias?: string;
+    ictConfirmation?: string[];
+    liquidationTarget?: string;
+  }>;
+  avoid?: {
+    direction: 'long' | 'short' | 'neutral';
+    reason: string;
+  };
 }
 
 // ============================================
