@@ -253,6 +253,17 @@ class MiniMaxClient implements AIClient {
           }
         }
 
+        // 3. 如果还是没有，尝试从 thinking 末尾提取 JSON
+        if (!text && data.content) {
+          const thinking = data.content.find(c => c.type === 'thinking')?.thinking || '';
+          // 从 thinking 末尾提取 JSON
+          const jsonMatch = thinking.match(/\{[\s\S]*\}$/);
+          if (jsonMatch) {
+            text = jsonMatch[0];
+            console.log(`[AI] 从 thinking 末尾提取到 JSON，长度: ${text.length}`);
+          }
+        }
+
         console.log(`[AI] text 长度: ${text.length}`);
 
         return text;
