@@ -179,18 +179,29 @@ const server = http.createServer(async (req, res) => {
         try {
             const data = await getLiquidationData(symbol, limit);
 
+            const longTop = (data?.longPeaks || []).map(l => ({
+                price: l.price,
+                amount: l.volume
+            }));
+
+            const shortTop = (data?.shortPeaks || []).map(sh => ({
+                price: sh.price,
+                amount: sh.volume
+            }));
+
+            const longTotal = longTop.reduce((s, l) => s + l.amount, 0);
+            const shortTotal = shortTop.reduce((s, sh) => s + sh.amount, 0);
+
             const response = {
                 success: true,
                 data: {
+                    symbol: symbol,
+                    timestamp: new Date().toISOString(),
                     lastPrice: currentPrice,
-                    longTop: (data?.longPeaks || []).map(l => ({
-                        price: l.price,
-                        amount: l.volume
-                    })),
-                    shortTop: (data?.shortPeaks || []).map(s => ({
-                        price: s.price,
-                        amount: s.volume
-                    }))
+                    longTop,
+                    shortTop,
+                    longTotal,
+                    shortTotal
                 }
             };
 
