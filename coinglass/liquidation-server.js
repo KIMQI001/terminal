@@ -40,6 +40,8 @@ let browser = null;
 let page = null;
 let isReady = false;
 let currentPrice = 68000;
+let lastFetchTime = 0;
+const FETCH_INTERVAL = 3 * 60 * 1000; // 3 分钟刷新一次
 
 /**
  * 初始化浏览器
@@ -86,6 +88,13 @@ async function initBrowser() {
 async function getLiquidationData(symbol, limit = 5) {
     if (!page || !isReady) {
         await initBrowser();
+    }
+
+    // 检查是否需要刷新
+    const now = Date.now();
+    if (now - lastFetchTime > FETCH_INTERVAL) {
+        console.log('[Server] 刷新数据...');
+        await refreshData();
     }
 
     const data = await page.evaluate(() => window.__CG_LIQ_DATA__);
@@ -141,6 +150,34 @@ async function getLiquidationData(symbol, limit = 5) {
         .slice(0, limit);
 
     return { longPeaks, shortPeaks };
+}
+
+/**
+ * 刷新页面数据
+ */
+async function refreshData() {
+    if (!page) return;
+
+    try {
+        // 重新访问页面刷新数据
+        await page.reload({ waitUntil: 'networkidle', timeout: 30000 });
+        await page.waitForTimeout(5000);
+
+        // 更新当前价格
+        const price = await page.evaluate(() => {
+            const data = window.__CG_LIQ_DATA__;
+            return data?.positions?.price || data?.hyperliquid?.price || 0;
+        });
+
+        if (price) {
+            currentPrice = price;
+        }
+
+        lastFetchTime = Date.now();
+        console.log(`[Server] 数据已刷新，当前价格: $${currentPrice}`);
+    } catch (err) {
+        console.error('[Server] 刷新数据失败:', err.message);
+    }
 }
 
 // HTTP 服务器
