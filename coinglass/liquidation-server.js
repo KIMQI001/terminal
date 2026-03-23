@@ -169,6 +169,13 @@ const server = http.createServer(async (req, res) => {
         const symbol = url.searchParams.get('symbol') || 'BTC';
         const limit = parseInt(url.searchParams.get('limit')) || 5;
 
+        // 如果浏览器未初始化完成，返回错误
+        if (!isReady) {
+            res.writeHead(503, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Service initializing, please retry in 30 seconds' }));
+            return;
+        }
+
         try {
             const data = await getLiquidationData(symbol, limit);
 
@@ -204,14 +211,19 @@ const server = http.createServer(async (req, res) => {
 const PORT = process.env.PORT || 3004;
 
 async function main() {
-    await initBrowser();
-
+    // 先启动 HTTP 服务器，立即响应
     server.listen(PORT, () => {
         console.log(`═══════════════════════════════════════`);
         console.log(`  CoinGlass 清算数据服务`);
         console.log(`  http://localhost:${PORT}/api/liqmap/top?symbol=BTC&limit=5`);
         console.log(`  http://localhost:${PORT}/health`);
         console.log(`═══════════════════════════════════════`);
+        console.log('[Server] 正在初始化浏览器...');
+    });
+
+    // 后台初始化浏览器，不阻塞
+    initBrowser().catch(err => {
+        console.error('[Server] 浏览器初始化失败:', err.message);
     });
 }
 
