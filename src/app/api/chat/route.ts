@@ -48,8 +48,9 @@ export async function POST(request: NextRequest) {
 
     const result = await response.json();
 
-    // MiniMax M2.7 返回格式: content[0].thinking 或 content[0].text
-    const text = result.content?.[0]?.thinking || result.content?.[0]?.text || '抱歉，无法生成回复';
+    // MiniMax M2.7 返回格式: content 数组中 type="text" 的是回复，type="thinking" 是推理过程
+    const textContent = result.content?.find((c: { type: string; text?: string }) => c.type === 'text');
+    const text = textContent?.text || '抱歉，无法生成回复';
 
     return NextResponse.json({
       success: true,
