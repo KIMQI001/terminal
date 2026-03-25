@@ -187,29 +187,45 @@ async function getICTData(symbol: string, interval: string): Promise<{ price: st
 function formatICTData(data: { price: string; klines: KLine[]; ict: ICTData }, interval: string): string {
   const { ict } = data;
   const recentKlines = data.klines.slice(-20);
+  const price = parseFloat(data.price);
+
+  // 计算日内范围
+  const todayHigh = recentKlines[recentKlines.length - 1]?.high || price;
+  const todayLow = recentKlines[recentKlines.length - 1]?.low || price;
+  const dailyRange = todayHigh - todayLow;
+  const pricePosition = dailyRange > 0 ? ((price - todayLow) / dailyRange * 100).toFixed(1) : '50';
+
+  // 判断是 discount 还是 premium
+  const positionLabel = parseFloat(pricePosition) < 38 ? 'Discount Zone (低价买入区)'
+    : parseFloat(pricePosition) > 62 ? 'Premium Zone (高价卖出区)'
+    : 'Mid-range (中间区)';
 
   let msg = `【实时 ICT 分析数据】
-当前价格: $${data.price}
+当前价格: $${data.price} (日内位置: ${pricePosition}%)
+日内范围: 高$${todayHigh.toFixed(2)} / 低$${todayLow.toFixed(2)}
+当前位置: ${positionLabel}
 时间周期: ${interval}
 
 【最近20根K线】
 ${recentKlines.map(k => `${k.time.slice(-8)} | 收:${k.close.toFixed(2)} 高:${k.high.toFixed(2)} 低:${k.low.toFixed(2)}`).join('\n')}
 
-【Swing Points】(最近10个)
-高点: ${ict.swingHighs.map(s => `$${s.price.toFixed(2)}`).join(', ') || '无'}
-低点: ${ict.swingLows.map(s => `$${s.price.toFixed(2)}`).join(', ') || '无'}
+【Swing Highs】(最近高点,可能成为阻力)
+${ict.swingHighs.slice(-5).map(s => `$${s.price.toFixed(2)} @ ${s.time.slice(-8)}`).join('\n') || '无'}
 
-【Bullish FVG】(向上跳空) ${ict.fvgBullish.length}个
-${ict.fvgBullish.map(f => `${f.time.slice(-8)} 区间:$${f.low.toFixed(2)}-${f.high.toFixed(2)}`).join('\n') || '无'}
+【Swing Lows】(最近低点,可能成为支撑)
+${ict.swingLows.slice(-5).map(s => `$${s.price.toFixed(2)} @ ${s.time.slice(-8)}`).join('\n') || '无'}
 
-【Bearish FVG】(向下跳空) ${ict.fvgBearish.length}个
-${ict.fvgBearish.map(f => `${f.time.slice(-8)} 区间:$${f.low.toFixed(2)}-${f.high.toFixed(2)}`).join('\n') || '无'}
+【Bullish FVG】(向上跳空缺口-回调买入目标) ${ict.fvgBullish.length}个
+${ict.fvgBullish.map(f => `$${f.low.toFixed(2)}-${f.high.toFixed(2)} @ ${f.time.slice(-8)}`).join('\n') || '无'}
 
-【Order Blocks】(供需逆转区) ${ict.orderBlocks.length}个
-${ict.orderBlocks.map(ob => `${ob.time.slice(-8)} $${ob.price.toFixed(2)} ${ob.side === 'bull' ? '多头OB' : '空头OB'} (强度:${ob.strength})`).join('\n') || '无'}
+【Bearish FVG】(向下跳空缺口-回调卖出目标) ${ict.fvgBearish.length}个
+${ict.fvgBearish.map(f => `$${f.low.toFixed(2)}-${f.high.toFixed(2)} @ ${f.time.slice(-8)}`).join('\n') || '无'}
 
-【Mitigation Blocks】(价格被拒区) ${ict.mitigationBlocks.length}个
-${ict.mitigationBlocks.map(mb => `${mb.time.slice(-8)} $${mb.price.toFixed(2)} ${mb.side === 'bull' ? '向上mitigation' : '向下mitigation'}`).join('\n') || '无'}
+【Bullish Order Blocks】(机构做多区-回调买入)
+${ict.orderBlocks.filter(ob => ob.side === 'bull').slice(-3).map(ob => `$${ob.price.toFixed(2)} @ ${ob.time.slice(-8)} (强度:${ob.strength})`).join('\n') || '无'}
+
+【Bearish Order Blocks】(机构做空区-反弹卖出)
+${ict.orderBlocks.filter(ob => ob.side === 'bear').slice(-3).map(ob => `$${ob.price.toFixed(2)} @ ${ob.time.slice(-8)} (强度:${ob.strength})`).join('\n') || '无'}
 `;
 
   return msg;
@@ -230,21 +246,55 @@ export async function POST(request: NextRequest) {
         marketData = '\n\n无法获取市场数据，请参考当前价格信息。';
       }
 
-      const systemPrompt = `你是专业的加密货币交易分析师，精通ICT方法分析BTC市场。
+      const systemPrompt = `你是ICT（Inner Circle Trader）方法论的专业分析师，精通BTC日内和波段交易。
 
-ICT核心概念：
-- Swing High/Low: 波段高低价，是关键支撑阻力
-- Order Block (OB): 价格突破前的最后一根同色蜡烛，代表机构建仓区
-- Fair Value Gap (FVG): 跳空区域，代表流动性真空区，价格往往回填补缺
-- Mitigation Block (MB): 价格被拒绝的区域，可能成为新的支撑阻力
+## ICT 核心分析框架
 
-分析任务：
-1. 根据Swing High/Low判断当前市场结构（更高高点/更低低点=趋势，持续=震荡）
-2. 识别最近的OB，判断当前回调是否可能企稳
-3. 检查FVG是否被填补
-4. 给出关键价位和方向判断
+### 1. 市场结构判断 (Market Structure)
+- **Bull Trend**: 价格创出更高高点(HH)和更高低点(HL)
+- **Bear Trend**: 价格创出更低高点(LH)和更低低点(LL)
+- **Consolidation**: 高低点不断降低(跌势)或抬高(涨势)，趋势不明显
+- **CHoCH (Change of Character)**: 结构改变，当前的低点不再创新低或高点不再创新高
 
-回复要求：简洁专业，3-5句话，直接给出结论。`;
+### 2. Killzone（机构最活跃时段）
+- **亚洲时段 (00:00-08:00 UTC)**: 低波动，常用于积累或消耗
+- **伦敦时段 (08:00-12:00 UTC)**: 高波动，突破常发生
+- **纽约时段 (12:00-16:00 UTC)**: 最大波动，机构流动性收割
+- **日内关键**: 寻找在 Killzone 边界的价格行为
+
+### 3. Order Block（机构订单区块）
+- **Bullish OB**: 下跌后最后一根阳线（上涨前积累）
+- **Bearish OB**: 上涨后最后一根阴线（下跌前派发）
+- OB 代表机构的"成本区"，价格回调到 OB 常被机构护盘
+
+### 4. Fair Value Gap (FVG / 流动性缺口)
+- 价格快速移动留下的真空区
+- 两种类型：
+  - **Mitigated FVG**: 已被填补，结构可能延续
+  - **Open FVG**: 未填补，可能成为回撤目标
+
+### 5.流动性分析 (Liquidity)
+- **BOS (Break of Structure)**: 突破重要波段高低价
+- **Liquidity Runs**: 价格去扫掉止损后反转（止损猎杀）
+- 观察价格是否去"猎"流动性：止损池、突破止损、合约持仓密集区
+
+### 6. 关键价位识别
+- **Discount Zone**: 价格偏离均值后的低价买入区
+- **Premium Zone**: 价格偏离均值后的高价卖出区
+- **Mid-range**: 震荡时的平衡区
+
+## 分析要求
+
+请按以下框架输出（简洁，5-8句）：
+
+1. **当前结构**: 现在是趋势还是震荡？HH/HL 还是 LH/LL？
+2. **关键OB**: 最近的有效OB在哪里？价格是否接近？
+3. **FVG状态**: 是否有未填补的缺口？是否在回调？
+4. **流动性猎杀**: 价格是否在去扫流动性？
+5. **方向判断**: 短期(1-4H)偏多还是偏空？
+6. **关键价位**: 关键支撑/阻力在哪？止损放哪里？
+
+用专业但易懂的语言，不要废话。`;
 
       const response = await fetch('https://api.minimaxi.com/anthropic/v1/messages', {
         method: 'POST',
