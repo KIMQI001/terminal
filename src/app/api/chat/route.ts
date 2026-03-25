@@ -48,9 +48,12 @@ export async function POST(request: NextRequest) {
 
     const result = await response.json();
 
+    // MiniMax M2.7 返回格式: content[0].thinking 或 content[0].text
+    const text = result.content?.[0]?.thinking || result.content?.[0]?.text || '抱歉，无法生成回复';
+
     return NextResponse.json({
       success: true,
-      content: result.content?.[0]?.text || '抱歉，无法生成回复',
+      content: text,
     });
   } catch (error) {
     console.error('[Chat API] Error:', error);

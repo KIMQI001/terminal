@@ -59,7 +59,8 @@ export async function POST(request: NextRequest) {
       }
 
       const result = await response.json();
-      const analysis = result.content?.[0]?.text || '无法生成分析';
+      // MiniMax M2.7 返回格式: content[0].thinking 或 content[0].text
+      const analysis = result.content?.[0]?.thinking || result.content?.[0]?.text || '无法生成分析';
 
       // 钉钉通知
       if (dingtalk && DINGTALK_WEBHOOK) {
