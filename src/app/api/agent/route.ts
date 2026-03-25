@@ -186,7 +186,7 @@ async function getICTData(symbol: string, interval: string): Promise<{ price: st
 // 格式化 ICT 数据给 AI
 function formatICTData(data: { price: string; klines: KLine[]; ict: ICTData }, interval: string): string {
   const { ict } = data;
-  const recentKlines = data.klines.slice(-50);  // 显示最近50根K线
+  const recentKlines = data.klines.slice(-200);  // 显示全部200根K线
   const price = parseFloat(data.price);
 
   // 计算日内范围
@@ -207,7 +207,7 @@ function formatICTData(data: { price: string; klines: KLine[]; ict: ICTData }, i
 时间周期: ${interval}
 数据基础: ${data.klines.length}根K线
 
-【最近50根K线】
+【最近200根K线】
 ${recentKlines.map(k => `${k.time.slice(-8)} | 收:${k.close.toFixed(2)} 高:${k.high.toFixed(2)} 低:${k.low.toFixed(2)}`).join('\n')}
 
 【Swing Highs】(最近高点,可能成为阻力)
