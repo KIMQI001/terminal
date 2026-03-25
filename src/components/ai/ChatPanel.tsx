@@ -5,7 +5,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { X, Send, Trash2, Bot, User } from 'lucide-react';
 
 export function ChatPanel() {
-  const { messages, isOpen, isLoading, addMessage, clearMessages, setOpen } = useChatStore();
+  const { messages, isOpen, isLoading, addMessage, clearMessages, setOpen, checkAndClearIfNeeded } = useChatStore();
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastEnterRef = useRef<number>(0);
@@ -13,6 +13,11 @@ export function ChatPanel() {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  useEffect(() => {
+    // 检查是否需要自动清空（跨天后第一次打开）
+    checkAndClearIfNeeded();
+  }, []);
 
   useEffect(() => {
     scrollToBottom();
