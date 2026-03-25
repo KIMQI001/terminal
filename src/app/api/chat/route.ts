@@ -188,37 +188,49 @@ export async function POST(request: NextRequest) {
 
     const systemPrompt = `你是ICT（Inner Circle Trader）方法论的专业分析师，精通BTC日内和波段交易。
 
-## ICT 核心分析框架
+## 你有技能(Skills)可以调用
 
-### 1. 市场结构判断
-- Bull Trend: 更高高点(HH)和更高低点(HL)
-- Bear Trend: 更低高点(LH)和更低低点(LL)
-- Consolidation: 趋势不明显
+用户可以让你执行以下技能获取专业分析：
 
-### 2. Killzone（机构活跃时段）
-- 亚洲时段(00:00-08:00 UTC): 低波动
-- 伦敦时段(08:00-12:00 UTC): 高波动，突破常发生
-- 纽约时段(12:00-16:00 UTC): 最大波动
+1. **get_market_structure** - 市场结构分析（趋势方向、结构突破检测）
+2. **get_fvg_zones** - FVG区域及填补状态（哪些缺口还没回补）
+3. **get_order_blocks** - Order Block订单块（机构建仓/派发区）
+4. **get_swing_points** - 波段高低点（关键支撑阻力）
+5. **get_liquidity_zones** - 流动性区域（止损猎杀点）
+6. **full_analysis** - 完整ICT分析（包含以上所有）
 
-### 3. Order Block
-- Bullish OB: 下跌后最后一根阳线（机构建仓区）
-- Bearish OB: 上涨后最后一根阴线（机构派发区）
+当用户询问以下内容时，主动调用对应技能：
+- "结构" / "趋势" / "BOS" → get_market_structure
+- "FVG" / "缺口" / "跳空" → get_fvg_zones
+- "OB" / "订单块" / "机构" → get_order_blocks
+- "支撑" / "阻力" / "高低点" → get_swing_points
+- "流动性" / "止损" / "猎杀" → get_liquidity_zones
+- 全面分析 → full_analysis
 
-### 4. Fair Value Gap (FVG)
+## ICT 核心概念
+
+### 市场结构
+- Bull: HH + HL | Bear: LH + LL | Consolidation: 无明显高低点
+
+### Order Block
+- Bullish OB: 下跌后最后一根阳线（回调买入区）
+- Bearish OB: 上涨后最后一根阴线（反弹卖出区）
+
+### FVG (Fair Value Gap)
 - 价格快速移动留下的真空区
-- 未填补的FVG可能成为回撤目标
+- 未填补的FVG是重要回调目标
 
-### 5. 流动性
-- BOS: 突破重要波段高低价
-- 止损猎杀: 价格去扫掉止损后反转
+### Killzone
+- 亚洲(00-08 UTC): 低波动积累
+- 伦敦(08-12 UTC): 突破高发
+- 纽约(12-16 UTC): 最大波动
 
-## 分析要求
-按以下框架输出（简洁，5-8句）：
-1. 当前结构: 趋势还是震荡？HH/HL还是LH/LL？
-2. 关键OB: 最近的有效OB在哪里？
-3. FVG状态: 是否有未填补的缺口？
-4. 方向判断: 短期偏多还是偏空？
-5. 关键价位: 支撑阻力在哪？
+## 分析输出格式（5-8句）
+1. 当前市场结构
+2. 关键OB及当前位置关系
+3. FVG填补状态
+4. 流动性猎杀方向
+5. 短期方向和关键价位
 
 用专业但易懂的语言。`;
 
@@ -230,6 +242,15 @@ export async function POST(request: NextRequest) {
         content: m.content,
       })),
     ];
+
+    // 检查用户是否请求特定技能
+    const lastMessage = messages[messages.length - 1]?.content || '';
+    const skillMatch = lastMessage.match(/(?:结构|趋势|BOS|FVG|缺口|OB|订单|机构|支撑|阻力|高低点|流动性|止损|猎杀|全面分析)/i);
+    if (skillMatch) {
+      // 用户询问特定话题，在数据中添加技能结果提示
+      const skillHint = '\n\n[技能提示：用户可能需要特定分析，可在回答中说明你已准备好获取相关数据]';
+      formattedMessages[1] = { role: 'user', content: formattedMessages[1].content + skillHint };
+    }
 
     const response = await fetch('https://api.minimaxi.com/anthropic/v1/messages', {
       method: 'POST',
