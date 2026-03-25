@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
             { role: 'user', content: `分析 BTC 当前行情，时间周期 ${interval}。${marketData}` },
           ],
           system: systemPrompt,
-          max_tokens: 1000,
+          max_tokens: 2000,
         }),
       });
 

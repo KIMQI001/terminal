@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify({
         model: 'MiniMax-M2.7',
         messages: formattedMessages,
-        max_tokens: 500,
+        max_tokens: 2000,
       }),
     });
 
