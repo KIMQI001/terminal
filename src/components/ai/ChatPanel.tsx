@@ -8,7 +8,7 @@ export function ChatPanel() {
   const { messages, isOpen, isLoading, addMessage, clearMessages, setOpen } = useChatStore();
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const isComposingRef = useRef(false);
+  const lastEnterRef = useRef<number>(0);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -49,18 +49,15 @@ export function ChatPanel() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey && !isComposingRef.current) {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      const now = Date.now();
+      if (now - lastEnterRef.current < 500) {
+        // 500ms 内连续按两次 Enter 发送
+        handleSend();
+      }
+      lastEnterRef.current = now;
     }
-  };
-
-  const handleCompositionStart = () => {
-    isComposingRef.current = true;
-  };
-
-  const handleCompositionEnd = () => {
-    isComposingRef.current = false;
   };
 
   if (!isOpen) return null;
@@ -140,9 +137,7 @@ export function ChatPanel() {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            onCompositionStart={handleCompositionStart}
-            onCompositionEnd={handleCompositionEnd}
-            placeholder="输入问题..."
+            placeholder="按两次回车发送..."
             className="flex-1 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
           />
           <button
