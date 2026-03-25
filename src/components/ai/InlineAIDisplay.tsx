@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { Sparkles, X, RefreshCw, ChevronDown, ChevronUp, Move } from 'lucide-react';
+import { useChartStore } from '@/stores/chartStore';
 
 interface InlineAIDisplayProps {
   symbol?: string;
-  timeframe?: string;
 }
 
 interface AIData {
@@ -14,7 +14,9 @@ interface AIData {
   signal?: 'bullish' | 'bearish' | 'neutral';
 }
 
-export function InlineAIDisplay({ symbol = 'BTC', timeframe = '15m' }: InlineAIDisplayProps) {
+export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
+  const timeframeRef = useRef('15m');
+  const { timeframe, setTimeframe } = useChartStore();
   const [isVisible, setIsVisible] = useState(true);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -25,13 +27,18 @@ export function InlineAIDisplay({ symbol = 'BTC', timeframe = '15m' }: InlineAID
   const [isDragging, setIsDragging] = useState(false);
   const dragRef = useRef<{ startX: number; startY: number; startPosX: number; startPosY: number } | null>(null);
 
+  // 同步 timeframe 到 ref
+  useEffect(() => {
+    timeframeRef.current = timeframe;
+  }, [timeframe]);
+
   const fetchAnalysis = async () => {
     setIsLoading(true);
     try {
       const response = await fetch('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'analyze', symbol, interval: timeframe, dingtalk: false }),
+        body: JSON.stringify({ action: 'analyze', symbol, interval: timeframeRef.current, dingtalk: false }),
       });
       const result = await response.json();
       if (result.success) {

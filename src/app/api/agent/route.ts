@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
         const klineRes = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=${interval}&limit=20`);
         const klines = await klineRes.json();
 
-        // 解析最近5根K线
+        // 解析最近20根K线
         interface KLine {
           time: string;
           open: string;
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
           low: string;
           close: string;
         }
-        const recentKlines: KLine[] = klines.slice(-5).map((k: [number, string, string, string, string, string, number, number, number, number, number, number]) => ({
+        const recentKlines: KLine[] = klines.slice(-20).map((k: [number, string, string, string, string, string, number, number, number, number, number, number]) => ({
           time: new Date(k[0]).toLocaleString('zh-CN'),
           open: parseFloat(k[1]).toFixed(2),
           high: parseFloat(k[2]).toFixed(2),
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
           close: parseFloat(k[4]).toFixed(2),
         }));
 
-        marketData = `\n\n【当前市场数据】\n当前价格: $${currentPrice}\n\n最近5根${interval} K线:\n${recentKlines.map((k: KLine) => `${k.time} | 开:${k.open} 高:${k.high} 低:${k.low} 收:${k.close}`).join('\n')}`;
+        marketData = `\n\n【当前市场数据】\n当前价格: $${currentPrice}\n\n最近20根${interval} K线:\n${recentKlines.map((k: KLine) => `${k.time} | 开:${k.open} 高:${k.high} 低:${k.low} 收:${k.close}`).join('\n')}`;
       } catch (e) {
         marketData = '\n\n无法获取市场数据，请参考当前价格信息。';
       }
