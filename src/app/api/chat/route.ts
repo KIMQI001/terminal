@@ -221,6 +221,10 @@ ${formatLiquidity(candles)}
 
     const systemPrompt = `你是ICT（Inner Circle Trader）方法论的专业分析师，精通BTC日内和波段交易。
 
+## 数据已提供
+下方用户消息中包含了 BTC 实时K线数据（200根）和 ICT 分析结果。
+你只需要基于这些数据进行专业分析，不需要也不应该说自己无法获取数据。
+
 ## ICT 核心概念
 
 ### 市场结构
@@ -246,15 +250,19 @@ ${formatLiquidity(candles)}
 4. 流动性猎杀方向
 5. 短期方向和关键价位
 
-用专业但易懂的语言。`;
+用专业但易懂的语言。不要说自己无法获取数据，数据已经在消息中提供。`;
+
+    // 构建消息：把数据注入到用户的最新消息中
+    const lastUserMessage = messages.length > 0 ? messages[messages.length - 1].content : 'BTC现在什么情况';
+    const userMessageWithData = `${lastUserMessage}\n\n【K线数据】\n${skillData}`;
 
     const formattedMessages = [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: `请分析 BTC 当前行情。\n\n${skillData}` },
-      ...messages.map((m: { role: string; content: string }) => ({
+      ...messages.slice(0, -1).map((m: { role: string; content: string }) => ({
         role: m.role,
         content: m.content,
       })),
+      { role: 'user', content: userMessageWithData },
     ];
 
     const response = await fetch('https://api.minimaxi.com/anthropic/v1/messages', {
