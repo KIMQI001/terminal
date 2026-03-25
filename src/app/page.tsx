@@ -6,6 +6,10 @@ import { StatusBar } from "@/components/layout/StatusBar";
 import { TradingChart } from "@/components/chart/TradingChart";
 import { TradePanel } from "@/components/trading/TradePanel";
 import { AuthGuard } from "@/components/auth/AuthGuard";
+import { ChatPanel } from "@/components/ai/ChatPanel";
+import { InlineAIDisplay } from "@/components/ai/InlineAIDisplay";
+import { useChatStore } from "@/stores/chatStore";
+import { MessageSquare } from "lucide-react";
 
 // 横屏提示组件
 function LandscapePrompt() {
@@ -24,6 +28,7 @@ function LandscapePrompt() {
 
 export default function Home() {
   const [isLandscape, setIsLandscape] = useState(true);
+  const { isOpen: isChatOpen, setOpen: setChatOpen } = useChatStore();
 
   useEffect(() => {
     const checkWidth = () => {
@@ -43,10 +48,23 @@ export default function Home() {
         <main className="flex-1 flex overflow-hidden">
           <div className="flex-1 overflow-hidden">
             <TradingChart />
+            <InlineAIDisplay />
           </div>
           <TradePanel />
         </main>
         <StatusBar />
+
+        {/* 悬浮聊天按钮 */}
+        {!isChatOpen && (
+          <button
+            onClick={() => setChatOpen(true)}
+            className="fixed bottom-20 right-4 w-14 h-14 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center z-50 transition-all hover:scale-105"
+          >
+            <MessageSquare className="w-6 h-6" />
+          </button>
+        )}
+
+        <ChatPanel />
       </div>
     </AuthGuard>
   );

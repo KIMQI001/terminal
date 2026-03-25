@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User, Maximize2, Minimize2, BarChart3, Building2, Layers } from "lucide-react";
+import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User, Maximize2, Minimize2, BarChart3, Building2, Layers, Bot } from "lucide-react";
 import { MTFPanel } from "@/components/chart/MTFPanel";
 import { DailyHLPanel } from "@/components/chart/DailyHLPanel";
 import Link from "next/link";
@@ -250,6 +250,18 @@ export function Header() {
           >
             <BarChart3 className="w-3 h-3 mr-1.5" />
             分析
+          </Button>
+        </Link>
+
+        {/* AI 助手按钮 */}
+        <Link href="/ai">
+          <Button
+            variant="outline"
+            size="sm"
+            title="AI 助手"
+          >
+            <Bot className="w-3 h-3 mr-1.5" />
+            AI
           </Button>
         </Link>
 
