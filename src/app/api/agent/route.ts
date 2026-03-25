@@ -16,57 +16,235 @@ export async function GET() {
   });
 }
 
+// K线数据
+interface KLine {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+// ICT 概念检测
+interface ICTData {
+  swingHighs: { time: string; price: number }[];
+  swingLows: { time: string; price: number }[];
+  fvgBullish: { time: string; high: number; low: number }[];
+  fvgBearish: { time: string; high: number; low: number }[];
+  orderBlocks: { time: string; price: number; side: 'bull' | 'bear'; strength: number }[];
+  mitigationBlocks: { time: string; price: number; side: 'bull' | 'bear' }[];
+}
+
+// 检测 Swing Points
+function detectSwingPoints(klines: KLine[], lookback: number = 5): { highs: { time: string; price: number }[]; lows: { time: string; price: number }[] } {
+  const highs: { time: string; price: number }[] = [];
+  const lows: { time: string; price: number }[] = [];
+
+  for (let i = lookback; i < klines.length - lookback; i++) {
+    const isHigh = klines.slice(i - lookback, i + lookback + 1).every((k, idx) => {
+      if (idx === lookback) return true;
+      return k.high <= klines[i].high;
+    });
+    if (isHigh) highs.push({ time: klines[i].time, price: klines[i].high });
+
+    const isLow = klines.slice(i - lookback, i + lookback + 1).every((k, idx) => {
+      if (idx === lookback) return true;
+      return k.low >= klines[i].low;
+    });
+    if (isLow) lows.push({ time: klines[i].time, price: klines[i].low });
+  }
+
+  return { highs, lows };
+}
+
+// 检测 FVG (Fair Value Gap)
+function detectFVG(klines: KLine[]): { bullish: { time: string; high: number; low: number }[]; bearish: { time: string; high: number; low: number }[] } {
+  const bullish: { time: string; high: number; low: number }[] = [];
+  const bearish: { time: string; high: number; low: number }[] = [];
+
+  for (let i = 2; i < klines.length; i++) {
+    const prev = klines[i - 2];
+    const curr = klines[i];
+    const mid = klines[i - 1];
+
+    // 阳阴阴 bullish FVG: 第一根阳线，中间阴线向上跳空
+    if (prev.close > prev.open && curr.close < curr.open) {
+      if (mid.low > prev.high) {
+        bullish.push({ time: mid.time, high: mid.high, low: mid.low });
+      }
+    }
+
+    // 阴阳阳 bearish FVG: 第一根阴线，中间阳线向下跳空
+    if (prev.close < prev.open && curr.close > curr.open) {
+      if (mid.high < prev.low) {
+        bearish.push({ time: mid.time, high: mid.high, low: mid.low });
+      }
+    }
+  }
+
+  return { bullish, bearish };
+}
+
+// 检测 Order Block (最后一个同色蜡烛作为 OB)
+function detectOrderBlocks(klines: KLine[]): { time: string; price: number; side: 'bull' | 'bear'; strength: number }[] {
+  const blocks: { time: string; price: number; side: 'bull' | 'bear'; strength: number }[] = [];
+  let consecutive = 1;
+
+  for (let i = 1; i < klines.length; i++) {
+    const prev = klines[i - 1];
+    const curr = klines[i];
+    const sameDirection = (curr.close > curr.open) === (prev.close > prev.open);
+
+    if (sameDirection) {
+      consecutive++;
+    } else {
+      // 方向改变，统计连续同色蜡烛的数量和均值
+      if (consecutive >= 1) {
+        const sumHigh = klines.slice(i - consecutive, i).reduce((s, k) => s + k.high, 0);
+        const sumLow = klines.slice(i - consecutive, i).reduce((s, k) => s + k.low, 0);
+        const avgPrice = prev.close > prev.open
+          ? (sumLow / consecutive + sumHigh / consecutive) / 2  // bull OB 取高低均值
+          : (sumLow / consecutive + sumHigh / consecutive) / 2; // bear OB
+
+        blocks.push({
+          time: klines[i - consecutive].time,
+          price: parseFloat(avgPrice.toFixed(2)),
+          side: prev.close > prev.open ? 'bull' : 'bear',
+          strength: consecutive,
+        });
+      }
+      consecutive = 1;
+    }
+  }
+
+  return blocks;
+}
+
+// 检测 Mitigation Block (价格被拒绝的区域)
+function detectMitigationBlocks(klines: KLine[], recentCount: number = 10): { time: string; price: number; side: 'bull' | 'bear' }[] {
+  const blocks: { time: string; price: number; side: 'bull' | 'bear' }[] = [];
+  const recent = klines.slice(-recentCount);
+
+  for (let i = 1; i < recent.length; i++) {
+    if (recent[i].close > recent[i].open && recent[i - 1].close < recent[i - 1].close) {
+      // 向上涨，但前一根是阴线且收盘在低位 - 可能是 bull MB
+      if (recent[i].low < recent[i - 1].low) {
+        blocks.push({ time: recent[i].time, price: recent[i].low, side: 'bull' });
+      }
+    }
+    if (recent[i].close < recent[i].open && recent[i - 1].close > recent[i - 1].open) {
+      // 向下跌，但前一根是阳线 - 可能是 bear MB
+      if (recent[i].high > recent[i - 1].high) {
+        blocks.push({ time: recent[i].time, price: recent[i].high, side: 'bear' });
+      }
+    }
+  }
+
+  return blocks;
+}
+
+// 获取市场数据
+async function getICTData(symbol: string, interval: string): Promise<{ price: string; klines: KLine[]; ict: ICTData }> {
+  // 获取当前价格
+  const priceRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}USDT`);
+  const priceData = await priceRes.json();
+  const currentPrice = priceData.price || '未知';
+
+  // 获取K线 - 200根
+  const klineRes = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=${interval}&limit=200`);
+  const klinesRaw = await klineRes.json();
+
+  // 解析K线
+  const klines: KLine[] = klinesRaw.map((k: [number, string, string, string, string, string, number]) => ({
+    time: new Date(k[0]).toLocaleString('zh-CN'),
+    open: parseFloat(k[1]),
+    high: parseFloat(k[2]),
+    low: parseFloat(k[3]),
+    close: parseFloat(k[4]),
+  }));
+
+  // 检测 ICT 概念
+  const swingPoints = detectSwingPoints(klines, 5);
+  const fvg = detectFVG(klines);
+  const orderBlocks = detectOrderBlocks(klines);
+  const mitigationBlocks = detectMitigationBlocks(klines, 20);
+
+  return {
+    price: currentPrice,
+    klines,
+    ict: {
+      swingHighs: swingPoints.highs.slice(-10),
+      swingLows: swingPoints.lows.slice(-10),
+      fvgBullish: fvg.bullish.slice(-5),
+      fvgBearish: fvg.bearish.slice(-5),
+      orderBlocks: orderBlocks.slice(-10),
+      mitigationBlocks: mitigationBlocks.slice(-10),
+    },
+  };
+}
+
+// 格式化 ICT 数据给 AI
+function formatICTData(data: { price: string; klines: KLine[]; ict: ICTData }, interval: string): string {
+  const { ict } = data;
+  const recentKlines = data.klines.slice(-20);
+
+  let msg = `【实时 ICT 分析数据】
+当前价格: $${data.price}
+时间周期: ${interval}
+
+【最近20根K线】
+${recentKlines.map(k => `${k.time.slice(-8)} | 收:${k.close.toFixed(2)} 高:${k.high.toFixed(2)} 低:${k.low.toFixed(2)}`).join('\n')}
+
+【Swing Points】(最近10个)
+高点: ${ict.swingHighs.map(s => `$${s.price.toFixed(2)}`).join(', ') || '无'}
+低点: ${ict.swingLows.map(s => `$${s.price.toFixed(2)}`).join(', ') || '无'}
+
+【Bullish FVG】(向上跳空) ${ict.fvgBullish.length}个
+${ict.fvgBullish.map(f => `${f.time.slice(-8)} 区间:$${f.low.toFixed(2)}-${f.high.toFixed(2)}`).join('\n') || '无'}
+
+【Bearish FVG】(向下跳空) ${ict.fvgBearish.length}个
+${ict.fvgBearish.map(f => `${f.time.slice(-8)} 区间:$${f.low.toFixed(2)}-${f.high.toFixed(2)}`).join('\n') || '无'}
+
+【Order Blocks】(供需逆转区) ${ict.orderBlocks.length}个
+${ict.orderBlocks.map(ob => `${ob.time.slice(-8)} $${ob.price.toFixed(2)} ${ob.side === 'bull' ? '多头OB' : '空头OB'} (强度:${ob.strength})`).join('\n') || '无'}
+
+【Mitigation Blocks】(价格被拒区) ${ict.mitigationBlocks.length}个
+${ict.mitigationBlocks.map(mb => `${mb.time.slice(-8)} $${mb.price.toFixed(2)} ${mb.side === 'bull' ? '向上mitigation' : '向下mitigation'}`).join('\n') || '无'}
+`;
+
+  return msg;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { action, symbol = 'BTC', interval = '15m', dingtalk = true } = body;
 
     if (action === 'analyze') {
-      // 获取实时市场价格
       let marketData = '';
       try {
-        // 获取当前价格
-        const priceRes = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}USDT`);
-        const priceData = await priceRes.json();
-        const currentPrice = priceData.price || '未知';
-
-        // 获取最近K线
-        const klineRes = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=${interval}&limit=20`);
-        const klines = await klineRes.json();
-
-        // 解析最近20根K线
-        interface KLine {
-          time: string;
-          open: string;
-          high: string;
-          low: string;
-          close: string;
-        }
-        const recentKlines: KLine[] = klines.slice(-20).map((k: [number, string, string, string, string, string, number, number, number, number, number, number]) => ({
-          time: new Date(k[0]).toLocaleString('zh-CN'),
-          open: parseFloat(k[1]).toFixed(2),
-          high: parseFloat(k[2]).toFixed(2),
-          low: parseFloat(k[3]).toFixed(2),
-          close: parseFloat(k[4]).toFixed(2),
-        }));
-
-        marketData = `\n\n【当前市场数据】\n当前价格: $${currentPrice}\n\n最近20根${interval} K线:\n${recentKlines.map((k: KLine) => `${k.time} | 开:${k.open} 高:${k.high} 低:${k.low} 收:${k.close}`).join('\n')}`;
+        const ictData = await getICTData(symbol, interval);
+        marketData = formatICTData(ictData, interval);
       } catch (e) {
+        console.error('[Agent API] Failed to get market data:', e);
         marketData = '\n\n无法获取市场数据，请参考当前价格信息。';
       }
 
-      // 构建 ICT 分析请求
-      const systemPrompt = `你是专业的加密货币交易分析师，使用ICT方法分析BTC市场。
+      const systemPrompt = `你是专业的加密货币交易分析师，精通ICT方法分析BTC市场。
 
-分析内容包括：
-1. 当前价格位置（相对重要支撑阻力）
-2. 市场结构（BOS/CHoCH）
-3. 订单块（Order Block）
-4. 公平价值gap（FVG）
-5. 流动性区域
-6. 关键价位
+ICT核心概念：
+- Swing High/Low: 波段高低价，是关键支撑阻力
+- Order Block (OB): 价格突破前的最后一根同色蜡烛，代表机构建仓区
+- Fair Value Gap (FVG): 跳空区域，代表流动性真空区，价格往往回填补缺
+- Mitigation Block (MB): 价格被拒绝的区域，可能成为新的支撑阻力
 
-回复格式：简洁专业，3-5句话概括重点。`;
+分析任务：
+1. 根据Swing High/Low判断当前市场结构（更高高点/更低低点=趋势，持续=震荡）
+2. 识别最近的OB，判断当前回调是否可能企稳
+3. 检查FVG是否被填补
+4. 给出关键价位和方向判断
+
+回复要求：简洁专业，3-5句话，直接给出结论。`;
 
       const response = await fetch('https://api.minimaxi.com/anthropic/v1/messages', {
         method: 'POST',
@@ -78,7 +256,7 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify({
           model: 'MiniMax-M2.7',
           messages: [
-            { role: 'user', content: `分析 BTC 当前行情，时间周期 ${interval}。${marketData}` },
+            { role: 'user', content: `分析 BTC 当前行情。\n\n${marketData}` },
           ],
           system: systemPrompt,
           max_tokens: 4000,
@@ -92,7 +270,6 @@ export async function POST(request: NextRequest) {
       }
 
       const result = await response.json();
-      // MiniMax M2.7 返回格式: content 数组中 type="text" 的是回复
       const textContent = result.content?.find((c: { type: string; text?: string }) => c.type === 'text');
       const analysis = textContent?.text || '无法生成分析';
 
@@ -124,6 +301,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
   } catch (error) {
     console.error('[Agent API] Error:', error);
-    return NextResponse.json({ error: '服务器错误' }, { status:  500 });
+    return NextResponse.json({ error: '服务器错误' }, { status: 500 });
   }
 }
