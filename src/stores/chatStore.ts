@@ -1,8 +1,8 @@
 /**
  * Chat Store - AI 对话状态管理
+ * 注意：不使用 persist，刷新页面会清空对话
  */
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 
 export interface ChatMessage {
   id: string;
@@ -24,29 +24,23 @@ interface ChatState {
 }
 
 export const useChatStore = create<ChatState>()(
-  persist(
-    (set, get) => ({
-      messages: [],
-      isOpen: false,
-      isLoading: false,
+  (set, get) => ({
+    messages: [],
+    isOpen: false,
+    isLoading: false,
 
-      addMessage: (role, content) => {
-        const message: ChatMessage = {
-          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          role,
-          content,
-          timestamp: Date.now(),
-        };
-        set({ messages: [...get().messages, message] });
-      },
+    addMessage: (role, content) => {
+      const message: ChatMessage = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        role,
+        content,
+        timestamp: Date.now(),
+      };
+      set({ messages: [...get().messages, message] });
+    },
 
-      clearMessages: () => set({ messages: [] }),
-      setOpen: (open) => set({ isOpen: open }),
-      setLoading: (loading) => set({ isLoading: loading }),
-    }),
-    {
-      name: 'chat-storage',
-      partialize: (state) => ({ messages: state.messages }),
-    }
-  )
+    clearMessages: () => set({ messages: [] }),
+    setOpen: (open) => set({ isOpen: open }),
+    setLoading: (loading) => set({ isLoading: loading }),
+  })
 );
