@@ -243,7 +243,7 @@ export async function POST(request: NextRequest) {
           aiAnalysis = textContent?.text || '';
         }
 
-        const separator = '\n═══════════════════\n';
+        const separator = '\n═══════════════════════════════════\n';
         const fullAnalysis = fvg25Msg + separator + aiAnalysis;
 
         return NextResponse.json({
