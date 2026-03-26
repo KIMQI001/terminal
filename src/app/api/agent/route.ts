@@ -83,16 +83,28 @@ async function getMultiTimeframeFVG25(symbol: string): Promise<{
       const openBull = fvgs.filter(f => f.direction === 'bull' && f.fillPercent < 25);
       const openBear = fvgs.filter(f => f.direction === 'bear' && f.fillPercent < 25);
 
-      // 取最新的3个
-      [...openBull, ...openBear].slice(-3).forEach(f => {
+      // 每个周期只取最新的看涨和看跌各一个
+      const lastBull = openBull[openBull.length - 1];
+      const lastBear = openBear[openBear.length - 1];
+
+      if (lastBull) {
         opportunities.push({
           interval,
-          direction: f.direction,
-          priceRange: `$${f.low.toFixed(2)}-${f.high.toFixed(2)}`,
-          fillPercent: f.fillPercent,
-          age: f.time,
+          direction: 'bull',
+          priceRange: `$${lastBull.low.toFixed(2)}-${lastBull.high.toFixed(2)}`,
+          fillPercent: lastBull.fillPercent,
+          age: lastBull.time,
         });
-      });
+      }
+      if (lastBear) {
+        opportunities.push({
+          interval,
+          direction: 'bear',
+          priceRange: `$${lastBear.low.toFixed(2)}-${lastBear.high.toFixed(2)}`,
+          fillPercent: lastBear.fillPercent,
+          age: lastBear.time,
+        });
+      }
     } catch (e) {
       // 忽略错误继续下一个周期
     }
