@@ -156,74 +156,10 @@ export async function POST(request: NextRequest) {
       const fvg25Data = await getMultiTimeframeFVG25(symbol);
       const fvg25Msg = formatFVG25Data(fvg25Data);
 
-      const systemPrompt = `你是ICT（Inner Circle Trader）方法论的专业分析师，专注于寻找FVG（Fair Value Gap）填补<25%的交易机会。
-
-## FVG 核心概念
-- FVG 是价格快速移动留下的真空区
-- 填补<25%的FVG表示接近填补完毕，可能是高概率的回调目标
-- 看涨FVG：价格向下快速移动后留下的向上跳空区域
-- 看跌FVG：价格向上快速移动后留下的向下跳空区域
-
-## 数据已提供
-下方提供了 BTC 各周期（1m/5m/15m/1h/4h/1d）的 FVG 数据。
-你只需要基于这些数据进行分析，不需要也不应该说自己无法获取数据。
-
-## 分析要求
-简洁输出（3-5句）：
-1. 当前价格位置
-2. 最有价值的FVG机会（哪个周期、什么方向、价格区间）
-3. 短期方向判断
-
-用专业但易懂的语言。`;
-
-      const response = await fetch('https://api.minimaxi.com/anthropic/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': MINIMAX_API_KEY,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'MiniMax-M2.7',
-          messages: [
-            { role: 'user', content: `分析 BTC FVG 填补<25% 机会。\n\n${fvg25Msg}` },
-          ],
-          system: systemPrompt,
-          max_tokens: 2000,
-        }),
-      });
-
-      if (!response.ok) {
-        const error = await response.text();
-        console.error('[Agent API] MiniMax error:', error);
-        return NextResponse.json({ error: 'AI服务请求失败' }, { status: 500 });
-      }
-
-      const result = await response.json();
-      const textContent = result.content?.find((c: { type: string; text?: string }) => c.type === 'text');
-      const analysis = textContent?.text || '无法生成分析';
-
-      // 钉钉通知
-      if (dingtalk && DINGTALK_WEBHOOK) {
-        try {
-          await fetch(DINGTALK_WEBHOOK, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              msgtype: 'text',
-              text: {
-                content: `【BTC FVG25 分析】\n${analysis}`,
-              },
-            }),
-          });
-        } catch (notifyError) {
-          console.error('[Agent API] DingTalk notification failed:', notifyError);
-        }
-      }
-
+      // 直接返回格式化列表，不经过 AI
       return NextResponse.json({
         success: true,
-        analysis,
+        analysis: fvg25Msg,
         fvgData: fvg25Data,
         timestamp: new Date().toISOString(),
       });
