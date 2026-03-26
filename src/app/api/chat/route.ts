@@ -237,7 +237,7 @@ export async function POST(request: NextRequest) {
     const lastMessage = messages[messages.length - 1]?.content || '';
     const intents = detectUserIntent(lastMessage);
 
-    // 根据意图构建数据
+    // 根据意图构建数据 - 默认包含所有ICT数据
     let skillData = '';
 
     if (intents.includes('full')) {
@@ -247,17 +247,15 @@ ${getBasicICTData(candles, currentPrice)}
 ${formatLiquidity(candles)}
 `;
     } else {
-      // 基础数据 + 按需添加专项
+      // 基础数据 + 多周期FVG（默认注入）
       skillData = getBasicICTData(candles, currentPrice);
+
+      // 默认添加多周期FVG分析
+      const mtfFvg = await getMultiTimeframeFVG(symbol);
+      skillData += `\n${mtfFvg}`;
 
       if (intents.includes('structure')) {
         skillData += `\n${formatStructure(candles)}`;
-      }
-      if (intents.includes('fvg')) {
-        skillData += `\n${formatFVG(candles)}`;
-        // 添加多周期FVG分析
-        const mtfFvg = await getMultiTimeframeFVG(symbol);
-        skillData += `\n${mtfFvg}`;
       }
       if (intents.includes('orderblocks')) {
         skillData += `\n${formatOB(candles)}`;
@@ -270,38 +268,32 @@ ${formatLiquidity(candles)}
       }
     }
 
-    const systemPrompt = `你是ICT（Inner Circle Trader）方法论的专业分析师，精通BTC日内和波段交易。
+    const systemPrompt = `你是ICT（Inner Circle Trader）方法论的专业分析师，专注于BTC的FVG（Fair Value Gap）分析。
 
 ## 数据已提供
-下方用户消息中包含了 BTC 实时K线数据（200根）和 ICT 分析结果。
+下方用户消息中包含了 BTC 各周期（1m/5m/15m/1h/4h/1d）的 FVG 数据，包含多空方向、价格区间和填补百分比。
 你只需要基于这些数据进行专业分析，不需要也不应该说自己无法获取数据。
 
-## ICT 核心概念
+## ICT FVG 核心概念
 
-### 市场结构
-- Bull: HH + HL | Bear: LH + LL | 中性: 无明显结构
+### FVG 类型
+- 🟢 绿色FVG：看涨FVG（价格向下快速移动后留下的向上跳空区域）
+- 🔴 红色FVG：看跌FVG（价格向上快速移动后留下的向下跳空区域）
+- 🔵 蓝色FVG：看涨且离当前价格最近
+- 🟠 橙色FVG：看跌且离当前价格最近
 
-### Order Block
-- Bullish OB: 下跌后最后一根阳线（机构建仓区）- 回调买入目标
-- Bearish OB: 上涨后最后一根阴线（机构派发区）- 反弹卖出目标
+### 填补百分比
+- <25%：接近填补完毕，高概率回调目标
+- 25-75%：部分填补
+- >75%：即将填补完毕
+- 100%：已完全填补
 
-### FVG (Fair Value Gap)
-- 价格快速移动留下的真空区
-- 未填补的FVG是重要回调目标
+### 分析要点
+1. 当前价格处于哪个FVG区间
+2. 最近的FVG机会及方向
+3. 短期操作建议（回调买入/反弹卖出）
 
-### Killzone
-- 亚洲(00-08 UTC): 低波动
-- 伦敦(08-12 UTC): 突破高发
-- 纽约(12-16 UTC): 最大波动
-
-## 分析输出格式（5-8句）
-1. 当前市场结构（HH/HL/LH/LL）
-2. 关键OB及当前位置关系
-3. FVG填补状态
-4. 流动性猎杀方向
-5. 短期方向和关键价位
-
-用专业但易懂的语言。不要说自己无法获取数据，数据已经在消息中提供。`;
+用专业但易懂的语言，简洁回答。`;
 
     // 构建消息：把数据注入到用户的最新消息中
     const lastUserMessage = messages.length > 0 ? messages[messages.length - 1].content : 'BTC现在什么情况';
