@@ -197,13 +197,70 @@ export async function POST(request: NextRequest) {
       const fvg25Data = await getMultiTimeframeFVG25(symbol);
       const fvg25Msg = formatFVG25Data(fvg25Data);
 
-      // 直接返回格式化列表，不经过 AI
-      return NextResponse.json({
-        success: true,
-        analysis: fvg25Msg,
-        fvgData: fvg25Data,
-        timestamp: new Date().toISOString(),
-      });
+      // 让 AI 分析 FVG 数据
+      const systemPrompt = `你是ICT（Inner Circle Trader）方法论的专业分析师，专注于FVG分析。
+
+## FVG 核心概念
+- FVG 是价格快速移动留下的真空区
+- 填补<25%的FVG表示接近填补完毕，可能是高概率的回调目标
+- 看涨FVG（🟢/🔵）：价格向下快速移动后留下的向上跳空区域
+- 看跌FVG（🔴/🟠）：价格向上快速移动后留下的向下跳空区域
+- 🔵/🟠 表示离当前价格最近的FVG
+
+## 数据已提供
+下方提供了 BTC 各周期的 FVG 数据，包含多空方向、价格区间和填补百分比。
+
+## 分析要求
+简洁输出（2-3句）：
+1. 当前价格处于什么位置（discount/premium）
+2. 最近的FVG机会及方向判断
+3. 短期操作建议
+
+用专业但易懂的语言。`;
+
+      try {
+        const response = await fetch('https://api.minimaxi.com/anthropic/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': MINIMAX_API_KEY,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: 'MiniMax-M2.7',
+            messages: [
+              { role: 'user', content: `分析以下 FVG 数据：\n\n${fvg25Msg}` },
+            ],
+            system: systemPrompt,
+            max_tokens: 1500,
+          }),
+        });
+
+        let aiAnalysis = '';
+        if (response.ok) {
+          const result = await response.json();
+          const textContent = result.content?.find((c: { type: string; text?: string }) => c.type === 'text');
+          aiAnalysis = textContent?.text || '';
+        }
+
+        const separator = '\n═══════════════════\n';
+        const fullAnalysis = fvg25Msg + separator + aiAnalysis;
+
+        return NextResponse.json({
+          success: true,
+          analysis: fullAnalysis,
+          fvgData: fvg25Data,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (e) {
+        // AI 分析失败时只返回 FVG 列表
+        return NextResponse.json({
+          success: true,
+          analysis: fvg25Msg,
+          fvgData: fvg25Data,
+          timestamp: new Date().toISOString(),
+        });
+      }
     }
 
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
