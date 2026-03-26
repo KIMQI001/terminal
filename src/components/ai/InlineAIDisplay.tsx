@@ -49,6 +49,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
   }
 
   const fetchAnalysis = async () => {
+    if (!inlineAIEnabled) return;
     setIsLoading(true);
     try {
       const response = await fetch('/api/agent', {
@@ -56,8 +57,12 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'analyze', symbol, interval: timeframeRef.current, dingtalk: false }),
       });
+      if (!response.ok) {
+        console.error('AI analysis failed:', response.status);
+        return;
+      }
       const result = await response.json();
-      if (result.success) {
+      if (result.success && result.analysis) {
         setData({
           analysis: result.analysis,
           timestamp: Date.now(),
@@ -66,7 +71,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
     } catch (error) {
       console.error('AI analysis failed:', error);
     } finally {
-      setIsLoading(false);
+      if (inlineAIEnabled) setIsLoading(false);
     }
   };
 
