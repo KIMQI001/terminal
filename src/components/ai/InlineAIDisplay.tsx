@@ -201,7 +201,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
             </div>
           ) : data ? (
             <>
-              <div className="text-sm leading-relaxed [&_h1]:text-base [&_h2]:text-base [&_h3]:text-sm [&_h4]:text-sm [&_h5]:text-sm [&_h6]:text-sm [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5 [&_strong]:font-semibold [&_em]:italic">
+              <div className="text-sm leading-relaxed font-mono [&_h1]:text-base [&_h2]:text-base [&_h3]:text-sm [&_h4]:text-sm [&_h5]:text-sm [&_h6]:text-sm [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5 [&_strong]:font-semibold [&_em]:italic">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.analysis}</ReactMarkdown>
               </div>
               <div className="mt-2 pt-2 border-t border-[var(--border-color)] flex items-center justify-between">
