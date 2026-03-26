@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { Sparkles, X, RefreshCw, ChevronDown, ChevronUp, Move } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useChartStore } from '@/stores/chartStore';
 import { useAgentStore } from '@/stores/agentStore';
 
@@ -199,7 +201,9 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
             </div>
           ) : data ? (
             <>
-              <p className="text-sm whitespace-pre-wrap leading-relaxed">{data.analysis}</p>
+              <div className="text-sm leading-relaxed [&_h1]:text-base [&_h2]:text-base [&_h3]:text-sm [&_h4]:text-sm [&_h5]:text-sm [&_h6]:text-sm [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5 [&_strong]:font-semibold [&_em]:italic">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.analysis}</ReactMarkdown>
+              </div>
               <div className="mt-2 pt-2 border-t border-[var(--border-color)] flex items-center justify-between">
                 <span className="text-xs text-[var(--text-secondary)]">
                   {formatTime(data.timestamp)}
