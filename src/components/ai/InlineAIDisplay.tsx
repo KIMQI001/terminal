@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Sparkles, X, RefreshCw, ChevronDown, ChevronUp, Move } from 'lucide-react';
 import { useChartStore } from '@/stores/chartStore';
+import { useAgentStore } from '@/stores/agentStore';
 
 interface InlineAIDisplayProps {
   symbol?: string;
@@ -17,6 +18,7 @@ interface AIData {
 export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
   const timeframeRef = useRef('15m');
   const { timeframe, setTimeframe } = useChartStore();
+  const { inlineAIEnabled, setInlineAIEnabled } = useAgentStore();
   const [isVisible, setIsVisible] = useState(true);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -31,6 +33,20 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
   useEffect(() => {
     timeframeRef.current = timeframe;
   }, [timeframe]);
+
+  // 如果开关关闭，不显示
+  if (!inlineAIEnabled) {
+    return (
+      <button
+        onClick={() => setInlineAIEnabled(true)}
+        className="fixed bg-blue-500 text-white px-3 py-2 rounded-lg shadow-lg flex items-center gap-2 z-40 hover:bg-blue-600 transition-colors"
+        style={{ left: position.x, top: position.y }}
+      >
+        <Sparkles className="w-4 h-4" />
+        <span className="text-sm">AI 分析</span>
+      </button>
+    );
+  }
 
   const fetchAnalysis = async () => {
     setIsLoading(true);
@@ -105,7 +121,10 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
   if (!isVisible) {
     return (
       <button
-        onClick={() => setIsVisible(true)}
+        onClick={() => {
+          setIsVisible(true);
+          setInlineAIEnabled(true);
+        }}
         className="fixed bg-blue-500 text-white px-3 py-2 rounded-lg shadow-lg flex items-center gap-2 z-40 hover:bg-blue-600 transition-colors"
         style={{ left: position.x, top: position.y }}
       >
@@ -149,9 +168,16 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
           </button>
           <button
+            onClick={() => setInlineAIEnabled(false)}
+            className="p-1 hover:bg-[var(--bg-primary)] rounded text-green-500"
+            title="关闭AI分析"
+          >
+            <Sparkles className="w-4 h-4" />
+          </button>
+          <button
             onClick={() => setIsVisible(false)}
             className="p-1 hover:bg-[var(--bg-primary)] rounded"
-            title="关闭"
+            title="最小化"
           >
             <X className="w-4 h-4" />
           </button>

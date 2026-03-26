@@ -11,6 +11,7 @@ interface AgentState {
   symbols: string[];
   lastAnalysis: string | null;
   dingtalkEnabled: boolean;
+  inlineAIEnabled: boolean; // AI实时分析开关
 
   // Actions
   setRunning: (running: boolean) => void;
@@ -19,6 +20,7 @@ interface AgentState {
   setSymbols: (symbols: string[]) => void;
   setLastAnalysis: (analysis: string | null) => void;
   setDingtalkEnabled: (enabled: boolean) => void;
+  setInlineAIEnabled: (enabled: boolean) => void;
 }
 
 export const useAgentStore = create<AgentState>()(
@@ -30,6 +32,7 @@ export const useAgentStore = create<AgentState>()(
       symbols: ['BTC'],
       lastAnalysis: null,
       dingtalkEnabled: true,
+      inlineAIEnabled: true, // 默认开启
 
       setRunning: (running) => set({ isRunning: running }),
       setLastRunTime: (time) => set({ lastRunTime: time }),
@@ -37,6 +40,7 @@ export const useAgentStore = create<AgentState>()(
       setSymbols: (symbols) => set({ symbols }),
       setLastAnalysis: (analysis) => set({ lastAnalysis: analysis }),
       setDingtalkEnabled: (enabled) => set({ dingtalkEnabled: enabled }),
+      setInlineAIEnabled: (enabled) => set({ inlineAIEnabled: enabled }),
     }),
     {
       name: 'agent-storage',
