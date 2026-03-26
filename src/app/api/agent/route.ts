@@ -64,7 +64,7 @@ async function getMultiTimeframeFVG25(symbol: string): Promise<{
     age: string;
   }>;
 }> {
-  const intervals = ['1m', '5m', '15m', '1h', '4h', '1d'];
+  const intervals = ['5m', '15m', '1h', '4h', '1d'];
   const { currentPrice } = await getCandles(symbol, '1m');
   const opportunities: Array<{
     interval: string;
@@ -130,7 +130,8 @@ function formatFVG25Data(data: { intervals: string[]; currentPrice: number; oppo
   for (const [interval, opps] of Object.entries(byInterval)) {
     for (const opp of opps.slice(-2)) {
       const circle = opp.direction === 'bull' ? '🟢' : '🔴';
-      msg += `${interval} ${circle} ${opp.direction === 'bull' ? '多' : '空'} ${opp.priceRange} (${opp.fillPercent.toFixed(0)}%已填补)\n`;
+      const paddedInterval = interval.padEnd(3);
+      msg += `${paddedInterval} ${circle} ${opp.direction === 'bull' ? '多' : '空'} ${opp.priceRange} (${opp.fillPercent.toFixed(0)}%已填补)\n`;
     }
   }
 
