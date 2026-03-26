@@ -104,6 +104,54 @@ ${unfilledBull.slice(-3).map(f => `  $${f.low.toFixed(2)}-${f.high.toFixed(2)} (
 ${unfilledBear.slice(-3).map(f => `  $${f.low.toFixed(2)}-${f.high.toFixed(2)} (${f.fillPercent.toFixed(0)}%已填补)`).join('\n') || '  无'}`;
 }
 
+// 获取多周期 FVG 分析
+async function getMultiTimeframeFVG(symbol: string): Promise<string> {
+  const intervals = ['1m', '5m', '15m', '1h', '4h', '1d'];
+  const currentPrice = parseFloat((await getCandles(symbol, '1m')).currentPrice);
+  let result = '【多周期 FVG 分析 - 填补<25%的机会】\n\n';
+
+  for (const interval of intervals) {
+    try {
+      const { candles } = await getCandles(symbol, interval);
+      const fvgs = detectFVGs(candles);
+
+      // 找填补小于25%的FVG（接近填补完毕）
+      const nearFullBull = fvgs.filter(f => f.direction === 'bull' && f.fillPercent >= 75 && f.fillPercent < 100);
+      const nearFullBear = fvgs.filter(f => f.direction === 'bear' && f.fillPercent >= 75 && f.fillPercent < 100);
+
+      // 完全未填补的
+      const openBull = fvgs.filter(f => f.direction === 'bull' && f.fillPercent < 25);
+      const openBear = fvgs.filter(f => f.direction === 'bear' && f.fillPercent < 25);
+
+      const nearCount = nearFullBull.length + nearFullBear.length;
+      const openCount = openBull.length + openBear.length;
+
+      if (nearCount > 0 || openCount > 0) {
+        result += `【${interval}】当前价格: $${currentPrice.toFixed(2)}\n`;
+
+        if (nearCount > 0) {
+          result += `  ⚠️ 即将填补(${nearCount}个):\n`;
+          [...nearFullBull, ...nearFullBear].slice(-2).forEach(f => {
+            result += `    $${f.low.toFixed(2)}-${f.high.toFixed(2)} ${f.direction === 'bull' ? '多' : '空'} (${f.fillPercent.toFixed(0)}%已填补)\n`;
+          });
+        }
+
+        if (openCount > 0) {
+          result += `  🕐 未填补(${openCount}个):\n`;
+          [...openBull, ...openBear].slice(-2).forEach(f => {
+            result += `    $${f.low.toFixed(2)}-${f.high.toFixed(2)} ${f.direction === 'bull' ? '多' : '空'} (${f.fillPercent.toFixed(0)}%已填补)\n`;
+          });
+        }
+        result += '\n';
+      }
+    } catch (e) {
+      // 忽略错误继续下一个周期
+    }
+  }
+
+  return result || '各周期无明显FVG机会';
+}
+
 // 格式化 OB 分析
 function formatOB(candles: Candle[]): string {
   const obs = detectOrderBlocks(candles);
@@ -207,6 +255,9 @@ ${formatLiquidity(candles)}
       }
       if (intents.includes('fvg')) {
         skillData += `\n${formatFVG(candles)}`;
+        // 添加多周期FVG分析
+        const mtfFvg = await getMultiTimeframeFVG(symbol);
+        skillData += `\n${mtfFvg}`;
       }
       if (intents.includes('orderblocks')) {
         skillData += `\n${formatOB(candles)}`;
