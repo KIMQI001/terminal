@@ -60,18 +60,24 @@ async function getMultiTimeframeFVG25(symbol: string): Promise<{
     interval: string;
     direction: 'bull' | 'bear';
     priceRange: string;
+    priceLow: number;
+    priceHigh: number;
     fillPercent: number;
     age: string;
+    nearest: boolean;
   }>;
 }> {
   const intervals = ['5m', '15m', '1h', '4h', '1d'];
-  const { currentPrice } = await getCandles(symbol, '1m');
+  const { candles: currentCandles, currentPrice } = await getCandles(symbol, '1m');
   const opportunities: Array<{
     interval: string;
     direction: 'bull' | 'bear';
     priceRange: string;
+    priceLow: number;
+    priceHigh: number;
     fillPercent: number;
     age: string;
+    nearest: boolean;
   }> = [];
 
   for (const interval of intervals) {
@@ -92,8 +98,11 @@ async function getMultiTimeframeFVG25(symbol: string): Promise<{
           interval,
           direction: 'bull',
           priceRange: `$${lastBull.low.toFixed(2)}-${lastBull.high.toFixed(2)}`,
+          priceLow: lastBull.low,
+          priceHigh: lastBull.high,
           fillPercent: lastBull.fillPercent,
           age: lastBull.time,
+          nearest: false,
         });
       }
       if (lastBear) {
@@ -101,8 +110,11 @@ async function getMultiTimeframeFVG25(symbol: string): Promise<{
           interval,
           direction: 'bear',
           priceRange: `$${lastBear.low.toFixed(2)}-${lastBear.high.toFixed(2)}`,
+          priceLow: lastBear.low,
+          priceHigh: lastBear.high,
           fillPercent: lastBear.fillPercent,
           age: lastBear.time,
+          nearest: false,
         });
       }
     } catch (e) {
@@ -110,18 +122,46 @@ async function getMultiTimeframeFVG25(symbol: string): Promise<{
     }
   }
 
+  // 计算哪个FVG离当前价格最近
+  let nearestIdx = -1;
+  let nearestDist = Infinity;
+  opportunities.forEach((opp, idx) => {
+    // 计算FVG中点与当前价格的距离
+    const midPrice = (opp.priceLow + opp.priceHigh) / 2;
+    const dist = Math.abs(midPrice - currentPrice);
+    if (dist < nearestDist) {
+      nearestDist = dist;
+      nearestIdx = idx;
+    }
+  });
+  if (nearestIdx >= 0) {
+    opportunities[nearestIdx].nearest = true;
+  }
+
   return { intervals, currentPrice, opportunities };
 }
 
+// FVG机会类型
+interface FVGOpportunity {
+  interval: string;
+  direction: 'bull' | 'bear';
+  priceRange: string;
+  priceLow: number;
+  priceHigh: number;
+  fillPercent: number;
+  age: string;
+  nearest: boolean;
+}
+
 // 格式化 FVG25 数据
-function formatFVG25Data(data: { intervals: string[]; currentPrice: number; opportunities: Array<{ interval: string; direction: 'bull' | 'bear'; priceRange: string; fillPercent: number; age: string }> }): string {
+function formatFVG25Data(data: { intervals: string[]; currentPrice: number; opportunities: FVGOpportunity[] }): string {
   const { currentPrice, opportunities } = data;
 
   let msg = `【FVG 填补<25% 机会分析】\n`;
   msg += `当前价格: $${currentPrice.toFixed(2)}\n\n`;
 
   // 按周期分组
-  const byInterval: Record<string, typeof opportunities> = {};
+  const byInterval: Record<string, FVGOpportunity[]> = {};
   for (const opp of opportunities) {
     if (!byInterval[opp.interval]) byInterval[opp.interval] = [];
     byInterval[opp.interval].push(opp);
@@ -129,9 +169,13 @@ function formatFVG25Data(data: { intervals: string[]; currentPrice: number; oppo
 
   for (const [interval, opps] of Object.entries(byInterval)) {
     for (const opp of opps.slice(-2)) {
-      const circle = opp.direction === 'bull' ? '🟢' : '🔴';
+      // 最近的那个显示不同颜色
+      const circle = opp.nearest
+        ? (opp.direction === 'bull' ? '🔵' : '🟠')
+        : (opp.direction === 'bull' ? '🟢' : '🔴');
       const paddedInterval = interval.padEnd(3);
-      msg += `${paddedInterval} ${circle} ${opp.direction === 'bull' ? '多' : '空'} ${opp.priceRange} (${opp.fillPercent.toFixed(0)}%已填补)\n`;
+      const marker = opp.nearest ? '*' : '';
+      msg += `${paddedInterval} ${circle} ${opp.direction === 'bull' ? '多' : '空'} ${opp.priceRange} (${opp.fillPercent.toFixed(0)}%已填补)${marker}\n`;
     }
   }
 
