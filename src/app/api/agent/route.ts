@@ -117,10 +117,8 @@ async function getMultiTimeframeFVG25(symbol: string): Promise<{
 function formatFVG25Data(data: { intervals: string[]; currentPrice: number; opportunities: Array<{ interval: string; direction: 'bull' | 'bear'; priceRange: string; fillPercent: number; age: string }> }): string {
   const { currentPrice, opportunities } = data;
 
-  let msg = `【FVG 填补<25% 机会分析】
-当前价格: $${currentPrice.toFixed(2)}
-
-`;
+  let msg = `【FVG 填补<25% 机会分析】\n`;
+  msg += `当前价格: $${currentPrice.toFixed(2)}\n\n`;
 
   // 按周期分组
   const byInterval: Record<string, typeof opportunities> = {};
@@ -132,10 +130,10 @@ function formatFVG25Data(data: { intervals: string[]; currentPrice: number; oppo
   for (const [interval, opps] of Object.entries(byInterval)) {
     msg += `【${interval}】\n`;
     for (const opp of opps.slice(-2)) {
-      const emoji = opp.direction === 'bull' ? '📈' : '📉';
-      const type = opp.direction === 'bull' ? '看涨' : '看跌';
-      msg += `  ${emoji} ${type} FVG: ${opp.priceRange} (填补${opp.fillPercent.toFixed(0)}%)\n`;
+      const circle = opp.direction === 'bull' ? '🔵' : '🔴';
+      msg += `${circle} ${opp.direction === 'bull' ? '多' : '空'}: ${opp.priceRange} (${opp.fillPercent.toFixed(0)}%已填补)\n`;
     }
+    msg += `\n`;
   }
 
   if (opportunities.length === 0) {
