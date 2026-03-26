@@ -130,7 +130,7 @@ function formatFVG25Data(data: { intervals: string[]; currentPrice: number; oppo
   for (const [interval, opps] of Object.entries(byInterval)) {
     msg += `【${interval}】\n`;
     for (const opp of opps.slice(-2)) {
-      const circle = opp.direction === 'bull' ? '🔵' : '🔴';
+      const circle = opp.direction === 'bull' ? '🟢' : '🔴';
       msg += `${circle} ${opp.direction === 'bull' ? '多' : '空'}: ${opp.priceRange} (${opp.fillPercent.toFixed(0)}%已填补)\n`;
     }
     msg += `\n`;
