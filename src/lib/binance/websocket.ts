@@ -38,7 +38,7 @@ export class BinanceWebSocket {
   private pingInterval: NodeJS.Timeout | null = null;
   private dataTimeout: NodeJS.Timeout | null = null;
   private lastDataTime: number = 0;
-  private readonly DATA_TIMEOUT_MS = 60000; // 60秒无数据则重连
+  private readonly DATA_TIMEOUT_MS = 15000; // 15秒无数据则重连
 
   constructor(
     symbol: string,
@@ -69,7 +69,14 @@ export class BinanceWebSocket {
 
     this.ws.onmessage = (event) => {
       try {
-        const msg: WsMessage = JSON.parse(event.data);
+        const data = event.data;
+
+        // 处理 Rust 直接发送的 "pong" 文本
+        if (data === "pong") {
+          return;
+        }
+
+        const msg: WsMessage = JSON.parse(data);
 
         switch (msg.type) {
           case "KlineUpdate":
@@ -147,7 +154,8 @@ export class BinanceWebSocket {
   private startPing() {
     this.pingInterval = setInterval(() => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: "Ping" }));
+        // 使用 WebSocket 原始 Ping 帧
+        this.ws.send("ping");
       }
     }, 30000);
   }
@@ -197,9 +205,11 @@ export class BinanceWebSocket {
         `Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`
       );
 
+      // 重连延迟最多30秒，避免指数增长
+      const delay = Math.min(this.reconnectDelay * this.reconnectAttempts, 30000);
       setTimeout(() => {
         this.connect();
-      }, this.reconnectDelay * this.reconnectAttempts);
+      }, delay);
     }
   }
 

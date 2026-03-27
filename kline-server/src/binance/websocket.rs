@@ -147,7 +147,11 @@ impl BinanceWs {
                 msg = read.next() => {
                     match msg {
                         Some(Ok(Message::Text(text))) => {
-                            if let Err(e) = self.handle_message(&text).await {
+                            // 处理前端的心跳 ping
+                            if text.trim() == "ping" {
+                                debug!("Received ping, sending pong");
+                                write.send(Message::Text("pong".to_string())).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                            } else if let Err(e) = self.handle_message(&text).await {
                                 warn!("Failed to handle message: {}", e);
                             }
                         }
