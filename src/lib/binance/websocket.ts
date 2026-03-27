@@ -205,6 +205,12 @@ export class BinanceWebSocket {
         `Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`
       );
 
+      // 先关闭旧连接
+      if (this.ws) {
+        this.ws.close();
+        this.ws = null;
+      }
+
       // 重连延迟最多30秒，避免指数增长
       const delay = Math.min(this.reconnectDelay * this.reconnectAttempts, 30000);
       setTimeout(() => {
