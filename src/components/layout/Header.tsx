@@ -152,7 +152,7 @@ export function Header() {
 
         {/* 图表类型切换 */}
         <Button
-          variant={useChartStore.getState().chartType === "line" ? "default" : "ghost"}
+          variant={useChartStore.getState().chartType === "line" ? "default" : "outline"}
           size="sm"
           className={useChartStore.getState().chartType === "line" ? "bg-[var(--accent)] hover:bg-[var(--accent)]/90" : ""}
           onClick={() => useChartStore.getState().setChartType(useChartStore.getState().chartType === "candlestick" ? "line" : "candlestick")}
