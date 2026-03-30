@@ -149,6 +149,16 @@ export function Header() {
         <MTFPanel />
         {/* Daily H/L Panel */}
         <DailyHLPanel />
+
+        {/* 图表类型切换 */}
+        <Button
+          variant={useChartStore.getState().chartType === "line" ? "default" : "ghost"}
+          size="sm"
+          className={useChartStore.getState().chartType === "line" ? "bg-[var(--accent)] hover:bg-[var(--accent)]/90" : ""}
+          onClick={() => useChartStore.getState().setChartType(useChartStore.getState().chartType === "candlestick" ? "line" : "candlestick")}
+        >
+          {useChartStore.getState().chartType === "candlestick" ? "📈 折线图" : "📊 蜡烛图"}
+        </Button>
       </div>
 
       {/* Tools & Trade & Indicators */}
