@@ -6,6 +6,7 @@ import {
   IChartApi,
   ISeriesApi,
   CandlestickData,
+  LineData,
   Time,
   SeriesMarker,
   IPriceLine,
@@ -50,6 +51,8 @@ export function TradingChart() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const highLineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const lowLineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const wsRef = useRef<BinanceWebSocket | null>(null);
 
   // ICT Primitives
@@ -70,9 +73,11 @@ export function TradingChart() {
   const {
     symbol,
     timeframe,
+    chartType,
     candles,
     liquidationData,
     setCandles,
+    setChartType,
     updateCandle,
     setLoading,
     setConnected,
@@ -316,6 +321,22 @@ export function TradingChart() {
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
 
+    // High Line Series (红色)
+    const highLineSeries = chart.addLineSeries({
+      color: "#ef4444",
+      lineWidth: 2,
+      visible: false,
+    });
+    highLineSeriesRef.current = highLineSeries;
+
+    // Low Line Series (绿色)
+    const lowLineSeries = chart.addLineSeries({
+      color: "#22c55e",
+      lineWidth: 2,
+      visible: false,
+    });
+    lowLineSeriesRef.current = lowLineSeries;
+
     // Initialize ICT Primitives
     const obPrimitive = new OrderBlockPrimitive();
     const fvgPrimitive = new FVGPrimitive();
@@ -414,6 +435,14 @@ export function TradingChart() {
           }));
           candleSeriesRef.current.setData(chartData);
 
+          // 设置折线图数据
+          if (highLineSeriesRef.current && lowLineSeriesRef.current) {
+            const highData: LineData<Time>[] = data.map(c => ({ time: c.time as Time, value: c.high }));
+            const lowData: LineData<Time>[] = data.map(c => ({ time: c.time as Time, value: c.low }));
+            highLineSeriesRef.current.setData(highData);
+            lowLineSeriesRef.current.setData(lowData);
+          }
+
           // 切换 symbol 后让图表自适应价格轴范围
           chartRef.current.timeScale().fitContent();
         }
@@ -433,6 +462,20 @@ export function TradingChart() {
                 high: candle.high,
                 low: candle.low,
                 close: candle.close,
+              });
+            }
+
+            // 更新折线图
+            if (highLineSeriesRef.current) {
+              highLineSeriesRef.current.update({
+                time: candle.time as Time,
+                value: candle.high,
+              });
+            }
+            if (lowLineSeriesRef.current) {
+              lowLineSeriesRef.current.update({
+                time: candle.time as Time,
+                value: candle.low,
               });
             }
 
@@ -468,6 +511,21 @@ export function TradingChart() {
       }
     };
   }, [symbol, timeframe, setCandles, updateCandle, setLoading, setConnected, calculateIndicators]);
+
+  // 处理图表类型切换
+  useEffect(() => {
+    if (!candleSeriesRef.current || !highLineSeriesRef.current || !lowLineSeriesRef.current) return;
+
+    if (chartType === "line") {
+      candleSeriesRef.current.applyOptions({ visible: false });
+      highLineSeriesRef.current.applyOptions({ visible: true });
+      lowLineSeriesRef.current.applyOptions({ visible: true });
+    } else {
+      candleSeriesRef.current.applyOptions({ visible: true });
+      highLineSeriesRef.current.applyOptions({ visible: false });
+      lowLineSeriesRef.current.applyOptions({ visible: false });
+    }
+  }, [chartType]);
 
   // 合并加载所有周期的 OTE/FVG/OB/Trend 数据（优化：并行请求，避免重复）
   useEffect(() => {
@@ -1026,6 +1084,13 @@ export function TradingChart() {
       onClick={handleClick}
       onMouseMove={handleMouseMove}
     >
+      {/* 图表类型切换按钮 */}
+      <button
+        onClick={() => setChartType(chartType === "candlestick" ? "line" : "candlestick")}
+        className="absolute top-2 left-2 z-10 px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-300"
+      >
+        {chartType === "candlestick" ? "📈 折线图" : "📊 蜡烛图"}
+      </button>
       <ICTOverlay
         chartRef={chartRef}
         seriesRef={candleSeriesRef}

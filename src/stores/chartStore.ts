@@ -22,6 +22,7 @@ export interface DailyHLLines {
 interface ChartState {
   symbol: string;
   timeframe: Timeframe;
+  chartType: "candlestick" | "line";
   candles: Candle[];
   isLoading: boolean;
   error: string | null;
@@ -32,6 +33,7 @@ interface ChartState {
 
   setSymbol: (symbol: string) => void;
   setTimeframe: (timeframe: Timeframe) => void;
+  setChartType: (type: "candlestick" | "line") => void;
   setCandles: (candles: Candle[]) => void;
   updateCandle: (candle: Candle) => void;
   setLoading: (loading: boolean) => void;
@@ -45,6 +47,7 @@ interface ChartState {
 export const useChartStore = create<ChartState>((set) => ({
   symbol: "BTCUSDC",
   timeframe: "15m",
+  chartType: "candlestick",
   candles: [],
   isLoading: false,
   error: null,
@@ -55,6 +58,7 @@ export const useChartStore = create<ChartState>((set) => ({
 
   setSymbol: (symbol) => set({ symbol, dailyHL: null, dailyHLLines: { H: false, P: false, D: false, L: false } }),  // 切换symbol时清空
   setTimeframe: (timeframe) => set({ timeframe }),
+  setChartType: (chartType) => set({ chartType }),
   setCandles: (candles) => set({ candles }),
   updateCandle: (candle) =>
     set((state) => {
