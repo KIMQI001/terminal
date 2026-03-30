@@ -1085,12 +1085,14 @@ export function TradingChart() {
       onMouseMove={handleMouseMove}
     >
       {/* 图表类型切换按钮 */}
-      <button
-        onClick={() => setChartType(chartType === "candlestick" ? "line" : "candlestick")}
-        className="absolute top-2 left-2 z-10 px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-300"
-      >
-        {chartType === "candlestick" ? "📈 折线图" : "📊 蜡烛图"}
-      </button>
+      <div className="absolute top-2 right-2 z-10">
+        <button
+          onClick={() => setChartType(chartType === "candlestick" ? "line" : "candlestick")}
+          className="bg-white/95 border border-gray-200 rounded-lg shadow-lg px-3 py-1.5 text-xs hover:bg-gray-50 transition-colors"
+        >
+          {chartType === "candlestick" ? "📈 折线图" : "📊 蜡烛图"}
+        </button>
+      </div>
       <ICTOverlay
         chartRef={chartRef}
         seriesRef={candleSeriesRef}
