@@ -788,11 +788,11 @@ export function TradingChart() {
 
   // Update Trading Lines (Entry, Stop Loss, Take Profit, Orders, Positions)
   useEffect(() => {
-    if (!chartRef.current) return;
+    if (!candleSeriesRef.current) return;
 
     // 清除旧的价格线
     priceLinesRef.current.forEach((line) => {
-      (chartRef.current as any)?.removePriceLine(line);
+      candleSeriesRef.current?.removePriceLine(line);
     });
     priceLinesRef.current = [];
 
@@ -801,8 +801,8 @@ export function TradingChart() {
     // 1. 显示持仓入场价格（实线）
     const currentPositions = positions.filter(p => p.symbol === currentSymbol);
     currentPositions.forEach((pos) => {
-      if (!chartRef.current) return;
-      const priceLine = (chartRef.current as any).createPriceLine({
+      if (!candleSeriesRef.current) return;
+      const priceLine = candleSeriesRef.current.createPriceLine({
         price: pos.entryPrice,
         color: pos.side === 'long' ? '#3b82f6' : '#a855f7',
         lineWidth: 2,
@@ -817,7 +817,7 @@ export function TradingChart() {
     realOrders
       .filter(o => o.symbol === currentSymbol && o.type.toLowerCase() === 'limit')
       .forEach((order) => {
-        if (!chartRef.current || !order.price) return;
+        if (!candleSeriesRef.current || !order.price) return;
 
         // 判断是开仓还是平仓（止盈）
         // BUY + LONG = 开多, SELL + SHORT = 开空 → 开仓限价
@@ -829,7 +829,7 @@ export function TradingChart() {
         // 也可以通过 clientOrderId 判断是否为止盈单
         const isTpOrder = order.clientOrderId?.includes('_tp');
 
-        const priceLine = (chartRef.current as any).createPriceLine({
+        const priceLine = candleSeriesRef.current.createPriceLine({
           price: order.price,
           color: isOpen
             ? (isLong ? '#3b82f6' : '#a855f7')  // 开仓：蓝/紫
@@ -847,12 +847,12 @@ export function TradingChart() {
       realOrders
         .filter(o => o.symbol === currentSymbol)
         .forEach((order) => {
-          if (!chartRef.current) return;
+          if (!candleSeriesRef.current) return;
           const price = order.stopPrice || order.price;
           if (!price) return;
 
           if (order.type.toLowerCase().includes('profit')) {
-            const priceLine = (chartRef.current as any).createPriceLine({
+            const priceLine = candleSeriesRef.current.createPriceLine({
               price,
               color: '#22c55e', // 绿色
               lineWidth: 1,
@@ -862,7 +862,7 @@ export function TradingChart() {
             });
             priceLinesRef.current.push(priceLine);
           } else if (order.type.toLowerCase().includes('stop') && !order.type.toLowerCase().includes('profit')) {
-            const priceLine = (chartRef.current as any).createPriceLine({
+            const priceLine = candleSeriesRef.current.createPriceLine({
               price,
               color: '#ef4444', // 红色
               lineWidth: 1,
@@ -878,7 +878,7 @@ export function TradingChart() {
     // 4. 显示手动输入的交易线（原有逻辑）
     if (tradingLines.length > 0) {
       tradingLines.forEach((line) => {
-        if (!chartRef.current) return;
+        if (!candleSeriesRef.current) return;
 
         let color: string;
         let title: string;
@@ -893,7 +893,7 @@ export function TradingChart() {
           title = "TP";
         }
 
-        const priceLine = (chartRef.current as any).createPriceLine({
+        const priceLine = candleSeriesRef.current.createPriceLine({
           price: line.price,
           color,
           lineWidth: 1,
@@ -910,7 +910,7 @@ export function TradingChart() {
     if (dailyHL) {
       // H - 前高 (浅红)
       if (dailyHLLines.H) {
-        const highLine = (chartRef.current as any).createPriceLine({
+        const highLine = candleSeriesRef.current.createPriceLine({
           price: dailyHL.high,
           color: '#f87171',  // red-400
           lineWidth: 1,
@@ -923,7 +923,7 @@ export function TradingChart() {
 
       // P - 溢价区开始（使用合并后的值）
       if (dailyHLLines.P) {
-        const pLine = (chartRef.current as any).createPriceLine({
+        const pLine = candleSeriesRef.current.createPriceLine({
           price: dailyHL.pStart,
           color: '#ef4444',  // 红色
           lineWidth: 1,
@@ -936,7 +936,7 @@ export function TradingChart() {
 
       // D - 折扣区开始（使用合并后的值）
       if (dailyHLLines.D) {
-        const dLine = (chartRef.current as any).createPriceLine({
+        const dLine = candleSeriesRef.current.createPriceLine({
           price: dailyHL.dStart,
           color: '#22c55e',  // 绿色
           lineWidth: 1,
@@ -949,7 +949,7 @@ export function TradingChart() {
 
       // L - 前低 (浅绿)
       if (dailyHLLines.L) {
-        const lowLine = (chartRef.current as any).createPriceLine({
+        const lowLine = candleSeriesRef.current.createPriceLine({
           price: dailyHL.low,
           color: '#4ade80',  // green-400
           lineWidth: 1,
@@ -1085,14 +1085,12 @@ export function TradingChart() {
       onMouseMove={handleMouseMove}
     >
       {/* 图表类型切换按钮 */}
-      <div className="absolute top-2 right-2 z-10">
-        <button
-          onClick={() => setChartType(chartType === "candlestick" ? "line" : "candlestick")}
-          className="bg-white/95 border border-gray-200 rounded-lg shadow-lg px-3 py-1.5 text-xs hover:bg-gray-50 transition-colors"
-        >
-          {chartType === "candlestick" ? "📈 折线图" : "📊 蜡烛图"}
-        </button>
-      </div>
+      <button
+        onClick={() => setChartType(chartType === "candlestick" ? "line" : "candlestick")}
+        className="absolute top-2 left-2 z-10 px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-300"
+      >
+        {chartType === "candlestick" ? "📈 折线图" : "📊 蜡烛图"}
+      </button>
       <ICTOverlay
         chartRef={chartRef}
         seriesRef={candleSeriesRef}
