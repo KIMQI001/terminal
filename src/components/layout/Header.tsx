@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User, Maximize2, Minimize2, Building2, Layers, Bot } from "lucide-react";
+import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User, Maximize2, Minimize2, Building2, Layers, Bot, BarChart3, LineChart } from "lucide-react";
 import { MTFPanel } from "@/components/chart/MTFPanel";
 import { DailyHLPanel } from "@/components/chart/DailyHLPanel";
 import Link from "next/link";
@@ -157,7 +157,8 @@ export function Header() {
           className={useChartStore.getState().chartType === "line" ? "bg-[var(--accent)] hover:bg-[var(--accent)]/90" : ""}
           onClick={() => useChartStore.getState().setChartType(useChartStore.getState().chartType === "candlestick" ? "line" : "candlestick")}
         >
-          {useChartStore.getState().chartType === "candlestick" ? "📈 折线图" : "📊 蜡烛图"}
+          {useChartStore.getState().chartType === "candlestick" ? <LineChart className="w-3 h-3 mr-1" /> : <BarChart3 className="w-3 h-3 mr-1" />}
+          {useChartStore.getState().chartType === "candlestick" ? "折线图" : "蜡烛图"}
         </Button>
       </div>
 
