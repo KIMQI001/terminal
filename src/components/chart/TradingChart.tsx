@@ -1088,7 +1088,7 @@ export function TradingChart() {
       <div className="absolute top-2 right-2 z-10">
         <button
           onClick={() => setChartType(chartType === "candlestick" ? "line" : "candlestick")}
-          className="bg-white/95 border border-gray-200 rounded-lg shadow-lg px-3 py-1.5 text-xs hover:bg-gray-50 transition-colors"
+          className="bg-[var(--accent)] hover:bg-[var(--accent)]/90 text-white px-3 py-1.5 text-xs rounded-md shadow transition-colors"
         >
           {chartType === "candlestick" ? "📈 折线图" : "📊 蜡烛图"}
         </button>
