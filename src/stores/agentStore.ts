@@ -4,6 +4,15 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+// 导出 HLLevel 类型
+export interface HLLevel {
+  price: number;
+  time: number;
+  type: 'hl' | 'hh' | 'lh' | 'll';
+  distance: number; // 与当前价距离 %
+  status: 'above' | 'below' | 'approaching' | 'broken';
+}
+
 interface AgentState {
   isRunning: boolean;
   lastRunTime: number | null;
@@ -11,7 +20,11 @@ interface AgentState {
   symbols: string[];
   lastAnalysis: string | null;
   dingtalkEnabled: boolean;
-  inlineAIEnabled: boolean; // AI实时分析开关
+  inlineAIEnabled: boolean; // 实时监控开关
+
+  // 实时监控数据
+  currentPrice: number | null;
+  hlLevels: HLLevel[]; // HL水平线列表
 
   // Actions
   setRunning: (running: boolean) => void;
@@ -21,6 +34,8 @@ interface AgentState {
   setLastAnalysis: (analysis: string | null) => void;
   setDingtalkEnabled: (enabled: boolean) => void;
   setInlineAIEnabled: (enabled: boolean) => void;
+  setCurrentPrice: (price: number) => void;
+  setHLLevels: (levels: HLLevel[]) => void;
 }
 
 export const useAgentStore = create<AgentState>()(
@@ -34,6 +49,9 @@ export const useAgentStore = create<AgentState>()(
       dingtalkEnabled: true,
       inlineAIEnabled: true, // 默认开启
 
+      currentPrice: null,
+      hlLevels: [],
+
       setRunning: (running) => set({ isRunning: running }),
       setLastRunTime: (time) => set({ lastRunTime: time }),
       setInterval: (interval) => set({ interval }),
@@ -41,6 +59,8 @@ export const useAgentStore = create<AgentState>()(
       setLastAnalysis: (analysis) => set({ lastAnalysis: analysis }),
       setDingtalkEnabled: (enabled) => set({ dingtalkEnabled: enabled }),
       setInlineAIEnabled: (enabled) => set({ inlineAIEnabled: enabled }),
+      setCurrentPrice: (price) => set({ currentPrice: price }),
+      setHLLevels: (levels) => set({ hlLevels: levels }),
     }),
     {
       name: 'agent-storage',

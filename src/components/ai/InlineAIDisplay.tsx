@@ -1,30 +1,31 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Sparkles, X, RefreshCw, ChevronDown, ChevronUp, Move } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { Activity, X, RefreshCw, ChevronDown, ChevronUp, Move, TrendingUp, TrendingDown } from 'lucide-react';
 import { useChartStore } from '@/stores/chartStore';
-import { useAgentStore } from '@/stores/agentStore';
+import { useAgentStore, HLLevel } from '@/stores/agentStore';
+import { detectSwingPoints } from '@/lib/chart/indicators/swingPoints';
+import type { SwingPoint } from '@/types/chart';
 
 interface InlineAIDisplayProps {
   symbol?: string;
 }
 
-interface AIData {
-  analysis: string;
-  timestamp: number;
-  signal?: 'bullish' | 'bearish' | 'neutral';
-}
-
 export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
   const timeframeRef = useRef('15m');
-  const { timeframe, setTimeframe } = useChartStore();
-  const { inlineAIEnabled, setInlineAIEnabled } = useAgentStore();
+  const { timeframe, candles } = useChartStore();
+  const {
+    inlineAIEnabled,
+    setInlineAIEnabled,
+    currentPrice,
+    hlLevels,
+    setCurrentPrice,
+    setHLLevels,
+  } = useAgentStore();
+
   const [isVisible, setIsVisible] = useState(true);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [data, setData] = useState<AIData | null>(null);
 
   // 拖拽状态
   const [position, setPosition] = useState({ x: 16, y: 80 });
@@ -36,55 +37,67 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
     timeframeRef.current = timeframe;
   }, [timeframe]);
 
+  // 监听 K 线数据变化，更新 HL 水平
+  useEffect(() => {
+    if (candles.length > 10) {
+      updateHLLevels();
+    }
+  }, [candles]);
+
+  // 更新 HL 水平线
+  const updateHLLevels = () => {
+    const currentCandles = candles;
+    if (currentCandles.length < 10) return;
+
+    const swings: SwingPoint[] = detectSwingPoints(currentCandles, 5);
+    const price = currentCandles[currentCandles.length - 1].close;
+
+    setCurrentPrice(price);
+
+    // 筛选 HL (更高低点) - 多头回调的支撑位
+    const hls = swings
+      .filter((sp) => sp.type === 'low')
+      .slice(-5) // 最近 5 个
+      .map((sp): HLLevel => {
+        const distance = ((price - sp.price) / price) * 100;
+        let status: HLLevel['status'];
+
+        if (price > sp.price * 1.001) {
+          status = 'broken'; // 价格已突破
+        } else if (price < sp.price * 0.999) {
+          status = 'below'; // 价格在下方
+        } else {
+          status = 'approaching'; // 接近中
+        }
+
+        return {
+          price: sp.price,
+          time: sp.time,
+          type: 'hl',
+          distance,
+          status,
+        };
+      })
+      .filter((hl) => hl.price < price && hl.distance < 5) // 只显示价格在上面的 HL，距离 < 5%
+      .sort((a, b) => a.distance - b.distance); // 按距离排序
+
+    setHLLevels(hls);
+  };
+
   // 如果开关关闭，不显示
   if (!inlineAIEnabled) {
     return (
       <button
         onClick={() => setInlineAIEnabled(true)}
-        className="fixed bg-blue-500 text-white px-3 py-2 rounded-lg shadow-lg flex items-center gap-2 z-40 hover:bg-blue-600 transition-colors"
+        className="fixed bg-green-500 text-white px-3 py-2 rounded-lg shadow-lg flex items-center gap-2 z-40 hover:bg-green-600 transition-colors"
         style={{ left: position.x, top: position.y }}
       >
-        <Sparkles className="w-4 h-4" />
-        <span className="text-sm">AI 分析</span>
+        <Activity className="w-4 h-4" />
+        <span className="text-sm">实时监控</span>
       </button>
     );
   }
 
-  const fetchAnalysis = async () => {
-    if (!inlineAIEnabled) return;
-    setIsLoading(true);
-    try {
-      const response = await fetch('/api/agent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'analyze', symbol, interval: timeframeRef.current, dingtalk: false }),
-      });
-      if (!response.ok) {
-        console.error('AI analysis failed:', response.status);
-        return;
-      }
-      const result = await response.json();
-      if (result.success && result.analysis) {
-        setData({
-          analysis: result.analysis,
-          timestamp: Date.now(),
-        });
-      }
-    } catch (error) {
-      console.error('AI analysis failed:', error);
-    } finally {
-      if (inlineAIEnabled) setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchAnalysis();
-    // 每 5 分钟自动刷新
-    const interval = setInterval(fetchAnalysis, 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [symbol, timeframe]);
-
-  // 拖拽处理
   const handleMouseDown = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button')) return;
     e.preventDefault();
@@ -112,17 +125,47 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
     dragRef.current = null;
   };
 
-  const getSignalColor = (signal?: string) => {
-    switch (signal) {
-      case 'bullish': return 'text-green-500';
-      case 'bearish': return 'text-red-500';
-      default: return 'text-yellow-500';
-    }
+  const formatPrice = (price: number) => {
+    return price.toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
   };
 
   const formatTime = (timestamp: number) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    return new Date(timestamp * 1000).toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  // 获取状态颜色和图标
+  const getStatusIcon = (status: HLLevel['status']) => {
+    switch (status) {
+      case 'broken':
+        return <TrendingUp className="w-3 h-3 text-green-500" />;
+      case 'approaching':
+        return <Activity className="w-3 h-3 text-yellow-500 animate-pulse" />;
+      case 'below':
+        return <TrendingDown className="w-3 h-3 text-gray-400" />;
+      default:
+        return null;
+    }
+  };
+
+  const getStatusText = (status: HLLevel['status']) => {
+    switch (status) {
+      case 'broken':
+        return '已突破';
+      case 'approaching':
+        return '接近中';
+      case 'below':
+        return '等待回踩';
+      default:
+        return '';
+    }
   };
 
   if (!isVisible) {
@@ -132,11 +175,11 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
           setIsVisible(true);
           setInlineAIEnabled(true);
         }}
-        className="fixed bg-blue-500 text-white px-3 py-2 rounded-lg shadow-lg flex items-center gap-2 z-40 hover:bg-blue-600 transition-colors"
+        className="fixed bg-green-500 text-white px-3 py-2 rounded-lg shadow-lg flex items-center gap-2 z-40 hover:bg-green-600 transition-colors"
         style={{ left: position.x, top: position.y }}
       >
-        <Sparkles className="w-4 h-4" />
-        <span className="text-sm">AI 分析</span>
+        <Activity className="w-4 h-4" />
+        <span className="text-sm">实时监控</span>
       </button>
     );
   }
@@ -144,7 +187,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
   return (
     <div
       className={`fixed bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg shadow-lg z-40 transition-shadow ${isDragging ? 'shadow-2xl cursor-grabbing' : 'cursor-grab'}`}
-      style={{ left: position.x, top: position.y, width: 380 }}
+      style={{ left: position.x, top: position.y, width: 320 }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -154,9 +197,8 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
       <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] rounded-t-lg select-none">
         <div className="flex items-center gap-2">
           <Move className="w-3 h-3 text-[var(--text-secondary)]" />
-          <Sparkles className="w-4 h-4 text-blue-500" />
-          <span className="text-sm font-medium">AI 实时分析</span>
-          <span className="text-xs text-[var(--text-secondary)]">{symbol} {timeframe}</span>
+          <Activity className="w-4 h-4 text-green-500" />
+          <span className="text-sm font-medium">实时监控</span>
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -167,7 +209,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
             {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
           </button>
           <button
-            onClick={fetchAnalysis}
+            onClick={updateHLLevels}
             disabled={isLoading}
             className="p-1 hover:bg-[var(--bg-primary)] rounded"
             title="刷新"
@@ -176,15 +218,8 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
           </button>
           <button
             onClick={() => setInlineAIEnabled(false)}
-            className="p-1 hover:bg-[var(--bg-primary)] rounded text-green-500"
-            title="关闭AI分析"
-          >
-            <Sparkles className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setIsVisible(false)}
-            className="p-1 hover:bg-[var(--bg-primary)] rounded"
-            title="最小化"
+            className="p-1 hover:bg-[var(--bg-primary)] rounded text-red-500"
+            title="关闭监控"
           >
             <X className="w-4 h-4" />
           </button>
@@ -194,30 +229,82 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
       {/* Content */}
       {!isCollapsed && (
         <div className="p-3 max-h-[400px] overflow-y-auto">
-          {isLoading && !data ? (
-            <div className="text-center py-4 text-[var(--text-secondary)]">
-              <RefreshCw className="w-6 h-6 mx-auto animate-spin" />
-              <p className="text-sm mt-2">分析中...</p>
+          {/* 当前价格 */}
+          <div className="mb-3 pb-2 border-b border-[var(--border-color)]">
+            <div className="text-xs text-[var(--text-secondary)] mb-1">当前价格</div>
+            <div className="text-xl font-bold text-green-500">
+              ${currentPrice ? formatPrice(currentPrice) : '--'}
             </div>
-          ) : data ? (
-            <>
-              <div className="text-sm font-mono whitespace-pre-wrap leading-relaxed">
-                {data.analysis}
+          </div>
+
+          {/* HL 水平线列表 */}
+          <div>
+            <div className="text-xs text-[var(--text-secondary)] mb-2">
+              HL 支撑位 (价格上方)
+            </div>
+            {hlLevels.length > 0 ? (
+              <div className="space-y-2">
+                {hlLevels.map((hl, idx) => (
+                  <div
+                    key={idx}
+                    className={`flex items-center justify-between p-2 rounded ${
+                      hl.status === 'approaching'
+                        ? 'bg-yellow-500/10 border border-yellow-500/30'
+                        : hl.status === 'broken'
+                        ? 'bg-green-500/10 border border-green-500/30'
+                        : 'bg-[var(--bg-secondary)]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {getStatusIcon(hl.status)}
+                      <div>
+                        <div className="text-sm font-mono font-medium">
+                          ${formatPrice(hl.price)}
+                        </div>
+                        <div className="text-xs text-[var(--text-secondary)]">
+                          {formatTime(hl.time)}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className={`text-xs font-medium ${
+                        hl.status === 'broken' ? 'text-green-500' :
+                        hl.status === 'approaching' ? 'text-yellow-500' :
+                        'text-[var(--text-secondary)]'
+                      }`}>
+                        {getStatusText(hl.status)}
+                      </div>
+                      <div className="text-xs text-[var(--text-secondary)]">
+                        距离 {hl.distance.toFixed(2)}%
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div className="mt-2 pt-2 border-t border-[var(--border-color)] flex items-center justify-between">
-                <span className="text-xs text-[var(--text-secondary)]">
-                  {formatTime(data.timestamp)}
-                </span>
-                {data.signal && (
-                  <span className={`text-xs font-medium ${getSignalColor(data.signal)}`}>
-                    {data.signal === 'bullish' ? '多头信号' : data.signal === 'bearish' ? '空头信号' : '中性'}
-                  </span>
-                )}
+            ) : (
+              <div className="text-sm text-[var(--text-secondary)] text-center py-4">
+                暂无 HL 支撑位
               </div>
-            </>
-          ) : (
-            <p className="text-sm text-[var(--text-secondary)]">暂无数据</p>
-          )}
+            )}
+          </div>
+
+          {/* 图例说明 */}
+          <div className="mt-3 pt-2 border-t border-[var(--border-color)]">
+            <div className="flex items-center gap-4 text-xs text-[var(--text-secondary)]">
+              <div className="flex items-center gap-1">
+                <TrendingUp className="w-3 h-3 text-green-500" />
+                <span>已突破</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Activity className="w-3 h-3 text-yellow-500" />
+                <span>接近中</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <TrendingDown className="w-3 h-3 text-gray-400" />
+                <span>等待回踩</span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
