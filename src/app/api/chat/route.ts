@@ -166,15 +166,103 @@ ${bullObs.slice(-3).map(ob => `  $${ob.price.toFixed(2)} @ ${new Date(ob.time).t
 ${bearObs.slice(-3).map(ob => `  $${ob.price.toFixed(2)} @ ${new Date(ob.time).toLocaleString('zh-CN').slice(-8)} (强度:${ob.strength})`).join('\n') || '  无'}`;
 }
 
-// 格式化 Swing Points
-function formatSwing(candles: Candle[]): string {
+// 格式化 Swing Points - 区分 HH/HL/LH/LL 结构
+function formatSwing(candles: Candle[], currentPrice: string): string {
+  const price = parseFloat(currentPrice);
   const swings = detectSwingPoints(candles, 5);
-  const highs = swings.filter(s => s.type === 'high').slice(-5);
-  const lows = swings.filter(s => s.type === 'low').slice(-5);
+  const highs = swings.filter(s => s.type === 'high');
+  const lows = swings.filter(s => s.type === 'low');
 
-  return `【波段高低点】
-阻力(近期高点): ${highs.length > 0 ? highs.map(h => `$${h.price.toFixed(2)}`).join(' > ') : '无'}
-支撑(近期低点): ${lows.length > 0 ? lows.map(l => `$${l.price.toFixed(2)}`).join(' > ') : '无'}`;
+  if (highs.length < 2 || lows.length < 2) {
+    return `【市场结构】数据不足`;
+  }
+
+  // 获取最近的结构点
+  const recentHighs = highs.slice(-5);
+  const recentLows = lows.slice(-5);
+
+  // 分类 HH/HL/LH/LL
+  let hh = '', hl = '', lh = '', ll = '';
+  let trend = 'neutral';
+
+  // 分析结构
+  for (let i = 1; i < recentHighs.length; i++) {
+    if (recentHighs[i].price > recentHighs[i-1].price) {
+      hh = `$${recentHighs[i].price.toFixed(2)}`;
+    } else {
+      lh = `$${recentHighs[i].price.toFixed(2)}`;
+    }
+  }
+
+  for (let i = 1; i < recentLows.length; i++) {
+    if (recentLows[i].price > recentLows[i-1].price) {
+      hl = `$${recentLows[i].price.toFixed(2)}`;
+    } else {
+      ll = `$${recentLows[i].price.toFixed(2)}`;
+    }
+  }
+
+  // 判断趋势
+  if (hh && hl) {
+    trend = 'bullish';
+  } else if (lh && ll) {
+    trend = 'bearish';
+  }
+
+  // 最近的阻力/支撑
+  const nearestHigh = recentHighs[recentHighs.length - 1];
+  const nearestLow = recentLows[recentLows.length - 1];
+
+  // 价格位置分析
+  let position = '';
+  let nextTarget = '';
+  let support = '';
+
+  if (trend === 'bullish') {
+    // 多头趋势：接近 HL 支撑，或突破 HH
+    if (price < parseFloat(hl)) {
+      position = `价格低于HL(${hl})，可能回踩`;
+      support = hl;
+      nextTarget = hh;
+    } else if (price > parseFloat(hh)) {
+      position = `价格突破HH(${hh})，多头延续`;
+      support = hl;
+      nextTarget = '新高';
+    } else {
+      position = `价格在HH(${hh})和HL(${hl})之间震荡`;
+      support = hl;
+      nextTarget = hh;
+    }
+  } else if (trend === 'bearish') {
+    // 空头趋势：接近 LH 阻力，或突破 LL
+    if (price > parseFloat(lh)) {
+      position = `价格高于LH(${lh})，可能反弹`;
+      nextTarget = ll;
+      support = lh;
+    } else if (price < parseFloat(ll)) {
+      position = `价格跌破LL(${ll})，空头延续`;
+      nextTarget = '新低';
+      support = lh;
+    } else {
+      position = `价格在LH(${lh})和LL(${ll})之间震荡`;
+      nextTarget = ll;
+      support = lh;
+    }
+  }
+
+  return `【市场结构分析】
+当前趋势: ${trend === 'bullish' ? '🟢 多头' : trend === 'bearish' ? '🔴 空头' : '⚪ 中性'}
+当前位置: ${position}
+
+【关键价位】
+更高高点(HH): ${hh || '无'}
+更高低点(HL): ${hl || '无'} ← 重要支撑
+更低高点(LH): ${lh || '无'} ← 重要阻力
+更低低点(LL): ${ll || '无'}
+
+【当前价格】: $${currentPrice}
+【上行目标】: ${nextTarget}
+【下方支撑】: ${support}`;
 }
 
 // 格式化流动性分析
@@ -217,7 +305,7 @@ ${formatFVG(candles)}
 
 ${formatOB(candles)}
 
-${formatSwing(candles)}
+${formatSwing(candles, currentPrice)}
 `;
 }
 
@@ -261,7 +349,7 @@ ${formatLiquidity(candles)}
         skillData += `\n${formatOB(candles)}`;
       }
       if (intents.includes('swing')) {
-        skillData += `\n${formatSwing(candles)}`;
+        skillData += `\n${formatSwing(candles, currentPrice)}`;
       }
       if (intents.includes('liquidity')) {
         skillData += `\n${formatLiquidity(candles)}`;
