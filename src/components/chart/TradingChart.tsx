@@ -28,7 +28,7 @@ import { OBPanel } from "./OBPanel";
 import { OrderCancelOverlay } from "./OrderCancelOverlay";
 import { fetchKlines } from "@/lib/binance/api";
 import { BinanceWebSocket } from "@/lib/binance/websocket";
-import { detectSwingPoints } from "@/lib/chart/indicators/swingPoints";
+import { detectSwingPoints, detectAllPivots } from "@/lib/chart/indicators/swingPoints";
 import { detectOrderBlocks } from "@/lib/chart/indicators/orderBlocks";
 import { detectFVGs } from "@/lib/chart/indicators/fvg";
 import { detectStructure } from "@/lib/chart/indicators/structure";
@@ -786,36 +786,45 @@ export function TradingChart() {
     }
   }, [swingPoints, enabled.swingPoints]);
 
-  // Update Swing Points Markers (折线图模式) - 在高线/低线上标记峰值
+  // Update Swing Points Markers (折线图模式) - 使用 detectAllPivots 标记所有波峰波谷
   useEffect(() => {
     if (chartType !== "line") return;
     if (!highLineSeriesRef.current || !lowLineSeriesRef.current) return;
 
-    if (enabled.swingPoints && swingPoints.length > 0) {
-      // 高线系列标记 HH (更高高点)
-      const highMarkers: SeriesMarker<Time>[] = swingPoints
-        .filter((sp) => sp.type === "high")
-        .map((sp) => ({
-          time: sp.time as Time,
-          position: "inBar" as const,
-          color: "#fbbf24", // 黄色标记
-          shape: "circle" as const,
-          text: "HH",
-        }));
+    if (enabled.swingPoints) {
+      // 使用 detectAllPivots 检测所有局部极值（不过滤）
+      const candles = useChartStore.getState().candles;
+      const allPivots = detectAllPivots(candles, 2, 2);
 
-      // 低线系列标记 LL (更低低点)
-      const lowMarkers: SeriesMarker<Time>[] = swingPoints
-        .filter((sp) => sp.type === "low")
-        .map((sp) => ({
-          time: sp.time as Time,
-          position: "inBar" as const,
-          color: "#60a5fa", // 蓝色标记
-          shape: "circle" as const,
-          text: "LL",
-        }));
+      if (allPivots.length > 0) {
+        // 高线系列标记局部高点 (H)
+        const highMarkers: SeriesMarker<Time>[] = allPivots
+          .filter((sp) => sp.type === "high")
+          .map((sp) => ({
+            time: sp.time as Time,
+            position: "inBar" as const,
+            color: "#fbbf24", // 黄色标记
+            shape: "circle" as const,
+            text: "H",
+          }));
 
-      highLineSeriesRef.current.setMarkers(highMarkers);
-      lowLineSeriesRef.current.setMarkers(lowMarkers);
+        // 低线系列标记局部低点 (L)
+        const lowMarkers: SeriesMarker<Time>[] = allPivots
+          .filter((sp) => sp.type === "low")
+          .map((sp) => ({
+            time: sp.time as Time,
+            position: "inBar" as const,
+            color: "#60a5fa", // 蓝色标记
+            shape: "circle" as const,
+            text: "L",
+          }));
+
+        highLineSeriesRef.current.setMarkers(highMarkers);
+        lowLineSeriesRef.current.setMarkers(lowMarkers);
+      } else {
+        highLineSeriesRef.current.setMarkers([]);
+        lowLineSeriesRef.current.setMarkers([]);
+      }
     } else {
       highLineSeriesRef.current.setMarkers([]);
       lowLineSeriesRef.current.setMarkers([]);

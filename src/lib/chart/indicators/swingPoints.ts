@@ -9,7 +9,7 @@ import { Candle, SwingPoint } from "@/types/chart";
  * @param candles - K线数据
  * @param leftBars - 左侧确认K线数量（默认3）
  * @param rightBars - 右侧确认K线数量（默认3）
- * @param minSwingPercent - 两个swing point之间的最小价格变化百分比（默认0.5%）
+ * @param minSwingPercent - 两个swing point之间的最小价格变化百分比（默认1.5%）
  */
 export function detectSwingPoints(
   candles: Candle[],
@@ -124,6 +124,86 @@ export function detectSwingPoints(
   }
 
   return result;
+}
+
+/**
+ * 检测所有局部极值（不过滤，不过分组）
+ * 用于折线图标记每个波峰波谷
+ *
+ * @param candles - K线数据
+ * @param leftBars - 左侧确认K线数量（默认2）
+ * @param rightBars - 右侧确认K线数量（默认2）
+ */
+export function detectAllPivots(
+  candles: Candle[],
+  leftBars: number = 2,
+  rightBars: number = 2
+): SwingPoint[] {
+  if (candles.length < Math.max(leftBars, rightBars) + 1) return [];
+
+  const results: SwingPoint[] = [];
+
+  for (let i = leftBars; i < candles.length - rightBars; i++) {
+    const current = candles[i];
+
+    // 动态计算实际可用的 rightBars
+    const actualRightBars = Math.min(rightBars, candles.length - 1 - i);
+
+    // 检查 Pivot High (局部高点)
+    let isPivotHigh = true;
+    for (let j = 1; j <= leftBars; j++) {
+      if (candles[i - j].high >= current.high) {
+        isPivotHigh = false;
+        break;
+      }
+    }
+    if (isPivotHigh && actualRightBars > 0) {
+      for (let j = 1; j <= actualRightBars; j++) {
+        if (candles[i + j].high > current.high) {
+          isPivotHigh = false;
+          break;
+        }
+      }
+    }
+
+    if (isPivotHigh) {
+      results.push({
+        type: "high",
+        price: current.high,
+        time: current.time,
+        index: i,
+      });
+    }
+
+    // 检查 Pivot Low (局部低点)
+    let isPivotLow = true;
+    for (let j = 1; j <= leftBars; j++) {
+      if (candles[i - j].low <= current.low) {
+        isPivotLow = false;
+        break;
+      }
+    }
+    if (isPivotLow && actualRightBars > 0) {
+      for (let j = 1; j <= actualRightBars; j++) {
+        if (candles[i + j].low < current.low) {
+          isPivotLow = false;
+          break;
+        }
+      }
+    }
+
+    if (isPivotLow) {
+      results.push({
+        type: "low",
+        price: current.low,
+        time: current.time,
+        index: i,
+      });
+    }
+  }
+
+  // 按时间排序
+  return results.sort((a, b) => a.time - b.time);
 }
 
 function selectBestFromGroup(group: SwingPoint[]): SwingPoint {
