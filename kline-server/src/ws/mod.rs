@@ -50,18 +50,29 @@ async fn fix_missing_klines(
         let curr_time = klines[i].open_time;
         let expected_diff = tf_seconds;
 
-        // 如果时间差不等于周期，说明有缺失
-        if curr_time - prev_time > expected_diff {
-            let missing_count = ((curr_time - prev_time) / expected_diff) as usize - 1;
+        // 跳过无效数据（时间戳为0或负数）
+        if prev_time <= 0 || curr_time <= 0 {
+            i += 1;
+            continue;
+        }
+
+        let time_diff = curr_time - prev_time;
+
+        // 如果时间差大于周期，说明有缺失（允许1秒误差）
+        if time_diff > expected_diff + 1 {
+            let missing_count = (time_diff / expected_diff) as usize - 1;
             if missing_count > 0 && missing_count <= 100 {
                 // 缺失太多可能是数据问题，跳过
-                missing_ranges.push((prev_time + expected_diff, curr_time - expected_diff));
+                let start_time = prev_time + expected_diff;
+                let end_time = curr_time - expected_diff;
+                missing_ranges.push((start_time, end_time));
                 info!(
-                    "[{}] Detected {} missing klines between {} and {} for {}@{}",
+                    "[{}] Detected {} missing klines between {} and {} (diff={}) for {}@{}",
                     exchange.exchange_type().as_str(),
                     missing_count,
-                    prev_time + expected_diff,
-                    curr_time - expected_diff,
+                    start_time,
+                    end_time,
+                    time_diff,
                     symbol,
                     timeframe
                 );
