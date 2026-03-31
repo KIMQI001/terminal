@@ -18,41 +18,68 @@ function calculateSwingLevels(candles: Candle[], timeframe: string, currentPrice
   const swings: SwingPoint[] = detectSwingPoints(candles, 5);
   const price = candles[candles.length - 1].close;
 
-  return swings.slice(-8).map((sp): HLLevel => {
-    const distance = Math.abs((price - sp.price) / price) * 100;
-    let status: HLLevel['status'];
-    let category: HLLevel['category'];
+  // 分离高低点并排序
+  const highs = swings.filter(sp => sp.type === 'high').slice(-8);
+  const lows = swings.filter(sp => sp.type === 'low').slice(-8);
 
-    if (sp.type === 'high') {
-      category = 'resistance';
-      if (price > sp.price * 1.001) {
-        status = 'broken'; // 价格已突破
-      } else if (price < sp.price * 0.999) {
-        status = 'below'; // 价格在下方
-      } else {
-        status = 'approaching';
-      }
+  // 分类 HH/HL/LH/LL
+  const results: HLLevel[] = [];
+
+  // 高点：与前一个高点比较
+  for (let i = 1; i < highs.length; i++) {
+    const sp = highs[i];
+    const prevSp = highs[i - 1];
+    const isHigherHigh = sp.price > prevSp.price;
+    const distance = Math.abs((price - sp.price) / price) * 100;
+
+    let status: HLLevel['status'];
+    if (price > sp.price * 1.001) {
+      status = 'broken';
+    } else if (price < sp.price * 0.999) {
+      status = 'below';
     } else {
-      category = 'support';
-      if (price < sp.price * 0.999) {
-        status = 'broken'; // 价格已跌破
-      } else if (price > sp.price * 1.001) {
-        status = 'above'; // 价格在上方
-      } else {
-        status = 'approaching';
-      }
+      status = 'approaching';
     }
 
-    return {
+    results.push({
       price: sp.price,
       time: sp.time,
-      type: sp.type === 'high' ? (sp.price > price ? 'hh' : 'lh') : (sp.price < price ? 'll' : 'hl'),
+      type: isHigherHigh ? 'hh' : 'lh',
       timeframe,
       distance,
       status,
-      category,
-    };
-  });
+      category: 'resistance',
+    });
+  }
+
+  // 低点：与前一个低点比较
+  for (let i = 1; i < lows.length; i++) {
+    const sp = lows[i];
+    const prevSp = lows[i - 1];
+    const isHigherLow = sp.price > prevSp.price;
+    const distance = Math.abs((price - sp.price) / price) * 100;
+
+    let status: HLLevel['status'];
+    if (price < sp.price * 0.999) {
+      status = 'broken';
+    } else if (price > sp.price * 1.001) {
+      status = 'above';
+    } else {
+      status = 'approaching';
+    }
+
+    results.push({
+      price: sp.price,
+      time: sp.time,
+      type: isHigherLow ? 'hl' : 'll',
+      timeframe,
+      distance,
+      status,
+      category: 'support',
+    });
+  }
+
+  return results;
 }
 
 export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
@@ -248,9 +275,14 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
     );
   }
 
-  // 分类显示
-  const aboveLevels = hlLevels.filter(l => l.price > (currentPrice || 0));
-  const belowLevels = hlLevels.filter(l => l.price < (currentPrice || 0));
+  // 分类显示：上方压力是 LH，下方支撑是 HL
+  const upperResistance = hlLevels.filter(l => l.type === 'lh'); // 上方压力 = LH
+  const lowerSupport = hlLevels.filter(l => l.type === 'hl');   // 下方支撑 = HL
+
+  // 压力位按价格从低到高排序（接近价格的在前）
+  const sortedResistance = [...upperResistance].sort((a, b) => b.price - a.price);
+  // 支撑位按价格从高到低排序（接近价格的在前）
+  const sortedSupport = [...lowerSupport].sort((a, b) => b.price - a.price);
 
   return (
     <div
@@ -310,16 +342,15 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
             </div>
           </div>
 
-          {/* 价格上方 - 压力位 */}
+          {/* 上方压力位 - LH (更低高点) */}
           <div className="mb-3">
             <div className="flex items-center gap-1 mb-2 text-xs text-[var(--text-secondary)]">
               <ArrowUp className="w-3 h-3 text-red-400" />
-              <span>上方压力位 (价格 &gt; 当前)</span>
+              <span>上方压力 (LH)</span>
             </div>
-            {aboveLevels.filter(l => l.category === 'resistance').length > 0 ? (
+            {sortedResistance.length > 0 ? (
               <div className="space-y-1">
-                {aboveLevels
-                  .filter(l => l.category === 'resistance')
+                {sortedResistance
                   .slice(0, 4)
                   .map((level, idx) => (
                     <div
@@ -331,9 +362,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                       }`}
                     >
                       <div className="flex items-center gap-2">
-                        <span className={`font-mono font-medium ${getTypeColor(level.type, level.category)}`}>
-                          {getTypeLabel(level.type)}
-                        </span>
+                        <span className="text-orange-400 font-mono font-medium">LH</span>
                         <span className={`text-xs ${getTimeframeColor(level.timeframe)}`}>
                           {level.timeframe}
                         </span>
@@ -354,16 +383,15 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
             )}
           </div>
 
-          {/* 价格下方 - 支撑位 */}
+          {/* 下方支撑位 - HL (更高低点) */}
           <div>
             <div className="flex items-center gap-1 mb-2 text-xs text-[var(--text-secondary)]">
               <ArrowDown className="w-3 h-3 text-green-400" />
-              <span>下方支撑位 (价格 &lt; 当前)</span>
+              <span>下方支撑 (HL)</span>
             </div>
-            {belowLevels.filter(l => l.category === 'support').length > 0 ? (
+            {sortedSupport.length > 0 ? (
               <div className="space-y-1">
-                {belowLevels
-                  .filter(l => l.category === 'support')
+                {sortedSupport
                   .slice(0, 4)
                   .map((level, idx) => (
                     <div
@@ -375,9 +403,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                       }`}
                     >
                       <div className="flex items-center gap-2">
-                        <span className={`font-mono font-medium ${getTypeColor(level.type, level.category)}`}>
-                          {getTypeLabel(level.type)}
-                        </span>
+                        <span className="text-green-400 font-mono font-medium">HL</span>
                         <span className={`text-xs ${getTimeframeColor(level.timeframe)}`}>
                           {level.timeframe}
                         </span>
@@ -401,10 +427,8 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
           {/* 图例 */}
           <div className="mt-3 pt-2 border-t border-[var(--border-color)]">
             <div className="flex items-center gap-3 text-xs text-[var(--text-secondary)] flex-wrap">
-              <span><span className="text-red-400">HH</span>更高高点</span>
-              <span><span className="text-orange-400">LH</span>更低高点</span>
-              <span><span className="text-green-400">HL</span>更高低点</span>
-              <span><span className="text-cyan-400">LL</span>更低低点</span>
+              <span><span className="text-orange-400">LH</span>更低高点(压力)</span>
+              <span><span className="text-green-400">HL</span>更高低点(支撑)</span>
             </div>
             <div className="flex items-center gap-3 mt-2 text-xs text-[var(--text-secondary)]">
               <span className="text-blue-400">15m</span>
