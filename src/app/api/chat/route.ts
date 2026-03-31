@@ -46,6 +46,42 @@ async function getCandles(symbol: string, interval: string): Promise<{ candles: 
   return { candles, currentPrice };
 }
 
+// 获取多周期 K 线数据
+async function getMultiTimeframeCandles(symbol: string): Promise<{
+  candles1h: Candle[];
+  candles15m: Candle[];
+  currentPrice: string;
+}> {
+  const [res1h, res15m] = await Promise.all([
+    fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=1h&limit=200`),
+    fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=15m&limit=200`),
+  ]);
+
+  const [raw1h, raw15m] = await Promise.all([res1h.json(), res15m.json()]);
+
+  const candles1h: Candle[] = raw1h.map((k: [number, string, string, string, string, string, number]) => ({
+    time: k[0],
+    open: parseFloat(k[1]),
+    high: parseFloat(k[2]),
+    low: parseFloat(k[3]),
+    close: parseFloat(k[4]),
+    volume: parseFloat(k[5]),
+  }));
+
+  const candles15m: Candle[] = raw15m.map((k: [number, string, string, string, string, string, number]) => ({
+    time: k[0],
+    open: parseFloat(k[1]),
+    high: parseFloat(k[2]),
+    low: parseFloat(k[3]),
+    close: parseFloat(k[4]),
+    volume: parseFloat(k[5]),
+  }));
+
+  const currentPrice = candles15m[candles15m.length - 1].close.toString();
+
+  return { candles1h, candles15m, currentPrice };
+}
+
 // 检测用户询问意图
 function detectUserIntent(message: string): string[] {
   const intents: string[] = [];
@@ -265,6 +301,164 @@ function formatSwing(candles: Candle[], currentPrice: string): string {
 【下方支撑】: ${support}`;
 }
 
+// 分析单周期结构数据
+interface StructureData {
+  trend: 'bullish' | 'bearish' | 'neutral';
+  hh: string;
+  hl: string;
+  lh: string;
+  ll: string;
+  position: string;
+  nextTarget: string;
+  support: string;
+  nearestHigh: string;
+  nearestLow: string;
+}
+
+function analyzeStructure(candles: Candle[], currentPrice: string): StructureData {
+  const price = parseFloat(currentPrice);
+  const swings = detectSwingPoints(candles, 5);
+  const highs = swings.filter(s => s.type === 'high');
+  const lows = swings.filter(s => s.type === 'low');
+
+  if (highs.length < 2 || lows.length < 2) {
+    return { trend: 'neutral', hh: '', hl: '', lh: '', ll: '', position: '数据不足', nextTarget: '', support: '', nearestHigh: '', nearestLow: '' };
+  }
+
+  const recentHighs = highs.slice(-5);
+  const recentLows = lows.slice(-5);
+
+  let hh = '', hl = '', lh = '', ll = '';
+  let trend: 'bullish' | 'bearish' | 'neutral' = 'neutral';
+
+  for (let i = 1; i < recentHighs.length; i++) {
+    if (recentHighs[i].price > recentHighs[i-1].price) {
+      hh = `$${recentHighs[i].price.toFixed(2)}`;
+    } else {
+      lh = `$${recentHighs[i].price.toFixed(2)}`;
+    }
+  }
+
+  for (let i = 1; i < recentLows.length; i++) {
+    if (recentLows[i].price > recentLows[i-1].price) {
+      hl = `$${recentLows[i].price.toFixed(2)}`;
+    } else {
+      ll = `$${recentLows[i].price.toFixed(2)}`;
+    }
+  }
+
+  if (hh && hl) {
+    trend = 'bullish';
+  } else if (lh && ll) {
+    trend = 'bearish';
+  }
+
+  let position = '';
+  let nextTarget = '';
+  let support = '';
+
+  if (trend === 'bullish') {
+    if (price < parseFloat(hl)) {
+      position = `价格低于HL(${hl})，回踩中`;
+      support = hl;
+      nextTarget = hh;
+    } else if (price > parseFloat(hh)) {
+      position = `突破HH(${hh})，多头延续`;
+      support = hl;
+      nextTarget = '新高';
+    } else {
+      position = `HH(${hh})与HL(${hl})之间`;
+      support = hl;
+      nextTarget = hh;
+    }
+  } else if (trend === 'bearish') {
+    if (price > parseFloat(lh)) {
+      position = `价格高于LH(${lh})，反弹中`;
+      nextTarget = ll;
+      support = lh;
+    } else if (price < parseFloat(ll)) {
+      position = `跌破LL(${ll})，空头延续`;
+      nextTarget = '新低';
+      support = lh;
+    } else {
+      position = `LH(${lh})与LL(${ll})之间`;
+      nextTarget = ll;
+      support = lh;
+    }
+  }
+
+  const nearestHigh = recentHighs[recentHighs.length - 1];
+  const nearestLow = recentLows[recentLows.length - 1];
+
+  return {
+    trend,
+    hh,
+    hl,
+    lh,
+    ll,
+    position,
+    nextTarget,
+    support,
+    nearestHigh: nearestHigh ? `$${nearestHigh.price.toFixed(2)}` : '',
+    nearestLow: nearestLow ? `$${nearestLow.price.toFixed(2)}` : '',
+  };
+}
+
+// 格式化多周期结构分析
+function formatMultiTimeframeStructure(
+  candles1h: Candle[],
+  candles15m: Candle[],
+  currentPrice: string
+): string {
+  const price = parseFloat(currentPrice);
+  const structure1h = analyzeStructure(candles1h, currentPrice);
+  const structure15m = analyzeStructure(candles15m, currentPrice);
+
+  // 综合分析
+  let overallTrend = 'neutral';
+  let analysis = '';
+
+  // 1H 决定大方向，15m 找入场点
+  if (structure1h.trend === 'bullish' && structure15m.trend === 'bullish') {
+    overallTrend = '🟢 多头共振';
+    analysis = `1H确认多头，15m回踩入场`;
+  } else if (structure1h.trend === 'bearish' && structure15m.trend === 'bearish') {
+    overallTrend = '🔴 空头共振';
+    analysis = `1H确认空头，15m反弹做空`;
+  } else if (structure1h.trend === 'bullish' && structure15m.trend === 'bearish') {
+    overallTrend = '🟡 背离';
+    analysis = `1H多头但15m空头，等待15m企稳`;
+  } else if (structure1h.trend === 'bearish' && structure15m.trend === 'bullish') {
+    overallTrend = '🟡 背离';
+    analysis = `1H空头但15m多头，等待15m企稳`;
+  } else {
+    overallTrend = '⚪ 中性';
+    analysis = `等待结构确认`;
+  }
+
+  return `【多周期结构分析】(1H + 15m)
+当前价格: $${currentPrice}
+综合判断: ${overallTrend} - ${analysis}
+
+━━━━━━━━ 1H 大周期 ━━━━━━━━
+趋势: ${structure1h.trend === 'bullish' ? '🟢 多头' : structure1h.trend === 'bearish' ? '🔴 空头' : '⚪ 中性'}
+位置: ${structure1h.position}
+HH: ${structure1h.hh || '无'} | HL: ${structure1h.hl || '无'} (支撑)
+LH: ${structure1h.lh || '无'} (阻力) | LL: ${structure1h.ll || '无'}
+
+━━━━━━━━ 15m 小周期 ━━━━━━━━
+趋势: ${structure15m.trend === 'bullish' ? '🟢 多头' : structure15m.trend === 'bearish' ? '🔴 空头' : '⚪ 中性'}
+位置: ${structure15m.position}
+HH: ${structure15m.hh || '无'} | HL: ${structure15m.hl || '无'} (支撑)
+LH: ${structure15m.lh || '无'} (阻力) | LL: ${structure15m.ll || '无'}
+
+【关键决策】
+1H ${structure1h.trend === 'bullish' ? '做多为主' : structure1h.trend === 'bearish' ? '做空为主' : '观望'}
+15m ${structure15m.position}
+入场参考: 15m回踩 ${structure15m.hl || structure1h.hl || '支撑位'} 可尝试做多
+止损参考: 跌破 ${structure15m.ll || structure1h.ll || '前低'}`;
+}
+
 // 格式化流动性分析
 function formatLiquidity(candles: Candle[]): string {
   const liq = detectLiquidityZones(candles);
@@ -321,6 +515,9 @@ export async function POST(request: NextRequest) {
     // 获取 K 线数据
     const { candles, currentPrice } = await getCandles(symbol, interval);
 
+    // 获取多周期数据 (1H + 15m)
+    const { candles1h, candles15m } = await getMultiTimeframeCandles(symbol);
+
     // 检测用户询问意图
     const lastMessage = messages[messages.length - 1]?.content || '';
     const intents = detectUserIntent(lastMessage);
@@ -343,13 +540,13 @@ ${formatLiquidity(candles)}
       skillData += `\n${mtfFvg}`;
 
       if (intents.includes('structure')) {
-        skillData += `\n${formatStructure(candles)}`;
+        skillData += `\n${formatMultiTimeframeStructure(candles1h, candles15m, currentPrice)}`;
       }
       if (intents.includes('orderblocks')) {
         skillData += `\n${formatOB(candles)}`;
       }
       if (intents.includes('swing')) {
-        skillData += `\n${formatSwing(candles, currentPrice)}`;
+        skillData += `\n${formatMultiTimeframeStructure(candles1h, candles15m, currentPrice)}`;
       }
       if (intents.includes('liquidity')) {
         skillData += `\n${formatLiquidity(candles)}`;
