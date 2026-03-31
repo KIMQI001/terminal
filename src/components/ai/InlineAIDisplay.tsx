@@ -193,7 +193,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
 
       {/* Content */}
       {!isCollapsed && (
-        <div className="p-3">
+        <div className="p-3 max-h-[400px] overflow-y-auto">
           {isLoading && !data ? (
             <div className="text-center py-4 text-[var(--text-secondary)]">
               <RefreshCw className="w-6 h-6 mx-auto animate-spin" />
