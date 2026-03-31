@@ -8,10 +8,11 @@ import { persist } from 'zustand/middleware';
 export interface HLLevel {
   price: number;
   time: number;
-  type: 'hl' | 'hh' | 'lh' | 'll';
+  type: 'hh' | 'hl' | 'lh' | 'll';
   timeframe: string; // 周期
   distance: number; // 与当前价距离 %
   status: 'above' | 'below' | 'approaching' | 'broken';
+  category: 'resistance' | 'support'; // 压力位还是支撑位
 }
 
 interface AgentState {
