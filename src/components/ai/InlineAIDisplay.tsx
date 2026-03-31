@@ -275,10 +275,10 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
     );
   }
 
-  // 上方压力 = LL/HL（下方的低点在价格上方形成压力）
-  const upperResistance = hlLevels.filter(l => l.type === 'll' || l.type === 'hl');
-  // 下方支撑 = HH/LH（上方的高点在价格下方形成支撑）
-  const lowerSupport = hlLevels.filter(l => l.type === 'hh' || l.type === 'lh');
+  // 上方压力 = LL/HL（下方的低点在价格上方形成压力）且价格高于当前价
+  const upperResistance = hlLevels.filter(l => (l.type === 'll' || l.type === 'hl') && l.price > currentPrice);
+  // 下方支撑 = HH/LH（上方的高点在价格下方形成支撑）且价格低于当前价
+  const lowerSupport = hlLevels.filter(l => (l.type === 'hh' || l.type === 'lh') && l.price < currentPrice);
 
   // 压力位按价格从低到高排序（接近价格的在前）
   const sortedResistance = [...upperResistance].sort((a, b) => a.price - b.price);
