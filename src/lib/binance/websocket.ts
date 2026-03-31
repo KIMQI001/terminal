@@ -154,8 +154,8 @@ export class BinanceWebSocket {
   private startPing() {
     this.pingInterval = setInterval(() => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        // 使用 WebSocket 原始 Ping 帧
-        this.ws.send("ping");
+        // 发送符合 WsMessage 格式的 JSON Ping
+        this.ws.send(JSON.stringify({ type: "Ping" }));
       }
     }, 30000);
   }
