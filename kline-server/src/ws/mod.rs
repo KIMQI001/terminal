@@ -14,6 +14,120 @@ const DEFAULT_CACHE_SIZE: usize = 1000; // 默认缓存大小
 const LARGE_CACHE_SIZE: usize = 5000; // BTC/ETH 大缓存
 const DB_BATCH_SIZE: usize = 100; // 批量写入数据库的数量
 
+/// 获取时间周期的秒数
+fn get_timeframe_seconds(timeframe: &str) -> i64 {
+    match timeframe {
+        "1m" => 60,
+        "5m" => 300,
+        "15m" => 900,
+        "1h" => 3600,
+        "4h" => 14400,
+        "1d" => 86400,
+        "4d" => 345600,
+        "1w" => 604800,
+        _ => 3600, // 默认 1h
+    }
+}
+
+/// 检测并修复缺失的 K 线
+async fn fix_missing_klines(
+    klines: &mut Vec<Kline>,
+    symbol: &str,
+    timeframe: &str,
+    exchange: &Arc<dyn Exchange>,
+) -> anyhow::Result<()> {
+    if klines.len() < 2 {
+        return Ok(());
+    }
+
+    let tf_seconds = get_timeframe_seconds(timeframe);
+    let mut missing_ranges: Vec<(i64, i64)> = Vec::new();
+    let mut i = 1;
+
+    // 检测缺失区间
+    while i < klines.len() {
+        let prev_time = klines[i - 1].open_time;
+        let curr_time = klines[i].open_time;
+        let expected_diff = tf_seconds;
+
+        // 如果时间差不等于周期，说明有缺失
+        if curr_time - prev_time > expected_diff {
+            let missing_count = ((curr_time - prev_time) / expected_diff) as usize - 1;
+            if missing_count > 0 && missing_count <= 100 {
+                // 缺失太多可能是数据问题，跳过
+                missing_ranges.push((prev_time + expected_diff, curr_time - expected_diff));
+                info!(
+                    "[{}] Detected {} missing klines between {} and {} for {}@{}",
+                    exchange.exchange_type().as_str(),
+                    missing_count,
+                    prev_time + expected_diff,
+                    curr_time - expected_diff,
+                    symbol,
+                    timeframe
+                );
+            }
+        }
+        i += 1;
+    }
+
+    if missing_ranges.is_empty() {
+        return Ok(());
+    }
+
+    // 获取 REST API 来补数据
+    let rest = exchange.rest();
+
+    for (start_time, end_time) in missing_ranges {
+        let start_ms = start_time * 1000;
+        let end_ms = end_time * 1000;
+
+        // 计算需要获取多少根
+        let count = ((end_time - start_time) / tf_seconds) as u32 + 1;
+
+        info!(
+            "[{}] Fetching {} missing klines for {}@{} from {} to {}",
+            exchange.exchange_type().as_str(),
+            count,
+            symbol,
+            timeframe,
+            start_time,
+            end_time
+        );
+
+        match rest.get_klines(symbol, timeframe, count, Some(start_ms), Some(end_ms)).await {
+            Ok(filled_klines) if !filled_klines.is_empty() => {
+                let before_count = klines.len();
+                klines.extend(filled_klines);
+                klines.sort_by_key(|k| k.open_time);
+                klines.dedup_by_key(|k| k.open_time);
+                info!(
+                    "[{}] Fixed {} missing klines, total now: {}",
+                    exchange.exchange_type().as_str(),
+                    klines.len() - before_count,
+                    klines.len()
+                );
+            }
+            Ok(_) => {
+                warn!(
+                    "[{}] No klines returned for missing range {} to {}",
+                    exchange.exchange_type().as_str(),
+                    start_time,
+                    end_time
+                );
+            }
+            Err(e) => {
+                warn!(
+                    "[{}] Failed to fetch missing klines: {}",
+                    exchange.exchange_type().as_str(),
+                    e
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// 根据交易对获取缓存大小
 /// BTC/ETH 使用 5000 根 K 线，其他使用 1000 根
 fn get_cache_size(symbol: &str) -> usize {
@@ -192,6 +306,9 @@ impl KlineManager {
         // 去重并排序
         all_klines.sort_by_key(|k| k.open_time);
         all_klines.dedup_by_key(|k| k.open_time);
+
+        // 4.5 检测并修复中间缺失的 K 线
+        fix_missing_klines(&mut all_klines, &symbol_upper, timeframe, &exchange).await?;
 
         // 只保留最近的 cache_size 条
         if all_klines.len() > cache_size {
