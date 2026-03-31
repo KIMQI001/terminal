@@ -768,7 +768,7 @@ export function TradingChart() {
     }
   }, [orderBlocks, fvgs, liquidityZones, oteZones, breakerBlocks, liquidationData, enabled.orderBlocks, enabled.fvg, enabled.liquidityZones, enabled.killzones, enabled.ote, enabled.breakerBlocks, timeframe]);
 
-  // Update Swing Points Markers
+  // Update Swing Points Markers (蜡烛图模式)
   useEffect(() => {
     if (!candleSeriesRef.current) return;
 
@@ -785,6 +785,42 @@ export function TradingChart() {
       candleSeriesRef.current.setMarkers([]);
     }
   }, [swingPoints, enabled.swingPoints]);
+
+  // Update Swing Points Markers (折线图模式) - 在高线/低线上标记峰值
+  useEffect(() => {
+    if (chartType !== "line") return;
+    if (!highLineSeriesRef.current || !lowLineSeriesRef.current) return;
+
+    if (enabled.swingPoints && swingPoints.length > 0) {
+      // 高线系列标记 HH (更高高点)
+      const highMarkers: SeriesMarker<Time>[] = swingPoints
+        .filter((sp) => sp.type === "high")
+        .map((sp) => ({
+          time: sp.time as Time,
+          position: "inBar" as const,
+          color: "#fbbf24", // 黄色标记
+          shape: "circle" as const,
+          text: "HH",
+        }));
+
+      // 低线系列标记 LL (更低低点)
+      const lowMarkers: SeriesMarker<Time>[] = swingPoints
+        .filter((sp) => sp.type === "low")
+        .map((sp) => ({
+          time: sp.time as Time,
+          position: "inBar" as const,
+          color: "#60a5fa", // 蓝色标记
+          shape: "circle" as const,
+          text: "LL",
+        }));
+
+      highLineSeriesRef.current.setMarkers(highMarkers);
+      lowLineSeriesRef.current.setMarkers(lowMarkers);
+    } else {
+      highLineSeriesRef.current.setMarkers([]);
+      lowLineSeriesRef.current.setMarkers([]);
+    }
+  }, [swingPoints, enabled.swingPoints, chartType]);
 
   // Update Trading Lines (Entry, Stop Loss, Take Profit, Orders, Positions)
   useEffect(() => {
