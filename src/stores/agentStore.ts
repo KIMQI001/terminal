@@ -9,6 +9,7 @@ export interface HLLevel {
   price: number;
   time: number;
   type: 'hl' | 'hh' | 'lh' | 'll';
+  timeframe: string; // 周期
   distance: number; // 与当前价距离 %
   status: 'above' | 'below' | 'approaching' | 'broken';
 }

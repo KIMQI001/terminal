@@ -5,10 +5,43 @@ import { Activity, X, RefreshCw, ChevronDown, ChevronUp, Move, TrendingUp, Trend
 import { useChartStore } from '@/stores/chartStore';
 import { useAgentStore, HLLevel } from '@/stores/agentStore';
 import { detectSwingPoints } from '@/lib/chart/indicators/swingPoints';
-import type { SwingPoint } from '@/types/chart';
+import type { SwingPoint, Candle } from '@/types/chart';
 
 interface InlineAIDisplayProps {
   symbol?: string;
+}
+
+// 计算单个周期的 HL 水平
+function calculateHLLevels(candles: Candle[], timeframe: string, currentPrice: number): HLLevel[] {
+  if (candles.length < 10) return [];
+
+  const swings: SwingPoint[] = detectSwingPoints(candles, 5);
+
+  return swings
+    .filter((sp) => sp.type === 'low')
+    .slice(-5)
+    .map((sp): HLLevel => {
+      const distance = ((currentPrice - sp.price) / currentPrice) * 100;
+      let status: HLLevel['status'];
+
+      if (currentPrice > sp.price * 1.001) {
+        status = 'broken';
+      } else if (currentPrice < sp.price * 0.999) {
+        status = 'below';
+      } else {
+        status = 'approaching';
+      }
+
+      return {
+        price: sp.price,
+        time: sp.time,
+        type: 'hl',
+        timeframe,
+        distance,
+        status,
+      };
+    })
+    .filter((hl) => hl.price < currentPrice && hl.distance < 5);
 }
 
 export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
@@ -42,46 +75,59 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
     if (candles.length > 10) {
       updateHLLevels();
     }
-  }, [candles]);
+  }, [candles, timeframe]);
 
-  // 更新 HL 水平线
-  const updateHLLevels = () => {
-    const currentCandles = candles;
-    if (currentCandles.length < 10) return;
-
-    const swings: SwingPoint[] = detectSwingPoints(currentCandles, 5);
-    const price = currentCandles[currentCandles.length - 1].close;
+  // 更新 HL 水平线（按周期分组）
+  const updateHLLevels = async () => {
+    const price = candles[candles.length - 1]?.close;
+    if (!price) return;
 
     setCurrentPrice(price);
 
-    // 筛选 HL (更高低点) - 多头回调的支撑位
-    const hls = swings
-      .filter((sp) => sp.type === 'low')
-      .slice(-5) // 最近 5 个
-      .map((sp): HLLevel => {
-        const distance = ((price - sp.price) / price) * 100;
-        let status: HLLevel['status'];
+    // 根据当前周期确定要监控的级别
+    const currentTf = timeframeRef.current;
+    let monitorTimeframes: string[] = [];
 
-        if (price > sp.price * 1.001) {
-          status = 'broken'; // 价格已突破
-        } else if (price < sp.price * 0.999) {
-          status = 'below'; // 价格在下方
-        } else {
-          status = 'approaching'; // 接近中
+    if (currentTf === '15m') {
+      monitorTimeframes = ['15m', '1h', '4h'];
+    } else if (currentTf === '1h') {
+      monitorTimeframes = ['1h', '4h', '1d'];
+    } else if (currentTf === '4h') {
+      monitorTimeframes = ['4h', '1d'];
+    } else {
+      monitorTimeframes = [currentTf];
+    }
+
+    // 获取各周期 K 线数据
+    const allHLs: HLLevel[] = [];
+
+    for (const tf of monitorTimeframes) {
+      try {
+        const res = await fetch(`/api/klines?symbol=${symbol}&interval=${tf}&limit=200`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.candles && data.candles.length > 10) {
+            const tfPrice = data.candles[data.candles.length - 1].close;
+            const levels = calculateHLLevels(data.candles, tf, tfPrice);
+            allHLs.push(...levels);
+          }
         }
+      } catch (e) {
+        console.error(`Failed to fetch ${tf} klines:`, e);
+      }
+    }
 
-        return {
-          price: sp.price,
-          time: sp.time,
-          type: 'hl',
-          distance,
-          status,
-        };
-      })
-      .filter((hl) => hl.price < price && hl.distance < 5) // 只显示价格在上面的 HL，距离 < 5%
-      .sort((a, b) => a.distance - b.distance); // 按距离排序
+    // 当前周期的 HL 用实时数据
+    const currentLevels = calculateHLLevels(candles, timeframeRef.current, price);
+    allHLs.push(...currentLevels);
 
-    setHLLevels(hls);
+    // 去重并按距离排序
+    const uniqueHLs = allHLs
+      .filter((hl, idx, arr) => arr.findIndex(h => h.price === hl.price) === idx)
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, 10); // 最多显示 10 个
+
+    setHLLevels(uniqueHLs);
   };
 
   // 如果开关关闭，不显示
@@ -141,7 +187,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
     });
   };
 
-  // 获取状态颜色和图标
+  // 获取状态图标
   const getStatusIcon = (status: HLLevel['status']) => {
     switch (status) {
       case 'broken':
@@ -165,6 +211,17 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
         return '等待回踩';
       default:
         return '';
+    }
+  };
+
+  // 周期颜色
+  const getTimeframeColor = (tf: string) => {
+    switch (tf) {
+      case '15m': return 'text-blue-400';
+      case '1h': return 'text-purple-400';
+      case '4h': return 'text-orange-400';
+      case '1d': return 'text-red-400';
+      default: return 'text-gray-400';
     }
   };
 
@@ -240,7 +297,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
           {/* HL 水平线列表 */}
           <div>
             <div className="text-xs text-[var(--text-secondary)] mb-2">
-              HL 支撑位 (价格上方)
+              HL 支撑位 (多周期)
             </div>
             {hlLevels.length > 0 ? (
               <div className="space-y-2">
@@ -258,8 +315,13 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                     <div className="flex items-center gap-2">
                       {getStatusIcon(hl.status)}
                       <div>
-                        <div className="text-sm font-mono font-medium">
-                          ${formatPrice(hl.price)}
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-mono font-medium">
+                            ${formatPrice(hl.price)}
+                          </span>
+                          <span className={`text-xs ${getTimeframeColor(hl.timeframe)}`}>
+                            {hl.timeframe}
+                          </span>
                         </div>
                         <div className="text-xs text-[var(--text-secondary)]">
                           {formatTime(hl.time)}
@@ -303,6 +365,12 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                 <TrendingDown className="w-3 h-3 text-gray-400" />
                 <span>等待回踩</span>
               </div>
+            </div>
+            <div className="flex items-center gap-3 mt-2 text-xs text-[var(--text-secondary)]">
+              <span className="text-blue-400">15m</span>
+              <span className="text-purple-400">1h</span>
+              <span className="text-orange-400">4h</span>
+              <span className="text-red-400">1d</span>
             </div>
           </div>
         </div>
