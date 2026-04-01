@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Activity, X, RefreshCw, ChevronDown, ChevronUp, Move, TrendingUp, TrendingDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Activity, X, RefreshCw, ChevronDown, ChevronUp, Move } from 'lucide-react';
 import { useChartStore } from '@/stores/chartStore';
 import { useAgentStore, HLLevel } from '@/stores/agentStore';
 import { detectSwingPoints } from '@/lib/chart/indicators/swingPoints';
@@ -25,11 +25,6 @@ interface BullishChannelPrediction {
     llExpansion: number;
     hl2Contract: number;
   };
-  pricePosition: {
-    nearLevel: 'HL1';
-    distanceToHL: number;
-    distanceToLL: number;
-  };
 }
 
 interface BearishChannelPrediction {
@@ -46,88 +41,12 @@ interface BearishChannelPrediction {
     hhExpansion: number;
     lh2Contract: number;
   };
-  pricePosition: {
-    nearLevel: 'LH1';
-    distanceToLH: number;
-    distanceToHH: number;
-  };
 }
 
 type ChannelPrediction = BullishChannelPrediction | BearishChannelPrediction | null;
 
 interface InlineAIDisplayProps {
   symbol?: string;
-}
-
-// 计算单周期所有摆动点
-function calculateSwingLevels(candles: Candle[], timeframe: string, currentPrice: number): HLLevel[] {
-  if (candles.length < 10) return [];
-
-  const swings: SwingPoint[] = detectSwingPoints(candles, 5);
-  const price = candles[candles.length - 1].close;
-
-  // 分离高低点并排序
-  const highs = swings.filter(sp => sp.type === 'high').slice(-8);
-  const lows = swings.filter(sp => sp.type === 'low').slice(-8);
-
-  // 分类 HH/HL/LH/LL
-  const results: HLLevel[] = [];
-
-  // 高点：与前一个高点比较
-  for (let i = 1; i < highs.length; i++) {
-    const sp = highs[i];
-    const prevSp = highs[i - 1];
-    const isHigherHigh = sp.price > prevSp.price;
-    const distance = Math.abs((price - sp.price) / price) * 100;
-
-    let status: HLLevel['status'];
-    if (price > sp.price * 1.001) {
-      status = 'broken';
-    } else if (price < sp.price * 0.999) {
-      status = 'below';
-    } else {
-      status = 'approaching';
-    }
-
-    results.push({
-      price: sp.price,
-      time: sp.time,
-      type: isHigherHigh ? 'hh' : 'lh',
-      timeframe,
-      distance,
-      status,
-      category: 'resistance',
-    });
-  }
-
-  // 低点：与前一个低点比较
-  for (let i = 1; i < lows.length; i++) {
-    const sp = lows[i];
-    const prevSp = lows[i - 1];
-    const isHigherLow = sp.price > prevSp.price;
-    const distance = Math.abs((price - sp.price) / price) * 100;
-
-    let status: HLLevel['status'];
-    if (price < sp.price * 0.999) {
-      status = 'broken';
-    } else if (price > sp.price * 1.001) {
-      status = 'above';
-    } else {
-      status = 'approaching';
-    }
-
-    results.push({
-      price: sp.price,
-      time: sp.time,
-      type: isHigherLow ? 'hl' : 'll',
-      timeframe,
-      distance,
-      status,
-      category: 'support',
-    });
-  }
-
-  return results;
 }
 
 export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
@@ -137,9 +56,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
     inlineAIEnabled,
     setInlineAIEnabled,
     currentPrice,
-    hlLevels,
     setCurrentPrice,
-    setHLLevels,
   } = useAgentStore();
 
   const [isVisible, setIsVisible] = useState(true);
@@ -151,9 +68,10 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
   const [isDragging, setIsDragging] = useState(false);
   const dragRef = useRef<{ startX: number; startY: number; startPosX: number; startPosY: number } | null>(null);
 
-  // 最近1000根K线的HH/LH/LL/HL（基于swing point）
-  const recentLevels = (() => {
+  // 通道预测分析
+  const channelPrediction: ChannelPrediction = (() => {
     if (candles.length < 10) return null;
+
     const recent = candles.slice(-1000);
     const swings = detectSwingPoints(recent, 5);
 
@@ -165,54 +83,12 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
 
     if (highs.length < 2 || lows.length < 2) return null;
 
-    return {
-      hh: { price: highs[0].price, time: highs[0].time },
-      lh: { price: highs[1].price, time: highs[1].time },
-      ll: { price: lows[0].price, time: lows[0].time },
-      hl: { price: lows[1].price, time: lows[1].time },
-    };
-  })();
+    const hh = highs[0];
+    const lh = highs[1];
+    const ll = lows[0];
+    const hl = lows[1];
 
-  // 预测分析：价格接近H点时，预测突破后的下一个H位置
-  const prediction = (() => {
-    if (!currentPrice || !hlLevels.length) return null;
-
-    // 找上方最近的H点（HH/LH）
-    const upperH = hlLevels
-      .filter(l => (l.type === 'hh' || l.type === 'lh') && l.price > currentPrice)
-      .sort((a, b) => a.price - b.price);
-
-    if (upperH.length === 0) return null;
-
-    // 找距离最近的H
-    const nearestH = upperH[0];
-    const distanceToH = nearestH.price - currentPrice;
-
-    // 如果距离太远（>500点），不预测
-    if (distanceToH > 500) return null;
-
-    // 找这个H上方的下一个H
-    const nextH = upperH.find(h => h.price > nearestH.price);
-    if (!nextH) return null;
-
-    // 计算H之间的距离差，预测突破目标
-    const hDistance = nextH.price - nearestH.price;
-    const targetPrice = nearestH.price + hDistance;
-
-    return {
-      approachingH: nearestH,
-      nextH,
-      hDistance,
-      targetPrice,
-      distanceToH,
-    };
-  })();
-
-  // 通道预测分析
-  const channelPrediction: ChannelPrediction = (() => {
-    if (!recentLevels || !currentPrice) return null;
-
-    const { hh, lh, hl, ll } = recentLevels;
+    const price = candles[candles.length - 1].close;
 
     // 通道宽度 d = 两个高点之差
     const d = hh.price - lh.price;
@@ -220,63 +96,44 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
     if (d <= 0) return null;
 
     // 当前价格在 HL1 附近时（低点区间）的预测 - 上升通道形态
-    // 条件：currentPrice 在 HL 和 LL 之间
-    if (currentPrice < hl.price && currentPrice > ll.price) {
-      const distanceToHL = currentPrice - hl.price;
-      const distanceToLL = currentPrice - ll.price;
-
+    if (price < hl.price && price > ll.price) {
       return {
         type: 'bullish',
-        zone: 'low', // 低点区间
+        zone: 'low',
         knownPoints: {
-          hh1: hh,
-          hh2: lh,
-          hl1: hl,
+          hh1: { price: hh.price, time: hh.time },
+          hh2: { price: lh.price, time: lh.time },
+          hl1: { price: hl.price, time: hl.time },
         },
         d,
         predictions: {
-          hl2Equal: hl.price - d,      // 等距通道
-          llExpansion: hl.price - 2 * d, // 扩张三角形
-          hl2Contract: hl.price + d,    // 收敛三角形
-        },
-        pricePosition: {
-          nearLevel: 'HL1',
-          distanceToHL: Math.abs(distanceToHL),
-          distanceToLL: Math.abs(distanceToLL),
+          hl2Equal: hl.price - d,
+          llExpansion: hl.price - 2 * d,
+          hl2Contract: hl.price + d,
         },
       };
     }
 
     // 当前价格在 LH1 附近时（高点区间）的预测 - 下降通道形态
-    // 条件：currentPrice 在 HH 和 LH 之间
-    if (currentPrice > lh.price && currentPrice < hh.price) {
-      const dLow = lh.price - ll.price; // 用低点差更合理
-      const distanceToLH = currentPrice - lh.price;
-      const distanceToHH = currentPrice - hh.price;
-
+    if (price > lh.price && price < hh.price) {
+      const dLow = lh.price - ll.price;
       return {
         type: 'bearish',
-        zone: 'high', // 高点区间
+        zone: 'high',
         knownPoints: {
-          ll1: ll,
-          ll2: hl,
-          lh1: lh,
+          ll1: { price: ll.price, time: ll.time },
+          ll2: { price: hl.price, time: hl.time },
+          lh1: { price: lh.price, time: lh.time },
         },
         d: dLow,
         predictions: {
-          lh2Equal: lh.price + dLow,      // 等距通道
-          hhExpansion: lh.price + 2 * dLow, // 扩张三角形
-          lh2Contract: lh.price - dLow,    // 收敛三角形
-        },
-        pricePosition: {
-          nearLevel: 'LH1',
-          distanceToLH: Math.abs(distanceToLH),
-          distanceToHH: Math.abs(distanceToHH),
+          lh2Equal: lh.price + dLow,
+          hhExpansion: lh.price + 2 * dLow,
+          lh2Contract: lh.price - dLow,
         },
       };
     }
 
-    // 价格在其他位置
     return null;
   })();
 
@@ -285,81 +142,19 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
     timeframeRef.current = timeframe;
   }, [timeframe]);
 
-  // 监听 K 线数据变化，更新水平
+  // 监听 K 线数据变化，更新价格
   useEffect(() => {
-    if (candles.length > 10) {
-      updateSwingLevels();
+    if (candles.length > 0) {
+      const price = candles[candles.length - 1].close;
+      setCurrentPrice(price);
     }
-  }, [candles, timeframe]);
+  }, [candles, setCurrentPrice]);
 
-  // 定时刷新附近点位（每30秒）
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (candles.length > 10) {
-        updateSwingLevels();
-      }
-    }, 30000);
-
-    return () => clearInterval(interval);
-  }, [candles, timeframe]);
-
-  // 更新摆动点水平
-  const updateSwingLevels = async () => {
-    const price = candles[candles.length - 1]?.close;
-    if (!price) return;
-
-    setCurrentPrice(price);
-
-    // 根据当前周期确定要监控的级别
-    const currentTf = timeframeRef.current;
-    let monitorTimeframes: string[] = [];
-
-    if (currentTf === '15m') {
-      monitorTimeframes = ['15m', '1h', '4h'];
-    } else if (currentTf === '1h') {
-      monitorTimeframes = ['1h', '4h', '1d'];
-    } else if (currentTf === '4h') {
-      monitorTimeframes = ['4h', '1d'];
-    } else {
-      monitorTimeframes = [currentTf];
+  // 刷新价格
+  const refreshPrice = () => {
+    if (candles.length > 0) {
+      setCurrentPrice(candles[candles.length - 1].close);
     }
-
-    const allLevels: HLLevel[] = [];
-
-    for (const tf of monitorTimeframes) {
-      try {
-        let tfCandles: Candle[];
-
-        if (tf === currentTf) {
-          tfCandles = candles;
-        } else {
-          const res = await fetch(`${KLINE_API}/api/klines/${symbol.toUpperCase()}/${tf}?limit=200`);
-          if (res.ok) {
-            const data = await res.json();
-            tfCandles = data.klines;
-          } else {
-            console.error(`Failed to fetch ${tf} klines:`, res.status);
-            continue;
-          }
-        }
-
-        if (tfCandles && tfCandles.length > 10) {
-          const tfPrice = tfCandles[tfCandles.length - 1].close;
-          const levels = calculateSwingLevels(tfCandles, tf, tfPrice);
-          allLevels.push(...levels);
-        }
-      } catch (e) {
-        console.error(`Failed to fetch ${tf} klines:`, e);
-      }
-    }
-
-    // 去重（同一价格只保留一个）
-    const uniqueLevels = allLevels
-      .filter((level, idx, arr) => arr.findIndex(l => Math.abs(l.price - level.price) < 1) === idx)
-      .sort((a, b) => a.distance - b.distance)
-      .slice(0, 12);
-
-    setHLLevels(uniqueLevels);
   };
 
   // 如果开关关闭，不显示
@@ -415,37 +210,8 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
+      minute: '2-digit',
     });
-  };
-
-  // 周期颜色
-  const getTimeframeColor = (tf: string) => {
-    switch (tf) {
-      case '15m': return 'text-blue-400';
-      case '1h': return 'text-purple-400';
-      case '4h': return 'text-orange-400';
-      case '1d': return 'text-red-400';
-      default: return 'text-gray-400';
-    }
-  };
-
-  // 类型标签
-  const getTypeLabel = (type: HLLevel['type']) => {
-    switch (type) {
-      case 'hh': return 'HH';
-      case 'hl': return 'HL';
-      case 'lh': return 'LH';
-      case 'll': return 'LL';
-    }
-  };
-
-  // 类型颜色
-  const getTypeColor = (type: HLLevel['type'], category: HLLevel['category']) => {
-    if (category === 'resistance') {
-      return type === 'hh' ? 'text-red-400' : 'text-orange-400';
-    } else {
-      return type === 'hl' ? 'text-green-400' : 'text-cyan-400';
-    }
   };
 
   if (!isVisible) {
@@ -464,18 +230,10 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
     );
   }
 
-  // 收集附近1500点的所有swing point
-  const nearbyLevels = currentPrice ? hlLevels.filter(l =>
-    Math.abs(l.price - currentPrice) <= 1500
-  ) : [];
-
-  // 按价格从高到低排序
-  const sortedLevels = [...nearbyLevels].sort((a, b) => b.price - a.price);
-
   return (
     <div
       className={`fixed bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg shadow-lg z-40 transition-shadow ${isDragging ? 'shadow-2xl cursor-grabbing' : 'cursor-grab'}`}
-      style={{ left: position.x, top: position.y, width: 340 }}
+      style={{ left: position.x, top: position.y, width: 320 }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -486,7 +244,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
         <div className="flex items-center gap-2">
           <Move className="w-3 h-3 text-[var(--text-secondary)]" />
           <Activity className="w-4 h-4 text-green-500" />
-          <span className="text-sm font-medium">实时监控</span>
+          <span className="text-sm font-medium">实时通道监控</span>
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -497,7 +255,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
             {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
           </button>
           <button
-            onClick={updateSwingLevels}
+            onClick={refreshPrice}
             disabled={isLoading}
             className="p-1 hover:bg-[var(--bg-primary)] rounded"
             title="刷新"
@@ -516,307 +274,147 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
 
       {/* Content */}
       {!isCollapsed && (
-        <div className="p-3 max-h-[450px] overflow-y-auto">
+        <div className="p-3 max-h-[400px] overflow-y-auto">
           {/* 当前价格 */}
-          <div className="mb-3 pb-2 border-b border-[var(--border-color)]">
-            <div className="flex items-center justify-between">
-              <div className="text-xs text-[var(--text-secondary)]">当前价格</div>
-              <div className="text-xs text-[var(--text-secondary)]">
-                {timeframeRef.current}
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <div className="text-[10px] text-[var(--text-secondary)]">当前价格</div>
+              <div className="text-lg font-bold text-green-500">
+                ${currentPrice ? formatPrice(currentPrice) : '--'}
               </div>
             </div>
-            <div className="text-xl font-bold text-green-500">
-              ${currentPrice ? formatPrice(currentPrice) : '--'}
+            <div className="text-right">
+              <div className="text-[10px] text-[var(--text-secondary)]">{timeframeRef.current}</div>
+              {channelPrediction && (
+                <div className={`text-[10px] px-2 py-0.5 rounded mt-1 ${channelPrediction.type === 'bullish' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                  {channelPrediction.type === 'bullish' ? '上升通道' : '下降通道'}
+                </div>
+              )}
             </div>
           </div>
 
-          {/* 最近100根K线 HH/LH/LL/HL */}
-          {recentLevels && (
-            <div className="mb-3 pb-2 border-b border-[var(--border-color)]">
-              <div className="text-xs text-[var(--text-secondary)] mb-2">近100根K线</div>
-              <div className="space-y-1 text-xs">
-                <div className="flex items-center justify-between p-2 bg-red-500/10 rounded">
-                  <div className="flex items-center gap-2">
-                    <span className="text-red-400 font-medium">HH</span>
-                    <span className="font-mono">${formatPrice(recentLevels.hh.price)}</span>
-                    <span className="text-[var(--text-secondary)]">{formatTime(recentLevels.hh.time)}</span>
+          {/* 通道监控 */}
+          {channelPrediction ? (
+            <div className="space-y-3">
+              {/* 通道宽度 */}
+              <div className="flex items-center justify-between p-2 bg-yellow-500/10 rounded border border-yellow-500/30">
+                <span className="text-[10px] text-[var(--text-secondary)]">通道宽度</span>
+                <span className="text-sm font-mono font-medium text-yellow-400">d = {channelPrediction.d.toFixed(0)}</span>
+              </div>
+
+              {/* 已知点 */}
+              <div className="p-2 bg-[var(--bg-secondary)] rounded">
+                <div className="text-[10px] text-[var(--text-secondary)] mb-2">已知点</div>
+                {channelPrediction.type === 'bullish' ? (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 text-red-400 font-medium">HH1</span>
+                        <span className="font-mono">{formatPrice(channelPrediction.knownPoints.hh1.price)}</span>
+                      </div>
+                      <span className="text-[var(--text-secondary)] text-[10px]">{formatTime(channelPrediction.knownPoints.hh1.time)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 text-orange-400 font-medium">HH2</span>
+                        <span className="font-mono">{formatPrice(channelPrediction.knownPoints.hh2.price)}</span>
+                      </div>
+                      <span className="text-[var(--text-secondary)] text-[10px]">{formatTime(channelPrediction.knownPoints.hh2.time)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 text-cyan-400 font-medium">HL1</span>
+                        <span className="font-mono">{formatPrice(channelPrediction.knownPoints.hl1.price)}</span>
+                      </div>
+                      <span className="text-[var(--text-secondary)] text-[10px]">{formatTime(channelPrediction.knownPoints.hl1.time)}</span>
+                    </div>
                   </div>
-                  <span className="text-orange-400">{recentLevels.hh.price - recentLevels.lh.price > 0 ? '+' : ''}{(recentLevels.hh.price - recentLevels.lh.price).toFixed(0)}</span>
-                </div>
-                <div className="flex items-center justify-between p-2 bg-orange-500/10 rounded">
-                  <div className="flex items-center gap-2">
-                    <span className="text-orange-400 font-medium">LH</span>
-                    <span className="font-mono">${formatPrice(recentLevels.lh.price)}</span>
-                    <span className="text-[var(--text-secondary)]">{formatTime(recentLevels.lh.time)}</span>
+                ) : (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 text-green-400 font-medium">LL1</span>
+                        <span className="font-mono">{formatPrice(channelPrediction.knownPoints.ll1.price)}</span>
+                      </div>
+                      <span className="text-[var(--text-secondary)] text-[10px]">{formatTime(channelPrediction.knownPoints.ll1.time)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 text-cyan-400 font-medium">LL2</span>
+                        <span className="font-mono">{formatPrice(channelPrediction.knownPoints.ll2.price)}</span>
+                      </div>
+                      <span className="text-[var(--text-secondary)] text-[10px]">{formatTime(channelPrediction.knownPoints.ll2.time)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 text-orange-400 font-medium">LH1</span>
+                        <span className="font-mono">{formatPrice(channelPrediction.knownPoints.lh1.price)}</span>
+                      </div>
+                      <span className="text-[var(--text-secondary)] text-[10px]">{formatTime(channelPrediction.knownPoints.lh1.time)}</span>
+                    </div>
                   </div>
-                </div>
-                <div className="flex items-center justify-between p-2 bg-green-500/10 rounded">
-                  <div className="flex items-center gap-2">
-                    <span className="text-green-400 font-medium">LL</span>
-                    <span className="font-mono">${formatPrice(recentLevels.ll.price)}</span>
-                    <span className="text-[var(--text-secondary)]">{formatTime(recentLevels.ll.time)}</span>
+                )}
+              </div>
+
+              {/* 预测点 */}
+              <div className="p-2 bg-[var(--bg-secondary)] rounded">
+                <div className="text-[10px] text-[var(--text-secondary)] mb-2">预测点</div>
+                {channelPrediction.type === 'bullish' ? (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between p-1.5 bg-green-500/10 rounded text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-green-400">=</span>
+                        <span className="text-[var(--text-secondary)]">等距</span>
+                      </div>
+                      <span className="font-mono text-green-400">${formatPrice(channelPrediction.predictions.hl2Equal)}</span>
+                    </div>
+                    <div className="flex items-center justify-between p-1.5 bg-orange-500/10 rounded text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-orange-400">×2</span>
+                        <span className="text-[var(--text-secondary)]">扩张</span>
+                      </div>
+                      <span className="font-mono text-orange-400">${formatPrice(channelPrediction.predictions.llExpansion)}</span>
+                    </div>
+                    <div className="flex items-center justify-between p-1.5 bg-purple-500/10 rounded text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-purple-400">↕</span>
+                        <span className="text-[var(--text-secondary)]">收敛</span>
+                      </div>
+                      <span className="font-mono text-purple-400">${formatPrice(channelPrediction.predictions.hl2Contract)}</span>
+                    </div>
                   </div>
-                  <span className="text-cyan-400">{recentLevels.hl.price - recentLevels.ll.price > 0 ? '+' : ''}{(recentLevels.hl.price - recentLevels.ll.price).toFixed(0)}</span>
-                </div>
-                <div className="flex items-center justify-between p-2 bg-cyan-500/10 rounded">
-                  <div className="flex items-center gap-2">
-                    <span className="text-cyan-400 font-medium">HL</span>
-                    <span className="font-mono">${formatPrice(recentLevels.hl.price)}</span>
-                    <span className="text-[var(--text-secondary)]">{formatTime(recentLevels.hl.time)}</span>
+                ) : (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between p-1.5 bg-green-500/10 rounded text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-green-400">=</span>
+                        <span className="text-[var(--text-secondary)]">等距</span>
+                      </div>
+                      <span className="font-mono text-green-400">${formatPrice(channelPrediction.predictions.lh2Equal)}</span>
+                    </div>
+                    <div className="flex items-center justify-between p-1.5 bg-orange-500/10 rounded text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-orange-400">×2</span>
+                        <span className="text-[var(--text-secondary)]">扩张</span>
+                      </div>
+                      <span className="font-mono text-orange-400">${formatPrice(channelPrediction.predictions.hhExpansion)}</span>
+                    </div>
+                    <div className="flex items-center justify-between p-1.5 bg-purple-500/10 rounded text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-purple-400">↕</span>
+                        <span className="text-[var(--text-secondary)]">收敛</span>
+                      </div>
+                      <span className="font-mono text-purple-400">${formatPrice(channelPrediction.predictions.lh2Contract)}</span>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             </div>
-          )}
-
-          {/* 预测分析：接近H点时预测突破目标 */}
-          {prediction && (
-            <div className="mb-3 pb-2 border-b border-[var(--border-color)]">
-              <div className="text-xs text-[var(--text-secondary)] mb-2">📍 突破预测</div>
-              <div className="space-y-1 text-xs">
-                <div className="flex items-center justify-between p-2 bg-yellow-500/10 rounded border border-yellow-500/30">
-                  <div className="flex items-center gap-2">
-                    <span className="text-yellow-400">→</span>
-                    <span className="text-[var(--text-secondary)]">当前接近</span>
-                    <span className={`font-mono font-medium ${getTypeColor(prediction.approachingH.type, prediction.approachingH.category)}`}>
-                      {getTypeLabel(prediction.approachingH.type)}
-                    </span>
-                    <span className="font-mono">${formatPrice(prediction.approachingH.price)}</span>
-                    <span className="text-yellow-400">-{prediction.distanceToH.toFixed(0)}</span>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between p-2 bg-orange-500/10 rounded">
-                  <div className="flex items-center gap-2">
-                    <span className="text-orange-400">↑</span>
-                    <span className="text-[var(--text-secondary)]">H间距离</span>
-                    <span className="font-mono">+{prediction.hDistance.toFixed(0)}</span>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between p-2 bg-green-500/10 rounded border border-green-500/30">
-                  <div className="flex items-center gap-2">
-                    <span className="text-green-400">🎯</span>
-                    <span className="text-[var(--text-secondary)]">突破目标</span>
-                    <span className={`font-mono font-medium ${getTypeColor(prediction.nextH.type, prediction.nextH.category)}`}>
-                      {getTypeLabel(prediction.nextH.type)}
-                    </span>
-                    <span className="font-mono text-green-400">${formatPrice(prediction.targetPrice)}</span>
-                  </div>
-                  <span className="text-green-400">+{(prediction.targetPrice - (currentPrice || 0)).toFixed(0)}</span>
-                </div>
-              </div>
+          ) : (
+            <div className="text-center py-4 text-xs text-[var(--text-secondary)]">
+              价格不在通道区间内
             </div>
           )}
-
-          {/* 调试信息 - 临时 */}
-          {recentLevels && (
-            <div className="mb-3 p-2 bg-gray-500/20 rounded text-xs">
-              <div className="text-gray-400 mb-1">调试: recentLevels</div>
-              <div>currentPrice: {currentPrice}</div>
-              <div>hh: {recentLevels.hh.price} | lh: {recentLevels.lh.price}</div>
-              <div>hl: {recentLevels.hl.price} | ll: {recentLevels.ll.price}</div>
-              <div>d: {recentLevels.hh.price - recentLevels.lh.price}</div>
-              <div>在HL区间: {currentPrice && currentPrice < recentLevels.hl.price && currentPrice > recentLevels.ll.price ? '是' : '否'}</div>
-              <div>在LH区间: {currentPrice && currentPrice > recentLevels.lh.price && currentPrice < recentLevels.hh.price ? '是' : '否'}</div>
-            </div>
-          )}
-
-          {/* 通道预测分析 */}
-          {channelPrediction && (
-            <div className="mb-3 pb-2 border-b border-[var(--border-color)]">
-              <div className="text-xs text-[var(--text-secondary)] mb-2">🔄 实时通道监控</div>
-              <div className="space-y-2 text-xs">
-                {/* 当前价格位置 */}
-                <div className="flex items-center justify-between p-2 bg-blue-500/10 rounded border border-blue-500/30">
-                  <div className="flex items-center gap-2">
-                    <span className="text-blue-400">📍</span>
-                    <span className="text-[var(--text-secondary)]">当前价格</span>
-                    <span className="font-mono font-medium text-blue-400">${formatPrice(currentPrice || 0)}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] ${channelPrediction.type === 'bullish' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                      {channelPrediction.type === 'bullish' ? '低点区间' : '高点区间'}
-                    </span>
-                    <span className="text-[var(--text-secondary)]">{channelPrediction.pricePosition.nearLevel}附近</span>
-                  </div>
-                </div>
-
-                {/* 已知点 */}
-                <div className="p-2 bg-[var(--bg-secondary)] rounded">
-                  <div className="text-[10px] text-[var(--text-secondary)] mb-1">【已知点】</div>
-                  {channelPrediction.type === 'bullish' ? (
-                    <div className="space-y-0.5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1">
-                          <span className="text-red-400 font-medium">HH1</span>
-                          <span className="font-mono text-red-400">${formatPrice(channelPrediction.knownPoints.hh1.price)}</span>
-                        </div>
-                        <span className="text-[var(--text-secondary)]">{formatTime(channelPrediction.knownPoints.hh1.time)}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1">
-                          <span className="text-orange-400 font-medium">HH2</span>
-                          <span className="font-mono text-orange-400">${formatPrice(channelPrediction.knownPoints.hh2.price)}</span>
-                        </div>
-                        <span className="text-[var(--text-secondary)]">{formatTime(channelPrediction.knownPoints.hh2.time)}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1">
-                          <span className="text-cyan-400 font-medium">HL1</span>
-                          <span className="font-mono text-cyan-400">${formatPrice(channelPrediction.knownPoints.hl1.price)}</span>
-                        </div>
-                        <span className="text-[var(--text-secondary)]">{formatTime(channelPrediction.knownPoints.hl1.time)}</span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-0.5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1">
-                          <span className="text-green-400 font-medium">LL1</span>
-                          <span className="font-mono text-green-400">${formatPrice(channelPrediction.knownPoints.ll1.price)}</span>
-                        </div>
-                        <span className="text-[var(--text-secondary)]">{formatTime(channelPrediction.knownPoints.ll1.time)}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1">
-                          <span className="text-cyan-400 font-medium">LL2</span>
-                          <span className="font-mono text-cyan-400">${formatPrice(channelPrediction.knownPoints.ll2.price)}</span>
-                        </div>
-                        <span className="text-[var(--text-secondary)]">{formatTime(channelPrediction.knownPoints.ll2.time)}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1">
-                          <span className="text-orange-400 font-medium">LH1</span>
-                          <span className="font-mono text-orange-400">${formatPrice(channelPrediction.knownPoints.lh1.price)}</span>
-                        </div>
-                        <span className="text-[var(--text-secondary)]">{formatTime(channelPrediction.knownPoints.lh1.time)}</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* 通道宽度 d */}
-                <div className="flex items-center justify-between p-2 bg-yellow-500/10 rounded border border-yellow-500/30">
-                  <div className="flex items-center gap-2">
-                    <span className="text-yellow-400">◇</span>
-                    <span className="text-[var(--text-secondary)]">通道宽度</span>
-                  </div>
-                  <span className="font-mono font-medium text-yellow-400">d = {channelPrediction.d.toFixed(0)}</span>
-                </div>
-
-                {/* 预测点 */}
-                <div className="p-2 bg-[var(--bg-secondary)] rounded">
-                  <div className="text-[10px] text-[var(--text-secondary)] mb-1">【预测点】</div>
-                  {channelPrediction.type === 'bullish' ? (
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between p-1.5 bg-green-500/10 rounded">
-                        <div className="flex items-center gap-1">
-                          <span className="text-green-400">=</span>
-                          <span className="text-[var(--text-secondary)]">HL2(等距)</span>
-                        </div>
-                        <span className="font-mono text-green-400">${formatPrice(channelPrediction.predictions.hl2Equal)}</span>
-                      </div>
-                      <div className="flex items-center justify-between p-1.5 bg-orange-500/10 rounded">
-                        <div className="flex items-center gap-1">
-                          <span className="text-orange-400">⇧</span>
-                          <span className="text-[var(--text-secondary)]">LL(扩张)</span>
-                        </div>
-                        <span className="font-mono text-orange-400">${formatPrice(channelPrediction.predictions.llExpansion)}</span>
-                      </div>
-                      <div className="flex items-center justify-between p-1.5 bg-purple-500/10 rounded">
-                        <div className="flex items-center gap-1">
-                          <span className="text-purple-400">↕</span>
-                          <span className="text-[var(--text-secondary)]">HL2(收敛)</span>
-                        </div>
-                        <span className="font-mono text-purple-400">${formatPrice(channelPrediction.predictions.hl2Contract)}</span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between p-1.5 bg-green-500/10 rounded">
-                        <div className="flex items-center gap-1">
-                          <span className="text-green-400">=</span>
-                          <span className="text-[var(--text-secondary)]">LH2(等距)</span>
-                        </div>
-                        <span className="font-mono text-green-400">${formatPrice(channelPrediction.predictions.lh2Equal)}</span>
-                      </div>
-                      <div className="flex items-center justify-between p-1.5 bg-orange-500/10 rounded">
-                        <div className="flex items-center gap-1">
-                          <span className="text-orange-400">⇧</span>
-                          <span className="text-[var(--text-secondary)]">HH(扩张)</span>
-                        </div>
-                        <span className="font-mono text-orange-400">${formatPrice(channelPrediction.predictions.hhExpansion)}</span>
-                      </div>
-                      <div className="flex items-center justify-between p-1.5 bg-purple-500/10 rounded">
-                        <div className="flex items-center gap-1">
-                          <span className="text-purple-400">↕</span>
-                          <span className="text-[var(--text-secondary)]">LH2(收敛)</span>
-                        </div>
-                        <span className="font-mono text-purple-400">${formatPrice(channelPrediction.predictions.lh2Contract)}</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* 附近点位列表 */}
-          <div>
-            <div className="flex items-center gap-1 mb-2 text-xs text-[var(--text-secondary)]">
-              <span>附近点位 (±1500)</span>
-            </div>
-            {sortedLevels.length > 0 ? (
-              <div className="space-y-1">
-                {sortedLevels
-                  .slice(0, 8)
-                  .map((level, idx) => {
-                    const distance = level.price - (currentPrice || 0);
-                    const isAbove = distance > 0;
-                    return (
-                      <div key={idx}>
-                        {idx === 0 || (idx > 0 && sortedLevels[idx - 1].price > (currentPrice || 0) && isAbove === false) && idx > 0 && (
-                          <div className="border-b border-[var(--border-color)] my-1" />
-                        )}
-                        <div
-                          className="flex items-center justify-between p-2 rounded text-xs bg-[var(--bg-secondary)]"
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className={`font-mono font-medium ${getTypeColor(level.type, level.category)}`}>
-                              {getTypeLabel(level.type)}
-                            </span>
-                            <span className={`text-xs ${getTimeframeColor(level.timeframe)}`}>
-                              {level.timeframe}
-                            </span>
-                            <span className="font-mono">
-                              ${formatPrice(level.price)}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className={isAbove ? 'text-red-400' : 'text-green-400'}>
-                              {isAbove ? '+' : ''}{distance.toFixed(0)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-              </div>
-            ) : (
-              <div className="text-xs text-[var(--text-secondary)] text-center py-2">暂无附近点位</div>
-            )}
-          </div>
-
-          {/* 图例 */}
-          <div className="mt-3 pt-2 border-t border-[var(--border-color)]">
-            <div className="flex items-center gap-3 text-xs text-[var(--text-secondary)] flex-wrap">
-              <span><span className="text-orange-400">L</span>高点</span>
-              <span><span className="text-green-400">H</span>低点</span>
-              <span className="text-blue-400">15m</span>
-              <span className="text-purple-400">1h</span>
-              <span className="text-orange-400">4h</span>
-              <span className="text-red-400">1d</span>
-            </div>
-          </div>
         </div>
       )}
     </div>
