@@ -275,24 +275,13 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
     );
   }
 
-  // 下方支撑 = 下方的H点（HH/LH）且价格低于当前价，在±1500范围内
-  const lowerSupport = currentPrice ? hlLevels.filter(l =>
-    (l.type === 'hh' || l.type === 'lh') &&
-    l.price < currentPrice &&
-    currentPrice - l.price <= 1500
+  // 收集附近1500点的所有swing point
+  const nearbyLevels = currentPrice ? hlLevels.filter(l =>
+    Math.abs(l.price - currentPrice) <= 1500
   ) : [];
 
-  // 上方压力 = 上方的L点（LL/LH）且价格高于当前价，在±1500范围内
-  const upperResistance = currentPrice ? hlLevels.filter(l =>
-    (l.type === 'll' || l.type === 'lh') &&
-    l.price > currentPrice &&
-    l.price - currentPrice <= 1500
-  ) : [];
-
-  // 压力位按价格从低到高排序（接近价格的在前）
-  const sortedResistance = [...upperResistance].sort((a, b) => a.price - b.price);
-  // 支撑位按价格从高到低排序（接近价格的在前）
-  const sortedSupport = [...lowerSupport].sort((a, b) => b.price - a.price);
+  // 按价格从高到低排序
+  const sortedLevels = [...nearbyLevels].sort((a, b) => b.price - a.price);
 
   return (
     <div
@@ -352,67 +341,19 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
             </div>
           </div>
 
-          {/* 上方压力位 - 上方的L点 */}
-          <div className="mb-3">
-            <div className="flex items-center gap-1 mb-2 text-xs text-[var(--text-secondary)]">
-              <ArrowUp className="w-3 h-3 text-red-400" />
-              <span>上方压力 (L点)</span>
-            </div>
-            {sortedResistance.length > 0 ? (
-              <div className="space-y-1">
-                {sortedResistance
-                  .slice(0, 4)
-                  .map((level, idx) => (
-                    <div
-                      key={idx}
-                      className={`flex items-center justify-between p-2 rounded text-xs ${
-                        level.status === 'approaching'
-                          ? 'bg-yellow-500/10 border border-yellow-500/30'
-                          : 'bg-[var(--bg-secondary)]'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={`font-mono font-medium ${getTypeColor(level.type, level.category)}`}>
-                          {getTypeLabel(level.type)}
-                        </span>
-                        <span className={`text-xs ${getTimeframeColor(level.timeframe)}`}>
-                          {level.timeframe}
-                        </span>
-                        <span className="font-mono">
-                          ${formatPrice(level.price)}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[var(--text-secondary)]">
-                          {formatTime(level.time)}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            ) : (
-              <div className="text-xs text-[var(--text-secondary)] text-center py-2">暂无压力位</div>
-            )}
-          </div>
-
-          {/* 下方支撑位 - 下方的H点 */}
+          {/* 附近点位列表 */}
           <div>
             <div className="flex items-center gap-1 mb-2 text-xs text-[var(--text-secondary)]">
-              <ArrowDown className="w-3 h-3 text-green-400" />
-              <span>下方支撑 (H点)</span>
+              <span>附近点位 (±1500)</span>
             </div>
-            {sortedSupport.length > 0 ? (
+            {sortedLevels.length > 0 ? (
               <div className="space-y-1">
-                {sortedSupport
-                  .slice(0, 4)
+                {sortedLevels
+                  .slice(0, 8)
                   .map((level, idx) => (
                     <div
                       key={idx}
-                      className={`flex items-center justify-between p-2 rounded text-xs ${
-                        level.status === 'approaching'
-                          ? 'bg-yellow-500/10 border border-yellow-500/30'
-                          : 'bg-[var(--bg-secondary)]'
-                      }`}
+                      className="flex items-center justify-between p-2 rounded text-xs bg-[var(--bg-secondary)]"
                     >
                       <div className="flex items-center gap-2">
                         <span className={`font-mono font-medium ${getTypeColor(level.type, level.category)}`}>
@@ -434,18 +375,15 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                   ))}
               </div>
             ) : (
-              <div className="text-xs text-[var(--text-secondary)] text-center py-2">暂无支撑位</div>
+              <div className="text-xs text-[var(--text-secondary)] text-center py-2">暂无附近点位</div>
             )}
           </div>
 
           {/* 图例 */}
           <div className="mt-3 pt-2 border-t border-[var(--border-color)]">
             <div className="flex items-center gap-3 text-xs text-[var(--text-secondary)] flex-wrap">
-              <span><span className="text-orange-400">L</span>上方压力</span>
-              <span><span className="text-green-400">H</span>下方支撑</span>
-              <span>±1500范围</span>
-            </div>
-            <div className="flex items-center gap-3 mt-2 text-xs text-[var(--text-secondary)]">
+              <span><span className="text-orange-400">L</span>高点</span>
+              <span><span className="text-green-400">H</span>低点</span>
               <span className="text-blue-400">15m</span>
               <span className="text-purple-400">1h</span>
               <span className="text-orange-400">4h</span>
