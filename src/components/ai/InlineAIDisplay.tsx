@@ -359,22 +359,32 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
           {recentLevels && (
             <div className="mb-3 pb-2 border-b border-[var(--border-color)]">
               <div className="text-xs text-[var(--text-secondary)] mb-2">近100根K线</div>
-              <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="space-y-1 text-xs">
                 <div className="flex items-center justify-between p-2 bg-red-500/10 rounded">
-                  <span className="text-red-400 font-medium">HH</span>
-                  <span className="font-mono">${formatPrice(recentLevels.hh.price)}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-red-400 font-medium">HH</span>
+                    <span className="font-mono">${formatPrice(recentLevels.hh.price)}</span>
+                  </div>
+                  <span className="text-orange-400">{recentLevels.hh.price - recentLevels.lh.price > 0 ? '+' : ''}{(recentLevels.hh.price - recentLevels.lh.price).toFixed(0)}</span>
                 </div>
                 <div className="flex items-center justify-between p-2 bg-orange-500/10 rounded">
-                  <span className="text-orange-400 font-medium">LH</span>
-                  <span className="font-mono">${formatPrice(recentLevels.lh.price)}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-orange-400 font-medium">LH</span>
+                    <span className="font-mono">${formatPrice(recentLevels.lh.price)}</span>
+                  </div>
                 </div>
                 <div className="flex items-center justify-between p-2 bg-green-500/10 rounded">
-                  <span className="text-green-400 font-medium">LL</span>
-                  <span className="font-mono">${formatPrice(recentLevels.ll.price)}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-green-400 font-medium">LL</span>
+                    <span className="font-mono">${formatPrice(recentLevels.ll.price)}</span>
+                  </div>
+                  <span className="text-cyan-400">{recentLevels.hl.price - recentLevels.ll.price > 0 ? '+' : ''}{(recentLevels.hl.price - recentLevels.ll.price).toFixed(0)}</span>
                 </div>
                 <div className="flex items-center justify-between p-2 bg-cyan-500/10 rounded">
-                  <span className="text-cyan-400 font-medium">HL</span>
-                  <span className="font-mono">${formatPrice(recentLevels.hl.price)}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-cyan-400 font-medium">HL</span>
+                    <span className="font-mono">${formatPrice(recentLevels.hl.price)}</span>
+                  </div>
                 </div>
               </div>
             </div>
