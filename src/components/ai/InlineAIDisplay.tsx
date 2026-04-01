@@ -7,6 +7,9 @@ import { useAgentStore, HLLevel } from '@/stores/agentStore';
 import { detectSwingPoints } from '@/lib/chart/indicators/swingPoints';
 import type { SwingPoint, Candle } from '@/types/chart';
 
+// kline-server API
+const KLINE_API = process.env.NEXT_PUBLIC_KLINE_API || 'http://localhost:3001';
+
 interface InlineAIDisplayProps {
   symbol?: string;
 }
@@ -202,11 +205,12 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
         if (tf === currentTf) {
           tfCandles = candles;
         } else {
-          const res = await fetch(`/api/klines?symbol=${symbol}&interval=${tf}&limit=200`);
+          const res = await fetch(`${KLINE_API}/api/klines/${symbol.toUpperCase()}/${tf}?limit=200`);
           if (res.ok) {
             const data = await res.json();
-            tfCandles = data.candles;
+            tfCandles = data.klines;
           } else {
+            console.error(`Failed to fetch ${tf} klines:`, res.status);
             continue;
           }
         }
