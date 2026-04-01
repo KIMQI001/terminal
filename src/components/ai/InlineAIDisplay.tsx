@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Activity, X, RefreshCw, ChevronDown, ChevronUp, Move, TrendingUp, TrendingDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { useChartStore } from '@/stores/chartStore';
 import { useAgentStore, HLLevel } from '@/stores/agentStore';
-import { detectSwingPoints, detectAllPivots } from '@/lib/chart/indicators/swingPoints';
+import { detectSwingPoints } from '@/lib/chart/indicators/swingPoints';
 import type { SwingPoint, Candle } from '@/types/chart';
 
 // kline-server API
@@ -87,7 +87,7 @@ function calculateSwingLevels(candles: Candle[], timeframe: string, currentPrice
 
 export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
   const timeframeRef = useRef('15m');
-  const { timeframe, candles, chartType } = useChartStore();
+  const { timeframe, candles } = useChartStore();
   const {
     inlineAIEnabled,
     setInlineAIEnabled,
@@ -109,13 +109,8 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
   // 最近1000根K线的HH/LH/LL/HL（基于swing point）
   const recentLevels = (() => {
     if (candles.length < 10) return null;
-
     const recent = candles.slice(-1000);
-
-    // 折线图用 detectAllPivots，蜡烛图用 detectSwingPoints
-    const swings = chartType === 'line'
-      ? detectAllPivots(recent, 2, 2)
-      : detectSwingPoints(recent, 5);
+    const swings = detectSwingPoints(recent, 5);
 
     if (swings.length < 4) return null;
 
