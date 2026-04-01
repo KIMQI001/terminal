@@ -125,6 +125,41 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
     };
   })();
 
+  // 预测分析：价格接近H点时，预测突破后的下一个H位置
+  const prediction = (() => {
+    if (!currentPrice || !hlLevels.length) return null;
+
+    // 找上方最近的H点（HH/LH）
+    const upperH = hlLevels
+      .filter(l => (l.type === 'hh' || l.type === 'lh') && l.price > currentPrice)
+      .sort((a, b) => a.price - b.price);
+
+    if (upperH.length === 0) return null;
+
+    // 找距离最近的H
+    const nearestH = upperH[0];
+    const distanceToH = nearestH.price - currentPrice;
+
+    // 如果距离太远（>500点），不预测
+    if (distanceToH > 500) return null;
+
+    // 找这个H上方的下一个H
+    const nextH = upperH.find(h => h.price > nearestH.price);
+    if (!nextH) return null;
+
+    // 计算H之间的距离差，预测突破目标
+    const hDistance = nextH.price - nearestH.price;
+    const targetPrice = nearestH.price + hDistance;
+
+    return {
+      approachingH: nearestH,
+      nextH,
+      hDistance,
+      targetPrice,
+      distanceToH,
+    };
+  })();
+
   // 同步 timeframe 到 ref
   useEffect(() => {
     timeframeRef.current = timeframe;
@@ -397,6 +432,44 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                     <span className="font-mono">${formatPrice(recentLevels.hl.price)}</span>
                     <span className="text-[var(--text-secondary)]">{formatTime(recentLevels.hl.time)}</span>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 预测分析：接近H点时预测突破目标 */}
+          {prediction && (
+            <div className="mb-3 pb-2 border-b border-[var(--border-color)]">
+              <div className="text-xs text-[var(--text-secondary)] mb-2">📍 突破预测</div>
+              <div className="space-y-1 text-xs">
+                <div className="flex items-center justify-between p-2 bg-yellow-500/10 rounded border border-yellow-500/30">
+                  <div className="flex items-center gap-2">
+                    <span className="text-yellow-400">→</span>
+                    <span className="text-[var(--text-secondary)]">当前接近</span>
+                    <span className={`font-mono font-medium ${getTypeColor(prediction.approachingH.type, prediction.approachingH.category)}`}>
+                      {getTypeLabel(prediction.approachingH.type)}
+                    </span>
+                    <span className="font-mono">${formatPrice(prediction.approachingH.price)}</span>
+                    <span className="text-yellow-400">-{prediction.distanceToH.toFixed(0)}</span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between p-2 bg-orange-500/10 rounded">
+                  <div className="flex items-center gap-2">
+                    <span className="text-orange-400">↑</span>
+                    <span className="text-[var(--text-secondary)]">H间距离</span>
+                    <span className="font-mono">+{prediction.hDistance.toFixed(0)}</span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between p-2 bg-green-500/10 rounded border border-green-500/30">
+                  <div className="flex items-center gap-2">
+                    <span className="text-green-400">🎯</span>
+                    <span className="text-[var(--text-secondary)]">突破目标</span>
+                    <span className={`font-mono font-medium ${getTypeColor(prediction.nextH.type, prediction.nextH.category)}`}>
+                      {getTypeLabel(prediction.nextH.type)}
+                    </span>
+                    <span className="font-mono text-green-400">${formatPrice(prediction.targetPrice)}</span>
+                  </div>
+                  <span className="text-green-400">+{(prediction.targetPrice - (currentPrice || 0)).toFixed(0)}</span>
                 </div>
               </div>
             </div>
