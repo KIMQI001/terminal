@@ -350,29 +350,37 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
               <div className="space-y-1">
                 {sortedLevels
                   .slice(0, 8)
-                  .map((level, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between p-2 rounded text-xs bg-[var(--bg-secondary)]"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={`font-mono font-medium ${getTypeColor(level.type, level.category)}`}>
-                          {getTypeLabel(level.type)}
-                        </span>
-                        <span className={`text-xs ${getTimeframeColor(level.timeframe)}`}>
-                          {level.timeframe}
-                        </span>
-                        <span className="font-mono">
-                          ${formatPrice(level.price)}
-                        </span>
+                  .map((level, idx) => {
+                    const distance = level.price - (currentPrice || 0);
+                    const isAbove = distance > 0;
+                    return (
+                      <div key={idx}>
+                        {idx === 0 || (idx > 0 && sortedLevels[idx - 1].price > (currentPrice || 0) && isAbove === false) && idx > 0 && (
+                          <div className="border-b border-[var(--border-color)] my-1" />
+                        )}
+                        <div
+                          className="flex items-center justify-between p-2 rounded text-xs bg-[var(--bg-secondary)]"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`font-mono font-medium ${getTypeColor(level.type, level.category)}`}>
+                              {getTypeLabel(level.type)}
+                            </span>
+                            <span className={`text-xs ${getTimeframeColor(level.timeframe)}`}>
+                              {level.timeframe}
+                            </span>
+                            <span className="font-mono">
+                              ${formatPrice(level.price)}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className={isAbove ? 'text-red-400' : 'text-green-400'}>
+                              {isAbove ? '+' : ''}{distance.toFixed(0)}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[var(--text-secondary)]">
-                          {formatTime(level.time)}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
               </div>
             ) : (
               <div className="text-xs text-[var(--text-secondary)] text-center py-2">暂无附近点位</div>
