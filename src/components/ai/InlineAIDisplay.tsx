@@ -175,6 +175,17 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
     }
   }, [candles, timeframe]);
 
+  // 定时刷新附近点位（每30秒）
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (candles.length > 10) {
+        updateSwingLevels();
+      }
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [candles, timeframe]);
+
   // 更新摆动点水平
   const updateSwingLevels = async () => {
     const price = candles[candles.length - 1]?.close;
