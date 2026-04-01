@@ -103,17 +103,25 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
   const [isDragging, setIsDragging] = useState(false);
   const dragRef = useRef<{ startX: number; startY: number; startPosX: number; startPosY: number } | null>(null);
 
-  // 最近100根K线的HH/LH/LL/HL
+  // 最近100根K线的HH/LH/LL/HL（基于swing point）
   const recentLevels = (() => {
-    if (candles.length < 4) return null;
+    if (candles.length < 10) return null;
     const recent = candles.slice(-100);
-    const highs = [...recent].sort((a, b) => b.high - a.high);
-    const lows = [...recent].sort((a, b) => a.low - b.low);
+    const swings = detectSwingPoints(recent, 5);
+
+    if (swings.length < 4) return null;
+
+    // 分离高低点
+    const highs = swings.filter(s => s.type === 'high').sort((a, b) => b.price - a.price);
+    const lows = swings.filter(s => s.type === 'low').sort((a, b) => a.price - b.price);
+
+    if (highs.length < 2 || lows.length < 2) return null;
+
     return {
-      hh: { price: highs[0].high, time: highs[0].time },
-      lh: { price: highs[1].high, time: highs[1].time },
-      ll: { price: lows[0].low, time: lows[0].time },
-      hl: { price: lows[1].low, time: lows[1].time },
+      hh: { price: highs[0].price, time: highs[0].time },
+      lh: { price: highs[1].price, time: highs[1].time },
+      ll: { price: lows[0].price, time: lows[0].time },
+      hl: { price: lows[1].price, time: lows[1].time },
     };
   })();
 
