@@ -106,10 +106,10 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
   const [isDragging, setIsDragging] = useState(false);
   const dragRef = useRef<{ startX: number; startY: number; startPosX: number; startPosY: number } | null>(null);
 
-  // 最近100根K线的HH/LH/LL/HL（基于swing point）
+  // 最近1000根K线的HH/LH/LL/HL（基于swing point）
   const recentLevels = (() => {
     if (candles.length < 10) return null;
-    const recent = candles.slice(-100);
+    const recent = candles.slice(-1000);
     const swings = detectSwingPoints(recent, 5);
 
     if (swings.length < 4) return null;
