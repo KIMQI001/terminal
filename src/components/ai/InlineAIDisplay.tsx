@@ -10,6 +10,51 @@ import type { SwingPoint, Candle } from '@/types/chart';
 // kline-server API
 const KLINE_API = process.env.NEXT_PUBLIC_KLINE_API || 'http://localhost:3001';
 
+// 通道预测类型
+interface BullishChannelPrediction {
+  type: 'bullish';
+  zone: 'low';
+  knownPoints: {
+    hh1: { price: number; time: number };
+    hh2: { price: number; time: number };
+    hl1: { price: number; time: number };
+  };
+  d: number;
+  predictions: {
+    hl2Equal: number;
+    llExpansion: number;
+    hl2Contract: number;
+  };
+  pricePosition: {
+    nearLevel: 'HL1';
+    distanceToHL: number;
+    distanceToLL: number;
+  };
+}
+
+interface BearishChannelPrediction {
+  type: 'bearish';
+  zone: 'high';
+  knownPoints: {
+    ll1: { price: number; time: number };
+    ll2: { price: number; time: number };
+    lh1: { price: number; time: number };
+  };
+  d: number;
+  predictions: {
+    lh2Equal: number;
+    hhExpansion: number;
+    lh2Contract: number;
+  };
+  pricePosition: {
+    nearLevel: 'LH1';
+    distanceToLH: number;
+    distanceToHH: number;
+  };
+}
+
+type ChannelPrediction = BullishChannelPrediction | BearishChannelPrediction | null;
+
 interface InlineAIDisplayProps {
   symbol?: string;
 }
@@ -161,6 +206,78 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
       targetPrice,
       distanceToH,
     };
+  })();
+
+  // 通道预测分析
+  const channelPrediction: ChannelPrediction = (() => {
+    if (!recentLevels || !currentPrice) return null;
+
+    const { hh, lh, hl, ll } = recentLevels;
+
+    // 通道宽度 d = 两个高点之差
+    const d = hh.price - lh.price;
+
+    if (d <= 0) return null;
+
+    // 当前价格在 HL1 附近时（低点区间）的预测 - 上升通道形态
+    // 条件：currentPrice 在 HL 和 LL 之间
+    if (currentPrice < hl.price && currentPrice > ll.price) {
+      const distanceToHL = currentPrice - hl.price;
+      const distanceToLL = currentPrice - ll.price;
+
+      return {
+        type: 'bullish',
+        zone: 'low', // 低点区间
+        knownPoints: {
+          hh1: hh,
+          hh2: lh,
+          hl1: hl,
+        },
+        d,
+        predictions: {
+          hl2Equal: hl.price - d,      // 等距通道
+          llExpansion: hl.price - 2 * d, // 扩张三角形
+          hl2Contract: hl.price + d,    // 收敛三角形
+        },
+        pricePosition: {
+          nearLevel: 'HL1',
+          distanceToHL: Math.abs(distanceToHL),
+          distanceToLL: Math.abs(distanceToLL),
+        },
+      };
+    }
+
+    // 当前价格在 LH1 附近时（高点区间）的预测 - 下降通道形态
+    // 条件：currentPrice 在 HH 和 LH 之间
+    if (currentPrice > lh.price && currentPrice < hh.price) {
+      const dLow = lh.price - ll.price; // 用低点差更合理
+      const distanceToLH = currentPrice - lh.price;
+      const distanceToHH = currentPrice - hh.price;
+
+      return {
+        type: 'bearish',
+        zone: 'high', // 高点区间
+        knownPoints: {
+          ll1: ll,
+          ll2: hl,
+          lh1: lh,
+        },
+        d: dLow,
+        predictions: {
+          lh2Equal: lh.price + dLow,      // 等距通道
+          hhExpansion: lh.price + 2 * dLow, // 扩张三角形
+          lh2Contract: lh.price - dLow,    // 收敛三角形
+        },
+        pricePosition: {
+          nearLevel: 'LH1',
+          distanceToLH: Math.abs(distanceToLH),
+          distanceToHH: Math.abs(distanceToHH),
+        },
+      };
+    }
+
+    // 价格在其他位置
+    return null;
   })();
 
   // 同步 timeframe 到 ref
@@ -485,6 +602,146 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                     <span className="font-mono text-green-400">${formatPrice(prediction.targetPrice)}</span>
                   </div>
                   <span className="text-green-400">+{(prediction.targetPrice - (currentPrice || 0)).toFixed(0)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 通道预测分析 */}
+          {channelPrediction && (
+            <div className="mb-3 pb-2 border-b border-[var(--border-color)]">
+              <div className="text-xs text-[var(--text-secondary)] mb-2">🔄 实时通道监控</div>
+              <div className="space-y-2 text-xs">
+                {/* 当前价格位置 */}
+                <div className="flex items-center justify-between p-2 bg-blue-500/10 rounded border border-blue-500/30">
+                  <div className="flex items-center gap-2">
+                    <span className="text-blue-400">📍</span>
+                    <span className="text-[var(--text-secondary)]">当前价格</span>
+                    <span className="font-mono font-medium text-blue-400">${formatPrice(currentPrice || 0)}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] ${channelPrediction.type === 'bullish' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                      {channelPrediction.type === 'bullish' ? '低点区间' : '高点区间'}
+                    </span>
+                    <span className="text-[var(--text-secondary)]">{channelPrediction.pricePosition.nearLevel}附近</span>
+                  </div>
+                </div>
+
+                {/* 已知点 */}
+                <div className="p-2 bg-[var(--bg-secondary)] rounded">
+                  <div className="text-[10px] text-[var(--text-secondary)] mb-1">【已知点】</div>
+                  {channelPrediction.type === 'bullish' ? (
+                    <div className="space-y-0.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1">
+                          <span className="text-red-400 font-medium">HH1</span>
+                          <span className="font-mono text-red-400">${formatPrice(channelPrediction.knownPoints.hh1.price)}</span>
+                        </div>
+                        <span className="text-[var(--text-secondary)]">{formatTime(channelPrediction.knownPoints.hh1.time)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1">
+                          <span className="text-orange-400 font-medium">HH2</span>
+                          <span className="font-mono text-orange-400">${formatPrice(channelPrediction.knownPoints.hh2.price)}</span>
+                        </div>
+                        <span className="text-[var(--text-secondary)]">{formatTime(channelPrediction.knownPoints.hh2.time)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1">
+                          <span className="text-cyan-400 font-medium">HL1</span>
+                          <span className="font-mono text-cyan-400">${formatPrice(channelPrediction.knownPoints.hl1.price)}</span>
+                        </div>
+                        <span className="text-[var(--text-secondary)]">{formatTime(channelPrediction.knownPoints.hl1.time)}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-0.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1">
+                          <span className="text-green-400 font-medium">LL1</span>
+                          <span className="font-mono text-green-400">${formatPrice(channelPrediction.knownPoints.ll1.price)}</span>
+                        </div>
+                        <span className="text-[var(--text-secondary)]">{formatTime(channelPrediction.knownPoints.ll1.time)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1">
+                          <span className="text-cyan-400 font-medium">LL2</span>
+                          <span className="font-mono text-cyan-400">${formatPrice(channelPrediction.knownPoints.ll2.price)}</span>
+                        </div>
+                        <span className="text-[var(--text-secondary)]">{formatTime(channelPrediction.knownPoints.ll2.time)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1">
+                          <span className="text-orange-400 font-medium">LH1</span>
+                          <span className="font-mono text-orange-400">${formatPrice(channelPrediction.knownPoints.lh1.price)}</span>
+                        </div>
+                        <span className="text-[var(--text-secondary)]">{formatTime(channelPrediction.knownPoints.lh1.time)}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 通道宽度 d */}
+                <div className="flex items-center justify-between p-2 bg-yellow-500/10 rounded border border-yellow-500/30">
+                  <div className="flex items-center gap-2">
+                    <span className="text-yellow-400">◇</span>
+                    <span className="text-[var(--text-secondary)]">通道宽度</span>
+                  </div>
+                  <span className="font-mono font-medium text-yellow-400">d = {channelPrediction.d.toFixed(0)}</span>
+                </div>
+
+                {/* 预测点 */}
+                <div className="p-2 bg-[var(--bg-secondary)] rounded">
+                  <div className="text-[10px] text-[var(--text-secondary)] mb-1">【预测点】</div>
+                  {channelPrediction.type === 'bullish' ? (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between p-1.5 bg-green-500/10 rounded">
+                        <div className="flex items-center gap-1">
+                          <span className="text-green-400">=</span>
+                          <span className="text-[var(--text-secondary)]">HL2(等距)</span>
+                        </div>
+                        <span className="font-mono text-green-400">${formatPrice(channelPrediction.predictions.hl2Equal)}</span>
+                      </div>
+                      <div className="flex items-center justify-between p-1.5 bg-orange-500/10 rounded">
+                        <div className="flex items-center gap-1">
+                          <span className="text-orange-400">⇧</span>
+                          <span className="text-[var(--text-secondary)]">LL(扩张)</span>
+                        </div>
+                        <span className="font-mono text-orange-400">${formatPrice(channelPrediction.predictions.llExpansion)}</span>
+                      </div>
+                      <div className="flex items-center justify-between p-1.5 bg-purple-500/10 rounded">
+                        <div className="flex items-center gap-1">
+                          <span className="text-purple-400">↕</span>
+                          <span className="text-[var(--text-secondary)]">HL2(收敛)</span>
+                        </div>
+                        <span className="font-mono text-purple-400">${formatPrice(channelPrediction.predictions.hl2Contract)}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between p-1.5 bg-green-500/10 rounded">
+                        <div className="flex items-center gap-1">
+                          <span className="text-green-400">=</span>
+                          <span className="text-[var(--text-secondary)]">LH2(等距)</span>
+                        </div>
+                        <span className="font-mono text-green-400">${formatPrice(channelPrediction.predictions.lh2Equal)}</span>
+                      </div>
+                      <div className="flex items-center justify-between p-1.5 bg-orange-500/10 rounded">
+                        <div className="flex items-center gap-1">
+                          <span className="text-orange-400">⇧</span>
+                          <span className="text-[var(--text-secondary)]">HH(扩张)</span>
+                        </div>
+                        <span className="font-mono text-orange-400">${formatPrice(channelPrediction.predictions.hhExpansion)}</span>
+                      </div>
+                      <div className="flex items-center justify-between p-1.5 bg-purple-500/10 rounded">
+                        <div className="flex items-center gap-1">
+                          <span className="text-purple-400">↕</span>
+                          <span className="text-[var(--text-secondary)]">LH2(收敛)</span>
+                        </div>
+                        <span className="font-mono text-purple-400">${formatPrice(channelPrediction.predictions.lh2Contract)}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
