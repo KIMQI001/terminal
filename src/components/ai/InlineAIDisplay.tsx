@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Activity, X, RefreshCw, ChevronDown, ChevronUp, Move, TrendingUp, TrendingDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { useChartStore } from '@/stores/chartStore';
 import { useAgentStore, HLLevel } from '@/stores/agentStore';
-import { detectSwingPoints } from '@/lib/chart/indicators/swingPoints';
+import { detectSwingPoints, detectAllPivots } from '@/lib/chart/indicators/swingPoints';
 import type { SwingPoint, Candle } from '@/types/chart';
 
 // kline-server API
@@ -87,7 +87,7 @@ function calculateSwingLevels(candles: Candle[], timeframe: string, currentPrice
 
 export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
   const timeframeRef = useRef('15m');
-  const { timeframe, candles, chartType, lineChartPeaks, lineChartValleys } = useChartStore();
+  const { timeframe, candles, chartType } = useChartStore();
   const {
     inlineAIEnabled,
     setInlineAIEnabled,
@@ -110,24 +110,12 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
   const recentLevels = (() => {
     if (candles.length < 10) return null;
 
-    // 折线图使用共享的波峰波谷数据
-    if (chartType === 'line' && lineChartPeaks.length > 0 && lineChartValleys.length > 0) {
-      const highs = [...lineChartPeaks].sort((a, b) => b.price - a.price);
-      const lows = [...lineChartValleys].sort((a, b) => a.price - b.price);
-
-      if (highs.length < 2 || lows.length < 2) return null;
-
-      return {
-        hh: { price: highs[0].price, time: highs[0].time },
-        lh: { price: highs[1].price, time: highs[1].time },
-        ll: { price: lows[0].price, time: lows[0].time },
-        hl: { price: lows[1].price, time: lows[1].time },
-      };
-    }
-
-    // 蜡烛图使用本地计算的swing points
     const recent = candles.slice(-1000);
-    const swings = detectSwingPoints(recent, 5);
+
+    // 折线图用 detectAllPivots，蜡烛图用 detectSwingPoints
+    const swings = chartType === 'line'
+      ? detectAllPivots(recent, 2, 2)
+      : detectSwingPoints(recent, 5);
 
     if (swings.length < 4) return null;
 

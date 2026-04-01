@@ -81,8 +81,6 @@ export function TradingChart() {
     updateCandle,
     setLoading,
     setConnected,
-    setLineChartPeaks,
-    setLineChartValleys,
   } = useChartStore();
 
   const {
@@ -797,12 +795,6 @@ export function TradingChart() {
       // 使用 detectAllPivots 检测所有局部极值（不过滤）
       const candles = useChartStore.getState().candles;
       const allPivots = detectAllPivots(candles, 2, 2);
-
-      // 共享折线图波峰波谷数据
-      const peaks = allPivots.filter((sp) => sp.type === "high");
-      const valleys = allPivots.filter((sp) => sp.type === "low");
-      setLineChartPeaks(peaks);
-      setLineChartValleys(valleys);
 
       if (allPivots.length > 0) {
         // 高线系列标记局部高点 (H)
