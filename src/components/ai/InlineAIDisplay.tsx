@@ -372,6 +372,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                   <div className="flex items-center gap-2">
                     <span className="text-red-400 font-medium">HH</span>
                     <span className="font-mono">${formatPrice(recentLevels.hh.price)}</span>
+                    <span className="text-[var(--text-secondary)]">{formatTime(recentLevels.hh.time)}</span>
                   </div>
                   <span className="text-orange-400">{recentLevels.hh.price - recentLevels.lh.price > 0 ? '+' : ''}{(recentLevels.hh.price - recentLevels.lh.price).toFixed(0)}</span>
                 </div>
@@ -379,12 +380,14 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                   <div className="flex items-center gap-2">
                     <span className="text-orange-400 font-medium">LH</span>
                     <span className="font-mono">${formatPrice(recentLevels.lh.price)}</span>
+                    <span className="text-[var(--text-secondary)]">{formatTime(recentLevels.lh.time)}</span>
                   </div>
                 </div>
                 <div className="flex items-center justify-between p-2 bg-green-500/10 rounded">
                   <div className="flex items-center gap-2">
                     <span className="text-green-400 font-medium">LL</span>
                     <span className="font-mono">${formatPrice(recentLevels.ll.price)}</span>
+                    <span className="text-[var(--text-secondary)]">{formatTime(recentLevels.ll.time)}</span>
                   </div>
                   <span className="text-cyan-400">{recentLevels.hl.price - recentLevels.ll.price > 0 ? '+' : ''}{(recentLevels.hl.price - recentLevels.ll.price).toFixed(0)}</span>
                 </div>
@@ -392,6 +395,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                   <div className="flex items-center gap-2">
                     <span className="text-cyan-400 font-medium">HL</span>
                     <span className="font-mono">${formatPrice(recentLevels.hl.price)}</span>
+                    <span className="text-[var(--text-secondary)]">{formatTime(recentLevels.hl.time)}</span>
                   </div>
                 </div>
               </div>
