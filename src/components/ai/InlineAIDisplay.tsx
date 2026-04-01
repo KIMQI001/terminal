@@ -607,6 +607,19 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
             </div>
           )}
 
+          {/* 调试信息 - 临时 */}
+          {recentLevels && (
+            <div className="mb-3 p-2 bg-gray-500/20 rounded text-xs">
+              <div className="text-gray-400 mb-1">调试: recentLevels</div>
+              <div>currentPrice: {currentPrice}</div>
+              <div>hh: {recentLevels.hh.price} | lh: {recentLevels.lh.price}</div>
+              <div>hl: {recentLevels.hl.price} | ll: {recentLevels.ll.price}</div>
+              <div>d: {recentLevels.hh.price - recentLevels.lh.price}</div>
+              <div>在HL区间: {currentPrice && currentPrice < recentLevels.hl.price && currentPrice > recentLevels.ll.price ? '是' : '否'}</div>
+              <div>在LH区间: {currentPrice && currentPrice > recentLevels.lh.price && currentPrice < recentLevels.hh.price ? '是' : '否'}</div>
+            </div>
+          )}
+
           {/* 通道预测分析 */}
           {channelPrediction && (
             <div className="mb-3 pb-2 border-b border-[var(--border-color)]">
