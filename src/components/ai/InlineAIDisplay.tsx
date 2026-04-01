@@ -103,6 +103,20 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
   const [isDragging, setIsDragging] = useState(false);
   const dragRef = useRef<{ startX: number; startY: number; startPosX: number; startPosY: number } | null>(null);
 
+  // 最近100根K线的HH/LH/LL/HL
+  const recentLevels = (() => {
+    if (candles.length < 4) return null;
+    const recent = candles.slice(-100);
+    const highs = [...recent].sort((a, b) => b.high - a.high);
+    const lows = [...recent].sort((a, b) => a.low - b.low);
+    return {
+      hh: { price: highs[0].high, time: highs[0].time },
+      lh: { price: highs[1].high, time: highs[1].time },
+      ll: { price: lows[0].low, time: lows[0].time },
+      hl: { price: lows[1].low, time: lows[1].time },
+    };
+  })();
+
   // 同步 timeframe 到 ref
   useEffect(() => {
     timeframeRef.current = timeframe;
@@ -340,6 +354,31 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
               ${currentPrice ? formatPrice(currentPrice) : '--'}
             </div>
           </div>
+
+          {/* 最近100根K线 HH/LH/LL/HL */}
+          {recentLevels && (
+            <div className="mb-3 pb-2 border-b border-[var(--border-color)]">
+              <div className="text-xs text-[var(--text-secondary)] mb-2">近100根K线</div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="flex items-center justify-between p-2 bg-red-500/10 rounded">
+                  <span className="text-red-400 font-medium">HH</span>
+                  <span className="font-mono">${formatPrice(recentLevels.hh.price)}</span>
+                </div>
+                <div className="flex items-center justify-between p-2 bg-orange-500/10 rounded">
+                  <span className="text-orange-400 font-medium">LH</span>
+                  <span className="font-mono">${formatPrice(recentLevels.lh.price)}</span>
+                </div>
+                <div className="flex items-center justify-between p-2 bg-green-500/10 rounded">
+                  <span className="text-green-400 font-medium">LL</span>
+                  <span className="font-mono">${formatPrice(recentLevels.ll.price)}</span>
+                </div>
+                <div className="flex items-center justify-between p-2 bg-cyan-500/10 rounded">
+                  <span className="text-cyan-400 font-medium">HL</span>
+                  <span className="font-mono">${formatPrice(recentLevels.hl.price)}</span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* 附近点位列表 */}
           <div>
