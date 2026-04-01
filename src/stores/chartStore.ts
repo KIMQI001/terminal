@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { Candle, Timeframe } from "@/types/chart";
+import { Candle, Timeframe, SwingPoint } from "@/types/chart";
 import type { LiquidationHillData } from "@/lib/chart/primitives";
 
 // 日K前高前低
@@ -30,6 +30,8 @@ interface ChartState {
   liquidationData: LiquidationHillData | null;
   dailyHL: DailyHL | null;  // 日K前高前低
   dailyHLLines: DailyHLLines;  // 价格线选中状态
+  lineChartPeaks: SwingPoint[];   // 折线图波峰
+  lineChartValleys: SwingPoint[]; // 折线图波谷
 
   setSymbol: (symbol: string) => void;
   setTimeframe: (timeframe: Timeframe) => void;
@@ -42,6 +44,8 @@ interface ChartState {
   setLiquidationData: (data: LiquidationHillData | null) => void;
   setDailyHL: (data: DailyHL | null) => void;
   toggleDailyHLLine: (line: keyof DailyHLLines) => void;
+  setLineChartPeaks: (peaks: SwingPoint[]) => void;
+  setLineChartValleys: (valleys: SwingPoint[]) => void;
 }
 
 export const useChartStore = create<ChartState>((set) => ({
@@ -55,8 +59,10 @@ export const useChartStore = create<ChartState>((set) => ({
   liquidationData: null,
   dailyHL: null,
   dailyHLLines: { H: false, P: false, D: false, L: false },
+  lineChartPeaks: [],
+  lineChartValleys: [],
 
-  setSymbol: (symbol) => set({ symbol, dailyHL: null, dailyHLLines: { H: false, P: false, D: false, L: false } }),  // 切换symbol时清空
+  setSymbol: (symbol) => set({ symbol, dailyHL: null, dailyHLLines: { H: false, P: false, D: false, L: false }, lineChartPeaks: [], lineChartValleys: [] }),  // 切换symbol时清空
   setTimeframe: (timeframe) => set({ timeframe }),
   setChartType: (chartType) => set({ chartType }),
   setCandles: (candles) => set({ candles }),
@@ -85,4 +91,6 @@ export const useChartStore = create<ChartState>((set) => ({
       [line]: !state.dailyHLLines[line],
     },
   })),
+  setLineChartPeaks: (peaks) => set({ lineChartPeaks: peaks }),
+  setLineChartValleys: (valleys) => set({ lineChartValleys: valleys }),
 }));
