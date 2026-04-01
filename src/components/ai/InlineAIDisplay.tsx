@@ -383,8 +383,8 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className={`${level.status === 'broken' ? 'text-green-500' : level.status === 'approaching' ? 'text-yellow-500' : 'text-[var(--text-secondary)]'}`}>
-                          {level.status === 'broken' ? '已突破' : level.status === 'approaching' ? '接近' : `+${level.distance.toFixed(1)}%`}
+                        <span className="text-[var(--text-secondary)]">
+                          {formatTime(level.time)}
                         </span>
                       </div>
                     </div>
@@ -426,8 +426,8 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className={`${level.status === 'broken' ? 'text-red-500' : level.status === 'approaching' ? 'text-yellow-500' : 'text-[var(--text-secondary)]'}`}>
-                          {level.status === 'broken' ? '已跌破' : level.status === 'approaching' ? '接近' : `-${level.distance.toFixed(1)}%`}
+                        <span className="text-[var(--text-secondary)]">
+                          {formatTime(level.time)}
                         </span>
                       </div>
                     </div>
