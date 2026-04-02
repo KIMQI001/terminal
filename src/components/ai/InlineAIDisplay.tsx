@@ -58,34 +58,34 @@ function calculateNearbyPivots(candles: Candle[], currentPrice: number): PivotSe
 
   if (swings.length < 4) return { hh: null, lh: null, hl: null, ll: null };
 
-  // 分离高低点
-  const highs = swings.filter(s => s.type === 'high').sort((a, b) => a.price - b.price); // 按价格升序
-  const lows = swings.filter(s => s.type === 'low').sort((a, b) => a.price - b.price);   // 按价格升序
+  // 分离高低点，按时间倒序（最近的在前）
+  const highs = swings.filter(s => s.type === 'high').sort((a, b) => b.time - a.time);
+  const lows = swings.filter(s => s.type === 'low').sort((a, b) => b.time - a.time);
 
-  // 找当前价格上方最近的两个高点 (HH, LH)
+  // 找上方最近的两个高点
   const higherHighs = highs.filter(h => h.price > currentPrice);
-  // HH: 价格最高的那个（最远的）
-  // LH: 价格最低的那个（最近的）
+  // HH = 最近的高点（上方最近的）
+  // LH = 第二近的高点
   let hh: PivotPoint | null = null;
   let lh: PivotPoint | null = null;
 
   if (higherHighs.length >= 2) {
-    hh = { price: higherHighs[higherHighs.length - 1].price, time: higherHighs[higherHighs.length - 1].time };
-    lh = { price: higherHighs[0].price, time: higherHighs[0].time };
+    hh = { price: higherHighs[0].price, time: higherHighs[0].time };
+    lh = { price: higherHighs[1].price, time: higherHighs[1].time };
   } else if (higherHighs.length === 1) {
     hh = { price: higherHighs[0].price, time: higherHighs[0].time };
   }
 
-  // 找当前价格下方最近的两个低点 (HL, LL)
+  // 找下方最近的两个低点
   const lowerLows = lows.filter(l => l.price < currentPrice);
-  // LL: 价格最低的那个（最远的）
-  // HL: 价格最高的那个（最近的）
+  // LL = 最近的最低点
+  // HL = 第二近的低点（相对更高的低点）
   let ll: PivotPoint | null = null;
   let hl: PivotPoint | null = null;
 
   if (lowerLows.length >= 2) {
     ll = { price: lowerLows[0].price, time: lowerLows[0].time };
-    hl = { price: lowerLows[lowerLows.length - 1].price, time: lowerLows[lowerLows.length - 1].time };
+    hl = { price: lowerLows[1].price, time: lowerLows[1].time };
   } else if (lowerLows.length === 1) {
     ll = { price: lowerLows[0].price, time: lowerLows[0].time };
   }
