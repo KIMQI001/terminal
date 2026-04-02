@@ -519,7 +519,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                   <div className="text-[9px] text-gray-400 text-center py-3">暂无</div>
                 ) : (
                   <div className="space-y-1">
-                    {[...liquidityPoints.aboveH].sort((a, b) => (a.price - currentPrice) - (b.price - currentPrice)).slice(0, 7).map((point, idx) => {
+                    {[...liquidityPoints.aboveH].sort((a, b) => (a.price - (currentPrice || 0)) - (b.price - (currentPrice || 0))).slice(0, 7).map((point, idx) => {
                       const distance = point.price - (currentPrice || 0);
                       const isNearest = idx === 0;
                       return (
@@ -555,7 +555,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                   <div className="text-[9px] text-gray-400 text-center py-3">暂无</div>
                 ) : (
                   <div className="space-y-1">
-                    {[...liquidityPoints.belowL].sort((a, b) => (currentPrice - a.price) - (currentPrice - b.price)).slice(0, 7).map((point, idx) => {
+                    {[...liquidityPoints.belowL].sort((a, b) => ((currentPrice || 0) - a.price) - ((currentPrice || 0) - b.price)).slice(0, 7).map((point, idx) => {
                       const distance = (currentPrice || 0) - point.price;
                       const isNearest = idx === 0;
                       return (
