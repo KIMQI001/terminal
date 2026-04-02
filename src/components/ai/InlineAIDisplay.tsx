@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Activity, X, RefreshCw, ChevronDown, ChevronUp, Move } from 'lucide-react';
 import { useChartStore } from '@/stores/chartStore';
 import { useAgentStore } from '@/stores/agentStore';
+import { useOrderStore, OTEPrefillData, TradingLine } from '@/stores/orderStore';
 import { detectSwingPoints, detectAllPivots, classifyPivots, ClassifiedSwingPoint } from '@/lib/chart/indicators/swingPoints';
 import type { Candle } from '@/types/chart';
 
@@ -182,6 +183,34 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
 
   // 当前价格使用 fapi BTCUSDC 价格
   const currentPrice = fapiPrice;
+
+  // 开单相关
+  const { setPrefillData, setTradingLines, openModal } = useOrderStore();
+
+  // 点击流动性点开单
+  const handleLiquidityClick = (point: LiquidityPoint, isAbove: boolean) => {
+    const side = isAbove ? 'sell' : 'buy';  // 上方H做空，下方L做多
+    const entry = point.price;
+    const stopLoss = isAbove ? entry + 200 : entry - 200;  // 止损200点
+    const takeProfit = isAbove ? entry - 1000 : entry + 1000;  // 止盈1000点
+
+    const prefillData: OTEPrefillData = {
+      side,
+      entry,
+      stopLoss,
+      takeProfit,
+    };
+
+    const lines: TradingLine[] = [
+      { price: entry, type: 'entry', side },
+      { price: stopLoss, type: 'stopLoss', side },
+      { price: takeProfit, type: 'takeProfit', side },
+    ];
+
+    setTradingLines(lines);
+    setPrefillData(prefillData);
+    openModal();
+  };
 
   // 计算各级别 Pivot 点
   const calculateAllPivots = async () => {
@@ -494,7 +523,11 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                     const isNearest = idx >= 5;
                     const isHighlighted = highlightH && isNearest;
                     return (
-                      <div key={idx} className={`flex items-center justify-between px-1.5 py-0.5 rounded ${isHighlighted ? 'border border-blue-500/60' : ''}`}>
+                      <div
+                        key={idx}
+                        onClick={() => handleLiquidityClick(point, true)}
+                        className={`flex items-center justify-between px-1.5 py-0.5 rounded cursor-pointer hover:bg-green-500/10 transition-colors ${isHighlighted ? 'border border-blue-500/60' : ''}`}
+                      >
                         <div className="flex items-center gap-1.5">
                           <span className={isHighlighted ? 'text-blue-400' : 'text-green-400'}>▲</span>
                           <span className={`font-bold ${isHighlighted ? 'text-blue-400 text-[11px]' : 'text-green-500/60 text-[9px]'}`}>{point.classification}</span>
@@ -539,7 +572,11 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                     const isNearest = idx === 0;
                     const isHighlighted = highlightL && isNearest;
                     return (
-                      <div key={idx} className={`flex items-center justify-between px-1.5 py-0.5 rounded ${isHighlighted ? 'border border-orange-500/60' : ''}`}>
+                      <div
+                        key={idx}
+                        onClick={() => handleLiquidityClick(point, false)}
+                        className={`flex items-center justify-between px-1.5 py-0.5 rounded cursor-pointer hover:bg-red-500/10 transition-colors ${isHighlighted ? 'border border-orange-500/60' : ''}`}
+                      >
                         <div className="flex items-center gap-1.5">
                           <span className={isHighlighted ? 'text-orange-400' : 'text-red-400'}>▼</span>
                           <span className={`font-bold ${isHighlighted ? 'text-orange-400 text-[11px]' : 'text-red-500/60 text-[9px]'}`}>{point.classification}</span>
