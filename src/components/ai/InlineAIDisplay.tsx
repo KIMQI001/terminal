@@ -144,18 +144,19 @@ function getLiquidityPoints(candles: Candle[], currentPrice: number): { aboveH: 
 
   const classified = classifyPivots(pivots, 0.5);
 
-  // 上方 H 点
+  // 上方 H 点 - 按价格升序（最近的在上面）
   const aboveH = classified
     .filter(p => p.type === 'high' && p.price > currentPrice)
     .map(p => ({ price: p.price, time: p.time, type: 'H' as const, classification: p.classification }))
+    .sort((a, b) => a.price - b.price)
     .slice(0, 10);
 
-  // 下方 L 点
+  // 下方 L 点 - 按价格降序（最近的在上面）
   const belowL = classified
     .filter(p => p.type === 'low' && p.price < currentPrice)
     .map(p => ({ price: p.price, time: p.time, type: 'L' as const, classification: p.classification }))
-    .slice(-10)
-    .reverse();
+    .sort((a, b) => b.price - a.price)
+    .slice(0, 10);
 
   return { aboveH, belowL };
 }
@@ -473,46 +474,80 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
 
           {/* 流动性分布 */}
           <div className="space-y-3 mb-4">
-            {/* 下方流动性 L 点 */}
-            <div className="p-2 bg-red-500/10 rounded border border-red-500/30">
-              <div className="text-[10px] text-red-400 font-medium mb-2">⬇️ 下方流动性 (做空目标)</div>
-              <div className="space-y-1">
-                {liquidityPoints.belowL.length === 0 ? (
-                  <div className="text-[10px] text-[var(--text-secondary)] text-center py-1">暂无数据</div>
+            {/* 上方流动性 H 点 - 按价格升序 */}
+            <div className="p-2 bg-green-500/10 rounded-lg border border-green-500/30">
+              <div className="text-[10px] text-green-400 font-semibold mb-2 flex items-center gap-1">
+                <span>⬆️</span>
+                <span>上方流动性</span>
+                <span className="text-[var(--text-secondary)] font-normal">(做多目标)</span>
+              </div>
+              <div className="space-y-1.5">
+                {liquidityPoints.aboveH.length === 0 ? (
+                  <div className="text-[10px] text-[var(--text-secondary)] text-center py-2">暂无数据</div>
                 ) : (
-                  liquidityPoints.belowL.slice(0, 5).map((point, idx) => (
-                    <div key={idx} className="flex items-center justify-between text-[10px]">
-                      <div className="flex items-center gap-1">
-                        <span className="text-red-400 font-medium w-4">L{idx + 1}</span>
-                        <span className={`font-mono ${point.classification === 'LL' ? 'text-red-400' : 'text-orange-400'}`}>
-                          ${formatPrice(point.price)}
-                        </span>
+                  liquidityPoints.aboveH.slice(0, 5).map((point, idx) => {
+                    const distance = point.price - (currentPrice || 0);
+                    const isNearest = idx === 0;
+                    return (
+                      <div
+                        key={idx}
+                        className={`flex items-center justify-between px-2 py-1.5 rounded ${
+                          isNearest ? 'bg-green-500/20 border border-green-500/50' : ''
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`font-bold w-5 text-right ${isNearest ? 'text-green-400' : 'text-green-500/60'}`}>
+                            {point.classification}
+                          </span>
+                          <span className={`font-mono font-semibold ${isNearest ? 'text-green-400 text-sm' : 'text-green-500/80 text-xs'}`}>
+                            ${formatPrice(point.price)}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-green-500/70">
+                          +{distance.toFixed(0)}
+                        </div>
                       </div>
-                      <span className="text-[var(--text-secondary)]">{formatTime(point.time)}</span>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
 
-            {/* 上方流动性 H 点 */}
-            <div className="p-2 bg-green-500/10 rounded border border-green-500/30">
-              <div className="text-[10px] text-green-400 font-medium mb-2">⬆️ 上方流动性 (做多目标)</div>
-              <div className="space-y-1">
-                {liquidityPoints.aboveH.length === 0 ? (
-                  <div className="text-[10px] text-[var(--text-secondary)] text-center py-1">暂无数据</div>
+            {/* 下方流动性 L 点 - 按价格降序 */}
+            <div className="p-2 bg-red-500/10 rounded-lg border border-red-500/30">
+              <div className="text-[10px] text-red-400 font-semibold mb-2 flex items-center gap-1">
+                <span>⬇️</span>
+                <span>下方流动性</span>
+                <span className="text-[var(--text-secondary)] font-normal">(做空目标)</span>
+              </div>
+              <div className="space-y-1.5">
+                {liquidityPoints.belowL.length === 0 ? (
+                  <div className="text-[10px] text-[var(--text-secondary)] text-center py-2">暂无数据</div>
                 ) : (
-                  liquidityPoints.aboveH.slice(0, 5).map((point, idx) => (
-                    <div key={idx} className="flex items-center justify-between text-[10px]">
-                      <div className="flex items-center gap-1">
-                        <span className="text-green-400 font-medium w-4">H{idx + 1}</span>
-                        <span className={`font-mono ${point.classification === 'HH' ? 'text-green-400' : 'text-cyan-400'}`}>
-                          ${formatPrice(point.price)}
-                        </span>
+                  liquidityPoints.belowL.slice(0, 5).map((point, idx) => {
+                    const distance = (currentPrice || 0) - point.price;
+                    const isNearest = idx === 0;
+                    return (
+                      <div
+                        key={idx}
+                        className={`flex items-center justify-between px-2 py-1.5 rounded ${
+                          isNearest ? 'bg-red-500/20 border border-red-500/50' : ''
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`font-bold w-5 text-right ${isNearest ? 'text-red-400' : 'text-red-500/60'}`}>
+                            {point.classification}
+                          </span>
+                          <span className={`font-mono font-semibold ${isNearest ? 'text-red-400 text-sm' : 'text-red-500/80 text-xs'}`}>
+                            ${formatPrice(point.price)}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-red-500/70">
+                          -{distance.toFixed(0)}
+                        </div>
                       </div>
-                      <span className="text-[var(--text-secondary)]">{formatTime(point.time)}</span>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
