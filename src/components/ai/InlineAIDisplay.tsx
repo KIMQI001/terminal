@@ -429,7 +429,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
   return (
     <div
       className={`fixed bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg shadow-lg z-40 transition-shadow ${isDragging ? 'shadow-2xl cursor-grabbing' : 'cursor-grab'}`}
-      style={{ left: position.x, top: position.y, width: 340 }}
+      style={{ left: position.x, top: position.y, width: 280 }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -459,97 +459,81 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
       {!isCollapsed && (
         <div className="p-3 max-h-[500px] overflow-y-auto">
           {/* 当前价格 */}
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-2 flex items-center justify-between">
             <div>
-              <div className="text-[10px] text-[var(--text-secondary)]">BTCUSDC 永续</div>
-              <div className="text-xl font-bold text-green-500">
+              <div className="text-[9px] text-[var(--text-secondary)]">BTCUSDC 永续</div>
+              <div className="text-base font-bold text-green-500">
                 ${currentPrice ? formatPrice(currentPrice) : '--'}
               </div>
             </div>
             <div className="text-right">
-              <div className="text-[10px] text-[var(--text-secondary)]">{lastUpdate ? `更新 ${lastUpdate}` : timeframeRef.current}</div>
-              <div className="text-[10px] text-yellow-400 mt-1">{pricePosition}</div>
+              <div className="text-[9px] text-[var(--text-secondary)]">{lastUpdate ? `更新 ${lastUpdate}` : timeframeRef.current}</div>
+              <div className="text-[9px] text-yellow-400 mt-0.5">{pricePosition}</div>
             </div>
           </div>
 
-          {/* 流动性分布 */}
-          <div className="space-y-3 mb-4">
-            {/* 上方流动性 H 点 - 按价格升序 */}
-            <div className="p-2 bg-green-500/10 rounded-lg border border-green-500/30">
-              <div className="text-[10px] text-green-400 font-semibold mb-2 flex items-center gap-1">
-                <span>⬆️</span>
-                <span>上方流动性</span>
-                <span className="text-[var(--text-secondary)] font-normal">(做多目标)</span>
-              </div>
-              <div className="space-y-1.5">
-                {liquidityPoints.aboveH.length === 0 ? (
-                  <div className="text-[10px] text-[var(--text-secondary)] text-center py-2">暂无数据</div>
-                ) : (
-                  liquidityPoints.aboveH.slice(0, 5).map((point, idx) => {
-                    const distance = point.price - (currentPrice || 0);
-                    const isNearest = idx === 0;
-                    return (
-                      <div
-                        key={idx}
-                        className={`flex items-center justify-between px-2 py-1.5 rounded ${
-                          isNearest ? 'bg-green-500/20 border border-green-500/50' : ''
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className={`font-bold w-5 text-right ${isNearest ? 'text-green-400' : 'text-green-500/60'}`}>
-                            {point.classification}
-                          </span>
-                          <span className={`font-mono font-semibold ${isNearest ? 'text-green-400 text-sm' : 'text-green-500/80 text-xs'}`}>
-                            ${formatPrice(point.price)}
-                          </span>
-                        </div>
-                        <div className="text-[10px] text-green-500/70">
-                          +{distance.toFixed(0)}
-                        </div>
+          {/* 流动性分布 - 价格在中间 */}
+          <div className="mb-4">
+            <div className="text-[9px] text-[var(--text-secondary)] mb-2">流动性分布</div>
+
+            {/* 上方 H 点 */}
+            <div className="space-y-0.5 mb-1">
+              {liquidityPoints.aboveH.length === 0 ? (
+                <div className="text-[9px] text-[var(--text-secondary)] text-center py-1">暂无上方流动性</div>
+              ) : (
+                liquidityPoints.aboveH.slice(0, 7).map((point, idx) => {
+                  const distance = point.price - (currentPrice || 0);
+                  return (
+                    <div key={idx} className="flex items-center justify-between px-1.5 py-0.5 rounded text-[9px]">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-green-400">▲</span>
+                        <span className="text-green-500/60 font-bold">{point.classification}</span>
                       </div>
-                    );
-                  })
-                )}
+                      <div className="font-mono text-green-400">
+                        {formatPrice(point.price)}
+                      </div>
+                      <div className="text-[9px] text-green-500/50 w-12 text-right">
+                        +{distance.toFixed(0)}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* 当前价格 - 中间显示 */}
+            <div className="flex items-center justify-center py-2 my-1 bg-[var(--bg-secondary)] rounded border border-[var(--border-color)]">
+              <div className="text-center">
+                <div className="text-[9px] text-[var(--text-secondary)]">当前价格</div>
+                <div className="text-sm font-bold text-[var(--text-primary)]">
+                  ${currentPrice ? formatPrice(currentPrice) : '--'}
+                </div>
               </div>
             </div>
 
-            {/* 下方流动性 L 点 - 按价格降序 */}
-            <div className="p-2 bg-red-500/10 rounded-lg border border-red-500/30">
-              <div className="text-[10px] text-red-400 font-semibold mb-2 flex items-center gap-1">
-                <span>⬇️</span>
-                <span>下方流动性</span>
-                <span className="text-[var(--text-secondary)] font-normal">(做空目标)</span>
-              </div>
-              <div className="space-y-1.5">
-                {liquidityPoints.belowL.length === 0 ? (
-                  <div className="text-[10px] text-[var(--text-secondary)] text-center py-2">暂无数据</div>
-                ) : (
-                  liquidityPoints.belowL.slice(0, 5).map((point, idx) => {
-                    const distance = (currentPrice || 0) - point.price;
-                    const isNearest = idx === 0;
-                    return (
-                      <div
-                        key={idx}
-                        className={`flex items-center justify-between px-2 py-1.5 rounded ${
-                          isNearest ? 'bg-red-500/20 border border-red-500/50' : ''
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className={`font-bold w-5 text-right ${isNearest ? 'text-red-400' : 'text-red-500/60'}`}>
-                            {point.classification}
-                          </span>
-                          <span className={`font-mono font-semibold ${isNearest ? 'text-red-400 text-sm' : 'text-red-500/80 text-xs'}`}>
-                            ${formatPrice(point.price)}
-                          </span>
-                        </div>
-                        <div className="text-[10px] text-red-500/70">
-                          -{distance.toFixed(0)}
-                        </div>
+            {/* 下方 L 点 */}
+            <div className="space-y-0.5 mt-1">
+              {liquidityPoints.belowL.length === 0 ? (
+                <div className="text-[9px] text-[var(--text-secondary)] text-center py-1">暂无下方流动性</div>
+              ) : (
+                liquidityPoints.belowL.slice(0, 7).map((point, idx) => {
+                  const distance = (currentPrice || 0) - point.price;
+                  return (
+                    <div key={idx} className="flex items-center justify-between px-1.5 py-0.5 rounded text-[9px]">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-red-400">▼</span>
+                        <span className="text-red-500/60 font-bold">{point.classification}</span>
                       </div>
-                    );
-                  })
-                )}
-              </div>
+                      <div className="font-mono text-red-400">
+                        {formatPrice(point.price)}
+                      </div>
+                      <div className="text-[9px] text-red-500/50 w-12 text-right">
+                        -{distance.toFixed(0)}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
 
