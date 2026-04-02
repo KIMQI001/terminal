@@ -43,33 +43,54 @@ interface InlineAIDisplayProps {
   symbol?: string;
 }
 
-// 计算某个周期的 HH/LH/HL/LL
+// 计算某个周期的附近 HH/LH/HL/LL（基于当前价格）
 interface PivotSet {
-  hh: PivotPoint;
-  lh: PivotPoint;
-  hl: PivotPoint;
-  ll: PivotPoint;
+  hh: PivotPoint | null;
+  lh: PivotPoint | null;
+  hl: PivotPoint | null;
+  ll: PivotPoint | null;
 }
 
-function calculatePivots(candles: Candle[]): PivotSet | null {
-  if (candles.length < 10) return null;
+function calculateNearbyPivots(candles: Candle[], currentPrice: number): PivotSet {
+  if (candles.length < 10) return { hh: null, lh: null, hl: null, ll: null };
 
   const swings = detectSwingPoints(candles, 5);
 
-  if (swings.length < 4) return null;
+  if (swings.length < 4) return { hh: null, lh: null, hl: null, ll: null };
 
-  // 分离高低点并按价格排序
-  const highs = swings.filter(s => s.type === 'high').sort((a, b) => b.price - a.price);
-  const lows = swings.filter(s => s.type === 'low').sort((a, b) => a.price - b.price);
+  // 分离高低点
+  const highs = swings.filter(s => s.type === 'high').sort((a, b) => a.price - b.price); // 按价格升序
+  const lows = swings.filter(s => s.type === 'low').sort((a, b) => a.price - b.price);   // 按价格升序
 
-  if (highs.length < 2 || lows.length < 2) return null;
+  // 找当前价格上方最近的两个高点 (HH, LH)
+  const higherHighs = highs.filter(h => h.price > currentPrice);
+  // HH: 价格最高的那个（最远的）
+  // LH: 价格最低的那个（最近的）
+  let hh: PivotPoint | null = null;
+  let lh: PivotPoint | null = null;
 
-  return {
-    hh: { price: highs[0].price, time: highs[0].time },
-    lh: { price: highs[1].price, time: highs[1].time },
-    hl: { price: lows[1].price, time: lows[1].time },
-    ll: { price: lows[0].price, time: lows[0].time },
-  };
+  if (higherHighs.length >= 2) {
+    hh = { price: higherHighs[higherHighs.length - 1].price, time: higherHighs[higherHighs.length - 1].time };
+    lh = { price: higherHighs[0].price, time: higherHighs[0].time };
+  } else if (higherHighs.length === 1) {
+    hh = { price: higherHighs[0].price, time: higherHighs[0].time };
+  }
+
+  // 找当前价格下方最近的两个低点 (HL, LL)
+  const lowerLows = lows.filter(l => l.price < currentPrice);
+  // LL: 价格最低的那个（最远的）
+  // HL: 价格最高的那个（最近的）
+  let ll: PivotPoint | null = null;
+  let hl: PivotPoint | null = null;
+
+  if (lowerLows.length >= 2) {
+    ll = { price: lowerLows[0].price, time: lowerLows[0].time };
+    hl = { price: lowerLows[lowerLows.length - 1].price, time: lowerLows[lowerLows.length - 1].time };
+  } else if (lowerLows.length === 1) {
+    ll = { price: lowerLows[0].price, time: lowerLows[0].time };
+  }
+
+  return { hh, lh, hl, ll };
 }
 
 // 判断价格位置
@@ -140,8 +161,9 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
         }
 
         if (tfCandles && tfCandles.length > 10) {
-          const pivots = calculatePivots(tfCandles);
-          if (pivots) {
+          const tfPrice = tfCandles[tfCandles.length - 1].close;
+          const pivots = calculateNearbyPivots(tfCandles, tfPrice);
+          if (pivots.hh || pivots.lh || pivots.hl || pivots.ll) {
             allPivots.push({
               timeframe: tf,
               ...pivots,
@@ -160,33 +182,55 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
   const channelPrediction: ChannelPrediction | null = (() => {
     if (!currentPrice || multiTimeframePivots.length === 0) return null;
 
-    // 优先用当前周期的 pivots
     const currentTf = timeframeRef.current;
     const pivots = multiTimeframePivots.find(p => p.timeframe === currentTf);
 
-    if (!pivots || !pivots.hh || !pivots.lh || !pivots.hl || !pivots.ll) return null;
+    if (!pivots) return null;
 
     const { hh, lh, hl, ll } = pivots;
 
-    // 通道宽度 d = 两个高点之差
+    // 需要至少两个高点和两个低点
+    if (!hh || !lh || !hl || !ll) return null;
+
+    // 通道宽度 d = 两个高点之差（上方两个近的高点）
     const d = hh.price - lh.price;
 
     if (d <= 0) return null;
 
-    // 宽松的通道判断：价格是否在 HH-LH 区间（接近高点）
-    // 或者在 HL-LL 区间（接近低点）
-    const isNearHigh = currentPrice > lh.price && currentPrice <= hh.price;
-    const isNearLow = currentPrice > ll.price && currentPrice <= hl.price;
+    // 价格是否在两个高点之间（接近高点区间）
+    const isNearHighs = currentPrice > lh.price && currentPrice <= hh.price;
+    // 价格是否在两个低点之间（接近低点区间）
+    const isNearLows = currentPrice > ll.price && currentPrice <= hl.price;
 
-    // 上升通道：价格接近低点 HL
-    if (isNearLow) {
+    // 下降通道：价格接近高点，用上方通道
+    if (isNearHighs) {
+      const dLow = lh.price - ll.price;
+      return {
+        type: 'bearish',
+        d: dLow,
+        predictions: {
+          equal: lh.price + dLow,      // 等距
+          expansion: lh.price + 2 * dLow, // 扩张
+          contract: lh.price - dLow,    // 收敛
+        },
+        relatedPivots: {
+          high1: { price: hh.price, time: hh.time, label: 'HH' },
+          high2: { price: lh.price, time: lh.time, label: 'LH' },
+          low1: { price: ll.price, time: ll.time, label: 'LL' },
+        },
+      };
+    }
+
+    // 上升通道：价格接近低点，用下方通道
+    if (isNearLows) {
+      const dLow = lh.price - ll.price;
       return {
         type: 'bullish',
-        d,
+        d: dLow,
         predictions: {
-          equal: hl.price - d,        // 等距
-          expansion: hl.price - 2 * d, // 扩张
-          contract: hl.price + d,      // 收敛
+          equal: hl.price - dLow,        // 等距
+          expansion: hl.price - 2 * dLow, // 扩张
+          contract: hl.price + dLow,      // 收敛
         },
         relatedPivots: {
           high1: { price: hh.price, time: hh.time, label: 'HH' },
@@ -196,26 +240,6 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
       };
     }
 
-    // 下降通道：价格接近高点 LH
-    if (isNearHigh) {
-      const dLow = lh.price - ll.price;
-      return {
-        type: 'bearish',
-        d: dLow,
-        predictions: {
-          equal: lh.price + dLow,
-          expansion: lh.price + 2 * dLow,
-          contract: lh.price - dLow,
-        },
-        relatedPivots: {
-          high1: { price: lh.price, time: lh.time, label: 'LH' },
-          high2: { price: hh.price, time: hh.time, label: 'HH' },
-          low1: { price: ll.price, time: ll.time, label: 'LL' },
-        },
-      };
-    }
-
-    // 价格在其他区间，不做通道预测
     return null;
   })();
 
