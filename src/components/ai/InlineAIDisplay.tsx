@@ -526,16 +526,16 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                         <div
                           key={idx}
                           onClick={() => handleLiquidityClick(point, true)}
-                          className={`grid grid-cols-3 gap-1 px-1.5 py-0.5 rounded cursor-pointer hover:bg-green-100 transition-colors ${isNearest ? 'border border-dashed border-green-500 bg-green-50' : ''}`}
+                          className={`grid grid-cols-3 gap-1 px-1 py-0.5 rounded cursor-pointer hover:bg-green-100 transition-colors ${isNearest ? 'border border-dashed border-green-500 bg-green-50' : ''}`}
                         >
                           <div className="flex items-center gap-1">
                             <span className={isNearest ? 'text-green-600' : 'text-green-500/60'}>▲</span>
-                            <span className={`font-bold ${isNearest ? 'text-green-600 text-[9px]' : 'text-green-500/60 text-[8px]'}`}>{point.classification}</span>
+                            <span className={`font-bold ${isNearest ? 'text-green-600 text-[10px]' : 'text-green-500/60 text-[10px]'}`}>{point.classification}</span>
                           </div>
-                          <div className={`font-mono text-right ${isNearest ? 'text-gray-700 text-[9px]' : 'text-gray-500 text-[8px]'}`}>
+                          <div className={`font-mono text-right ${isNearest ? 'text-gray-700 text-[10px]' : 'text-gray-500 text-[10px]'}`}>
                             {formatPrice(point.price)}
                           </div>
-                          <div className={`text-right ${isNearest ? 'text-gray-600 text-[8px]' : 'text-gray-400 text-[7px]'}`}>
+                          <div className={`text-right ${isNearest ? 'text-gray-600 text-[10px]' : 'text-gray-400 text-[10px]'}`}>
                             +{distance.toFixed(0)}
                           </div>
                         </div>
@@ -562,16 +562,16 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                         <div
                           key={idx}
                           onClick={() => handleLiquidityClick(point, false)}
-                          className={`grid grid-cols-3 gap-1 px-1.5 py-0.5 rounded cursor-pointer hover:bg-red-100 transition-colors ${isNearest ? 'border border-dashed border-red-500 bg-red-50' : ''}`}
+                          className={`grid grid-cols-3 gap-1 px-1 py-0.5 rounded cursor-pointer hover:bg-red-100 transition-colors ${isNearest ? 'border border-dashed border-red-500 bg-red-50' : ''}`}
                         >
                           <div className="flex items-center gap-1">
                             <span className={isNearest ? 'text-red-500' : 'text-red-500/60'}>▼</span>
-                            <span className={`font-bold ${isNearest ? 'text-red-500 text-[9px]' : 'text-red-500/60 text-[8px]'}`}>{point.classification}</span>
+                            <span className={`font-bold ${isNearest ? 'text-red-500 text-[10px]' : 'text-red-500/60 text-[10px]'}`}>{point.classification}</span>
                           </div>
-                          <div className={`font-mono text-right ${isNearest ? 'text-gray-700 text-[9px]' : 'text-gray-500 text-[8px]'}`}>
+                          <div className={`font-mono text-right ${isNearest ? 'text-gray-700 text-[10px]' : 'text-gray-500 text-[10px]'}`}>
                             {formatPrice(point.price)}
                           </div>
-                          <div className={`text-right ${isNearest ? 'text-gray-600 text-[8px]' : 'text-gray-400 text-[7px]'}`}>
+                          <div className={`text-right ${isNearest ? 'text-gray-600 text-[10px]' : 'text-gray-400 text-[10px]'}`}>
                             -{distance.toFixed(0)}
                           </div>
                         </div>
