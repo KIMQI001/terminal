@@ -482,23 +482,33 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
               {liquidityPoints.aboveH.length === 0 ? (
                 <div className="text-[9px] text-[var(--text-secondary)] text-center py-1">暂无上方流动性</div>
               ) : (
-                liquidityPoints.aboveH.slice(0, 7).map((point, idx) => {
-                  const distance = point.price - (currentPrice || 0);
-                  return (
-                    <div key={idx} className="flex items-center justify-between px-1.5 py-0.5 rounded text-[9px]">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-green-400">▲</span>
-                        <span className="text-green-500/60 font-bold">{point.classification}</span>
+                (() => {
+                  const nearestH = liquidityPoints.aboveH[liquidityPoints.aboveH.length - 1];
+                  const nearestL = liquidityPoints.belowL[0];
+                  const distanceToH = nearestH ? nearestH.price - (currentPrice || 0) : Infinity;
+                  const distanceToL = nearestL ? (currentPrice || 0) - nearestL.price : Infinity;
+                  const highlightH = distanceToH <= distanceToL && distanceToH !== Infinity;
+
+                  return liquidityPoints.aboveH.slice(0, 7).map((point, idx) => {
+                    const distance = point.price - (currentPrice || 0);
+                    const isNearest = idx >= 5;
+                    const isHighlighted = highlightH && isNearest;
+                    return (
+                      <div key={idx} className={`flex items-center justify-between px-1.5 py-0.5 rounded ${isHighlighted ? 'border border-blue-500/60' : ''}`}>
+                        <div className="flex items-center gap-1.5">
+                          <span className={isHighlighted ? 'text-blue-400' : 'text-green-400'}>▲</span>
+                          <span className={`font-bold ${isHighlighted ? 'text-blue-400 text-[11px]' : 'text-green-500/60 text-[9px]'}`}>{point.classification}</span>
+                        </div>
+                        <div className={`font-mono ${isHighlighted ? 'text-blue-400 text-[11px]' : 'text-green-400 text-[9px]'}`}>
+                          {formatPrice(point.price)}
+                        </div>
+                        <div className={`w-12 text-right ${isHighlighted ? 'text-blue-400 text-[10px]' : 'text-green-500/50 text-[9px]'}`}>
+                          +{distance.toFixed(0)}
+                        </div>
                       </div>
-                      <div className="font-mono text-green-400">
-                        {formatPrice(point.price)}
-                      </div>
-                      <div className="text-[9px] text-green-500/50 w-12 text-right">
-                        +{distance.toFixed(0)}
-                      </div>
-                    </div>
-                  );
-                })
+                    );
+                  });
+                })()
               )}
             </div>
 
@@ -517,23 +527,33 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
               {liquidityPoints.belowL.length === 0 ? (
                 <div className="text-[9px] text-[var(--text-secondary)] text-center py-1">暂无下方流动性</div>
               ) : (
-                liquidityPoints.belowL.slice(0, 7).map((point, idx) => {
-                  const distance = (currentPrice || 0) - point.price;
-                  return (
-                    <div key={idx} className="flex items-center justify-between px-1.5 py-0.5 rounded text-[9px]">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-red-400">▼</span>
-                        <span className="text-red-500/60 font-bold">{point.classification}</span>
+                (() => {
+                  const nearestH = liquidityPoints.aboveH[liquidityPoints.aboveH.length - 1];
+                  const nearestL = liquidityPoints.belowL[0];
+                  const distanceToH = nearestH ? nearestH.price - (currentPrice || 0) : Infinity;
+                  const distanceToL = nearestL ? (currentPrice || 0) - nearestL.price : Infinity;
+                  const highlightL = distanceToL < distanceToH && distanceToL !== Infinity;
+
+                  return liquidityPoints.belowL.slice(0, 7).map((point, idx) => {
+                    const distance = (currentPrice || 0) - point.price;
+                    const isNearest = idx === 0;
+                    const isHighlighted = highlightL && isNearest;
+                    return (
+                      <div key={idx} className={`flex items-center justify-between px-1.5 py-0.5 rounded ${isHighlighted ? 'border border-orange-500/60' : ''}`}>
+                        <div className="flex items-center gap-1.5">
+                          <span className={isHighlighted ? 'text-orange-400' : 'text-red-400'}>▼</span>
+                          <span className={`font-bold ${isHighlighted ? 'text-orange-400 text-[11px]' : 'text-red-500/60 text-[9px]'}`}>{point.classification}</span>
+                        </div>
+                        <div className={`font-mono ${isHighlighted ? 'text-orange-400 text-[11px]' : 'text-red-400 text-[9px]'}`}>
+                          {formatPrice(point.price)}
+                        </div>
+                        <div className={`w-12 text-right ${isHighlighted ? 'text-orange-400 text-[10px]' : 'text-red-500/50 text-[9px]'}`}>
+                          -{distance.toFixed(0)}
+                        </div>
                       </div>
-                      <div className="font-mono text-red-400">
-                        {formatPrice(point.price)}
-                      </div>
-                      <div className="text-[9px] text-red-500/50 w-12 text-right">
-                        -{distance.toFixed(0)}
-                      </div>
-                    </div>
-                  );
-                })
+                    );
+                  });
+                })()
               )}
             </div>
           </div>
