@@ -219,3 +219,121 @@ function selectBestFromGroup(group: SwingPoint[]): SwingPoint {
     }
   });
 }
+
+/**
+ * Swing Point 分类类型
+ * HH = Higher High 更高的波峰
+ * HL = Higher Low 更高的波谷
+ * LH = Lower High 更低的波峰
+ * LL = Lower Low 更低的波谷
+ */
+export type SwingClassification = "HH" | "HL" | "LH" | "LL";
+
+/**
+ * 带分类的 Swing Point
+ */
+export interface ClassifiedSwingPoint extends SwingPoint {
+  classification: SwingClassification;
+}
+
+/**
+ * 对 detectAllPivots 的结果进行二次规则筛选
+ * 将 H/L 点分类为 HH/HL/LH/LL
+ *
+ * @param pivots - detectAllPivots 返回的极值点（已按时间排序）
+ * @param minSwingPercent - 最小摆动幅度百分比，用于过滤无效信号
+ */
+export function classifyPivots(
+  pivots: SwingPoint[],
+  minSwingPercent: number = 0.5
+): ClassifiedSwingPoint[] {
+  if (pivots.length < 2) {
+    return pivots.map(p => ({
+      ...p,
+      classification: p.type === "high" ? "LH" as SwingClassification : "LL" as SwingClassification,
+    }));
+  }
+
+  // 分离高点和低点
+  const highs = pivots.filter(p => p.type === "high");
+  const lows = pivots.filter(p => p.type === "low");
+
+  // 分类结果
+  const classified: ClassifiedSwingPoint[] = [];
+
+  // 追踪上一个有效的高点/低点价格
+  let lastHighPrice: number | null = null;
+  let lastLowPrice: number | null = null;
+
+  // 追踪上一个点的类型和分类
+  let lastPointType: "high" | "low" | null = null;
+  let lastClassification: SwingClassification | null = null;
+
+  for (const pivot of pivots) {
+    let classification: SwingClassification;
+
+    if (pivot.type === "high") {
+      // 处理高点
+      if (lastHighPrice === null) {
+        // 第一个高点
+        classification = "LH";
+      } else {
+        const priceChange = Math.abs(pivot.price - lastHighPrice) / lastHighPrice * 100;
+        if (priceChange < minSwingPercent) {
+          // 幅度太小，标记为与上一个相同类型
+          classification = lastClassification === "HH" ? "HH" : "LH";
+        } else if (pivot.price > lastHighPrice) {
+          classification = "HH";
+        } else {
+          classification = "LH";
+        }
+      }
+      lastHighPrice = pivot.price;
+    } else {
+      // 处理低点
+      if (lastLowPrice === null) {
+        // 第一个低点
+        classification = "LL";
+      } else {
+        const priceChange = Math.abs(pivot.price - lastLowPrice) / lastLowPrice * 100;
+        if (priceChange < minSwingPercent) {
+          // 幅度太小，标记为与上一个相同类型
+          classification = lastClassification === "HL" ? "HL" : "LL";
+        } else if (pivot.price > lastLowPrice) {
+          classification = "HL";
+        } else {
+          classification = "LL";
+        }
+      }
+      lastLowPrice = pivot.price;
+    }
+
+    lastPointType = pivot.type;
+    lastClassification = classification;
+
+    classified.push({
+      ...pivot,
+      classification,
+    });
+  }
+
+  return classified;
+}
+
+/**
+ * 获取 HH/HL/LH/LL 分类的 Swing Points
+ *
+ * @param candles - K线数据
+ * @param leftBars - 左侧确认K线数量
+ * @param rightBars - 右侧确认K线数量
+ * @param minSwingPercent - 最小摆动幅度百分比
+ */
+export function detectClassifiedSwings(
+  candles: Candle[],
+  leftBars: number = 2,
+  rightBars: number = 2,
+  minSwingPercent: number = 0.5
+): ClassifiedSwingPoint[] {
+  const pivots = detectAllPivots(candles, leftBars, rightBars);
+  return classifyPivots(pivots, minSwingPercent);
+}

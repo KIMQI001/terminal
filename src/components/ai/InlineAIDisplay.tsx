@@ -4,10 +4,10 @@ import { useState, useEffect, useRef } from 'react';
 import { Activity, X, RefreshCw, ChevronDown, ChevronUp, Move } from 'lucide-react';
 import { useChartStore } from '@/stores/chartStore';
 import { useAgentStore } from '@/stores/agentStore';
-import { detectSwingPoints } from '@/lib/chart/indicators/swingPoints';
+import { detectSwingPoints, detectAllPivots, classifyPivots, ClassifiedSwingPoint } from '@/lib/chart/indicators/swingPoints';
 import type { Candle } from '@/types/chart';
 
-const KLINE_API = process.env.NEXT_PUBLIC_KLINE_API || 'http://localhost:3001';
+const BINANCE_FAPI = 'https://fapi.binance.com/fapi/v1';
 
 // 分级别的 Pivot 点
 interface PivotPoint {
@@ -21,6 +21,14 @@ interface LevelPivots {
   lh: PivotPoint | null;
   hl: PivotPoint | null;
   ll: PivotPoint | null;
+}
+
+// 流动性点
+interface LiquidityPoint {
+  price: number;
+  time: number;
+  type: 'H' | 'L';
+  classification: 'HH' | 'LH' | 'HL' | 'LL';
 }
 
 // 通道预测
@@ -112,8 +120,48 @@ function getPricePosition(price: number, pivots: LevelPivots): string {
   return '未知';
 }
 
+// 从 fapi 获取 K 线数据
+async function fetchFapiKlines(symbol: string = 'BTCUSDC', interval: string = '1h', limit: number = 500): Promise<Candle[]> {
+  const url = `${BINANCE_FAPI}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('Failed to fetch klines');
+  const data = await response.json();
+  return data.map((k: any[]) => ({
+    time: k[0] / 1000, // 转为秒
+    open: parseFloat(k[1]),
+    high: parseFloat(k[2]),
+    low: parseFloat(k[3]),
+    close: parseFloat(k[4]),
+  }));
+}
+
+// 获取流动性点（当前价格上方H点和下方L点）
+function getLiquidityPoints(candles: Candle[], currentPrice: number): { aboveH: LiquidityPoint[], belowL: LiquidityPoint[] } {
+  if (candles.length < 10) return { aboveH: [], belowL: [] };
+
+  const pivots = detectAllPivots(candles, 2, 2);
+  if (pivots.length < 2) return { aboveH: [], belowL: [] };
+
+  const classified = classifyPivots(pivots, 0.5);
+
+  // 上方 H 点
+  const aboveH = classified
+    .filter(p => p.type === 'high' && p.price > currentPrice)
+    .map(p => ({ price: p.price, time: p.time, type: 'H' as const, classification: p.classification }))
+    .slice(0, 10);
+
+  // 下方 L 点
+  const belowL = classified
+    .filter(p => p.type === 'low' && p.price < currentPrice)
+    .map(p => ({ price: p.price, time: p.time, type: 'L' as const, classification: p.classification }))
+    .slice(-10)
+    .reverse();
+
+  return { aboveH, belowL };
+}
+
 export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
-  const timeframeRef = useRef('15m');
+  const timeframeRef = useRef('1h');
   const { timeframe, candles } = useChartStore();
   const { inlineAIEnabled, setInlineAIEnabled, setCurrentPrice } = useAgentStore();
 
@@ -121,14 +169,17 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [multiTimeframePivots, setMultiTimeframePivots] = useState<LevelPivots[]>([]);
+  const [liquidityPoints, setLiquidityPoints] = useState<{ aboveH: LiquidityPoint[], belowL: LiquidityPoint[] }>({ aboveH: [], belowL: [] });
+  const [lastUpdate, setLastUpdate] = useState<string>('');
+  const [fapiPrice, setFapiPrice] = useState<number | null>(null);
 
   // 拖拽状态
   const [position, setPosition] = useState({ x: 16, y: 80 });
   const [isDragging, setIsDragging] = useState(false);
   const dragRef = useRef<{ startX: number; startY: number; startPosX: number; startPosY: number } | null>(null);
 
-  // 当前价格
-  const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : null;
+  // 当前价格使用 fapi BTCUSDC 价格
+  const currentPrice = fapiPrice;
 
   // 计算各级别 Pivot 点
   const calculateAllPivots = async () => {
@@ -154,10 +205,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
         if (tf === currentTf && candles.length > 0) {
           tfCandles = candles;
         } else {
-          const res = await fetch(`${KLINE_API}/api/klines/${symbol.toUpperCase()}/${tf}?limit=500`);
-          if (!res.ok) continue;
-          const data = await res.json();
-          tfCandles = data.klines;
+          tfCandles = await fetchFapiKlines('BTCUSDC', tf === '1d' ? '1d' : tf === '4h' ? '4h' : tf === '1h' ? '1h' : '15m', 500);
         }
 
         if (tfCandles && tfCandles.length > 10) {
@@ -176,6 +224,23 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
     }
 
     setMultiTimeframePivots(allPivots);
+  };
+
+  // 计算流动性点
+  const calculateLiquidityPoints = async () => {
+    try {
+      const candles = await fetchFapiKlines('BTCUSDC', '1h', 500);
+      if (candles.length > 0) {
+        const currentP = candles[candles.length - 1].close;
+        setFapiPrice(currentP);
+        setCurrentPrice(currentP);
+        const liq = getLiquidityPoints(candles, currentP);
+        setLiquidityPoints(liq);
+        setLastUpdate(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
+      }
+    } catch (e) {
+      console.error('Failed to fetch liquidity points:', e);
+    }
   };
 
   // 通道预测计算
@@ -267,19 +332,20 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
       setCurrentPrice(price);
       // 重新计算 pivot 点
       calculateAllPivots();
+      // 重新计算流动性点
+      calculateLiquidityPoints();
     }
   }, [candles, timeframe, setCurrentPrice]);
 
   // 定时刷新
   useEffect(() => {
     const interval = setInterval(() => {
-      if (candles.length > 0) {
-        calculateAllPivots();
-      }
+      calculateAllPivots();
+      calculateLiquidityPoints();
     }, 30000);
 
     return () => clearInterval(interval);
-  }, [candles, timeframe]);
+  }, [timeframe]);
 
   // 刷新
   const handleRefresh = () => {
@@ -394,44 +460,62 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
           {/* 当前价格 */}
           <div className="mb-3 flex items-center justify-between">
             <div>
-              <div className="text-[10px] text-[var(--text-secondary)]">当前价格</div>
+              <div className="text-[10px] text-[var(--text-secondary)]">BTCUSDC 永续</div>
               <div className="text-xl font-bold text-green-500">
                 ${currentPrice ? formatPrice(currentPrice) : '--'}
               </div>
             </div>
             <div className="text-right">
-              <div className="text-[10px] text-[var(--text-secondary)]">{timeframeRef.current}</div>
+              <div className="text-[10px] text-[var(--text-secondary)]">{lastUpdate ? `更新 ${lastUpdate}` : timeframeRef.current}</div>
               <div className="text-[10px] text-yellow-400 mt-1">{pricePosition}</div>
             </div>
           </div>
 
-          {/* 各级别 Pivot 点 */}
+          {/* 流动性分布 */}
           <div className="space-y-3 mb-4">
-            {multiTimeframePivots.map((pivots) => (
-              <div key={pivots.timeframe} className="p-2 bg-[var(--bg-secondary)] rounded">
-                <div className={`text-[10px] font-medium mb-2 ${getTimeframeColor(pivots.timeframe)}`}>
-                  {pivots.timeframe}
-                </div>
-                <div className="grid grid-cols-2 gap-1 text-[10px]">
-                  <div className="flex items-center gap-1">
-                    <span className="text-red-400 w-5">HH</span>
-                    <span className="font-mono">{pivots.hh ? formatPrice(pivots.hh.price) : '-'}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-orange-400 w-5">LH</span>
-                    <span className="font-mono">{pivots.lh ? formatPrice(pivots.lh.price) : '-'}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-cyan-400 w-5">HL</span>
-                    <span className="font-mono">{pivots.hl ? formatPrice(pivots.hl.price) : '-'}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-green-400 w-5">LL</span>
-                    <span className="font-mono">{pivots.ll ? formatPrice(pivots.ll.price) : '-'}</span>
-                  </div>
-                </div>
+            {/* 下方流动性 L 点 */}
+            <div className="p-2 bg-red-500/10 rounded border border-red-500/30">
+              <div className="text-[10px] text-red-400 font-medium mb-2">⬇️ 下方流动性 (做空目标)</div>
+              <div className="space-y-1">
+                {liquidityPoints.belowL.length === 0 ? (
+                  <div className="text-[10px] text-[var(--text-secondary)] text-center py-1">暂无数据</div>
+                ) : (
+                  liquidityPoints.belowL.slice(0, 5).map((point, idx) => (
+                    <div key={idx} className="flex items-center justify-between text-[10px]">
+                      <div className="flex items-center gap-1">
+                        <span className="text-red-400 font-medium w-4">L{idx + 1}</span>
+                        <span className={`font-mono ${point.classification === 'LL' ? 'text-red-400' : 'text-orange-400'}`}>
+                          ${formatPrice(point.price)}
+                        </span>
+                      </div>
+                      <span className="text-[var(--text-secondary)]">{formatTime(point.time)}</span>
+                    </div>
+                  ))
+                )}
               </div>
-            ))}
+            </div>
+
+            {/* 上方流动性 H 点 */}
+            <div className="p-2 bg-green-500/10 rounded border border-green-500/30">
+              <div className="text-[10px] text-green-400 font-medium mb-2">⬆️ 上方流动性 (做多目标)</div>
+              <div className="space-y-1">
+                {liquidityPoints.aboveH.length === 0 ? (
+                  <div className="text-[10px] text-[var(--text-secondary)] text-center py-1">暂无数据</div>
+                ) : (
+                  liquidityPoints.aboveH.slice(0, 5).map((point, idx) => (
+                    <div key={idx} className="flex items-center justify-between text-[10px]">
+                      <div className="flex items-center gap-1">
+                        <span className="text-green-400 font-medium w-4">H{idx + 1}</span>
+                        <span className={`font-mono ${point.classification === 'HH' ? 'text-green-400' : 'text-cyan-400'}`}>
+                          ${formatPrice(point.price)}
+                        </span>
+                      </div>
+                      <span className="text-[var(--text-secondary)]">{formatTime(point.time)}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
 
           {/* 通道预测 */}

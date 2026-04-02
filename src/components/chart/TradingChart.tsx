@@ -28,7 +28,7 @@ import { OBPanel } from "./OBPanel";
 import { OrderCancelOverlay } from "./OrderCancelOverlay";
 import { fetchKlines } from "@/lib/binance/api";
 import { BinanceWebSocket } from "@/lib/binance/websocket";
-import { detectSwingPoints, detectAllPivots } from "@/lib/chart/indicators/swingPoints";
+import { detectSwingPoints, detectAllPivots, classifyPivots } from "@/lib/chart/indicators/swingPoints";
 import { detectOrderBlocks } from "@/lib/chart/indicators/orderBlocks";
 import { detectFVGs } from "@/lib/chart/indicators/fvg";
 import { detectStructure } from "@/lib/chart/indicators/structure";
@@ -792,31 +792,32 @@ export function TradingChart() {
     if (!highLineSeriesRef.current || !lowLineSeriesRef.current) return;
 
     if (enabled.swingPoints) {
-      // 使用 detectAllPivots 检测所有局部极值（不过滤）
+      // 使用 detectAllPivots 检测所有局部极值，再用 classifyPivots 分类为 HH/HL/LH/LL
       const candles = useChartStore.getState().candles;
       const allPivots = detectAllPivots(candles, 2, 2);
+      const classifiedPivots = classifyPivots(allPivots, 0.5);
 
-      if (allPivots.length > 0) {
-        // 高线系列标记局部高点 (H)
-        const highMarkers: SeriesMarker<Time>[] = allPivots
+      if (classifiedPivots.length > 0) {
+        // 高线系列标记 HH/LH (局部高点)
+        const highMarkers: SeriesMarker<Time>[] = classifiedPivots
           .filter((sp) => sp.type === "high")
           .map((sp) => ({
             time: sp.time as Time,
             position: "inBar" as const,
-            color: "#fbbf24", // 黄色标记
+            color: sp.classification === "HH" ? "#22c55e" : "#f97316", // HH=绿色, LH=橙色
             shape: "circle" as const,
-            text: "H",
+            text: sp.classification, // 显示 HH 或 LH
           }));
 
-        // 低线系列标记局部低点 (L)
-        const lowMarkers: SeriesMarker<Time>[] = allPivots
+        // 低线系列标记 HL/LL (局部低点)
+        const lowMarkers: SeriesMarker<Time>[] = classifiedPivots
           .filter((sp) => sp.type === "low")
           .map((sp) => ({
             time: sp.time as Time,
             position: "inBar" as const,
-            color: "#60a5fa", // 蓝色标记
+            color: sp.classification === "HL" ? "#22c55e" : "#f97316", // HL=绿色, LL=橙色
             shape: "circle" as const,
-            text: "L",
+            text: sp.classification, // 显示 HL 或 LL
           }));
 
         highLineSeriesRef.current.setMarkers(highMarkers);
