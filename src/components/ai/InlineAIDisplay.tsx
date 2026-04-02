@@ -144,12 +144,13 @@ function getLiquidityPoints(candles: Candle[], currentPrice: number): { aboveH: 
 
   const classified = classifyPivots(pivots, 0.5);
 
-  // 上方 H 点 - 按价格升序（最近的在上面）
+  // 上方 H 点 - 先取最近的7个，再按价格降序（远离的在上）
   const aboveH = classified
     .filter(p => p.type === 'high' && p.price > currentPrice)
     .map(p => ({ price: p.price, time: p.time, type: 'H' as const, classification: p.classification }))
-    .sort((a, b) => a.price - b.price)
-    .slice(0, 10);
+    .sort((a, b) => a.price - b.price)  // 先按价格升序取最近的
+    .slice(0, 7)
+    .sort((a, b) => b.price - a.price);  // 再按价格降序排列
 
   // 下方 L 点 - 按价格降序（最近的在上面）
   const belowL = classified
