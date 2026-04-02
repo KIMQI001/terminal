@@ -503,22 +503,22 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
           </div>
 
           {/* 流动性分布 - FVG 面板风格 */}
-          <div className="bg-white/95 border border-gray-200 rounded-lg shadow-lg p-4">
+          <div className="bg-white/95 border border-gray-200 rounded-lg shadow-lg p-3">
             {/* 标题栏 */}
-            <div className="text-[10px] font-semibold text-gray-500 mb-3 flex items-center justify-between">
+            <div className="text-[10px] font-semibold text-gray-500 mb-2 flex items-center justify-between">
               <span>流动性分布 (点击开单)</span>
               <span className="text-gray-400">H7 / L7</span>
             </div>
 
             {/* 左右两栏布局 */}
             <div className="flex">
-              {/* 左侧: 上方 H 点 - 按距离从小到大排序 */}
-              <div className="flex-1 pr-3">
-                <div className="text-[9px] font-semibold text-gray-500 mb-1.5">H 点 (做空)</div>
+              {/* 左侧: 上方 H 点 */}
+              <div className="flex-1 pr-2">
+                <div className="text-[9px] font-semibold text-gray-500 mb-1">H 点 (做空)</div>
                 {liquidityPoints.aboveH.length === 0 ? (
-                  <div className="text-[9px] text-gray-400 text-center py-3">暂无</div>
+                  <div className="text-[9px] text-gray-400 text-center py-2">暂无</div>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="space-y-0.5">
                     {[...liquidityPoints.aboveH].sort((a, b) => (a.price - (currentPrice || 0)) - (b.price - (currentPrice || 0))).slice(0, 7).map((point, idx) => {
                       const distance = point.price - (currentPrice || 0);
                       const isNearest = idx === 0;
@@ -526,16 +526,16 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                         <div
                           key={idx}
                           onClick={() => handleLiquidityClick(point, true)}
-                          className={`flex items-center justify-between px-2 py-1 rounded cursor-pointer hover:bg-green-100 transition-colors ${isNearest ? 'border border-dashed border-green-500 bg-green-50' : ''}`}
+                          className={`grid grid-cols-3 gap-1 px-1.5 py-0.5 rounded cursor-pointer hover:bg-green-100 transition-colors ${isNearest ? 'border border-dashed border-green-500 bg-green-50' : ''}`}
                         >
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1">
                             <span className={isNearest ? 'text-green-600' : 'text-green-500/60'}>▲</span>
-                            <span className={`font-bold ${isNearest ? 'text-green-600 text-[10px]' : 'text-green-500/60 text-[9px]'}`}>{point.classification}</span>
+                            <span className={`font-bold ${isNearest ? 'text-green-600 text-[9px]' : 'text-green-500/60 text-[8px]'}`}>{point.classification}</span>
                           </div>
-                          <div className={`font-mono ${isNearest ? 'text-gray-700 text-[10px]' : 'text-gray-500 text-[9px]'}`}>
+                          <div className={`font-mono text-right ${isNearest ? 'text-gray-700 text-[9px]' : 'text-gray-500 text-[8px]'}`}>
                             {formatPrice(point.price)}
                           </div>
-                          <div className={`w-14 text-right ${isNearest ? 'text-gray-600 text-[9px]' : 'text-gray-400 text-[8px]'}`}>
+                          <div className={`text-right ${isNearest ? 'text-gray-600 text-[8px]' : 'text-gray-400 text-[7px]'}`}>
                             +{distance.toFixed(0)}
                           </div>
                         </div>
@@ -546,15 +546,15 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
               </div>
 
               {/* 分隔线 */}
-              <div className="w-px bg-gray-200 mx-3" />
+              <div className="w-px bg-gray-200 mx-2" />
 
-              {/* 右侧: 下方 L 点 - 按距离从小到大排序 */}
-              <div className="flex-1 pl-3">
-                <div className="text-[9px] font-semibold text-gray-500 mb-1.5">L 点 (做多)</div>
+              {/* 右侧: 下方 L 点 */}
+              <div className="flex-1 pl-2">
+                <div className="text-[9px] font-semibold text-gray-500 mb-1">L 点 (做多)</div>
                 {liquidityPoints.belowL.length === 0 ? (
-                  <div className="text-[9px] text-gray-400 text-center py-3">暂无</div>
+                  <div className="text-[9px] text-gray-400 text-center py-2">暂无</div>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="space-y-0.5">
                     {[...liquidityPoints.belowL].sort((a, b) => ((currentPrice || 0) - a.price) - ((currentPrice || 0) - b.price)).slice(0, 7).map((point, idx) => {
                       const distance = (currentPrice || 0) - point.price;
                       const isNearest = idx === 0;
@@ -562,16 +562,16 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                         <div
                           key={idx}
                           onClick={() => handleLiquidityClick(point, false)}
-                          className={`flex items-center justify-between px-2 py-1 rounded cursor-pointer hover:bg-red-100 transition-colors ${isNearest ? 'border border-dashed border-red-500 bg-red-50' : ''}`}
+                          className={`grid grid-cols-3 gap-1 px-1.5 py-0.5 rounded cursor-pointer hover:bg-red-100 transition-colors ${isNearest ? 'border border-dashed border-red-500 bg-red-50' : ''}`}
                         >
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1">
                             <span className={isNearest ? 'text-red-500' : 'text-red-500/60'}>▼</span>
-                            <span className={`font-bold ${isNearest ? 'text-red-500 text-[10px]' : 'text-red-500/60 text-[9px]'}`}>{point.classification}</span>
+                            <span className={`font-bold ${isNearest ? 'text-red-500 text-[9px]' : 'text-red-500/60 text-[8px]'}`}>{point.classification}</span>
                           </div>
-                          <div className={`font-mono ${isNearest ? 'text-gray-700 text-[10px]' : 'text-gray-500 text-[9px]'}`}>
+                          <div className={`font-mono text-right ${isNearest ? 'text-gray-700 text-[9px]' : 'text-gray-500 text-[8px]'}`}>
                             {formatPrice(point.price)}
                           </div>
-                          <div className={`w-14 text-right ${isNearest ? 'text-gray-600 text-[9px]' : 'text-gray-400 text-[8px]'}`}>
+                          <div className={`text-right ${isNearest ? 'text-gray-600 text-[8px]' : 'text-gray-400 text-[7px]'}`}>
                             -{distance.toFixed(0)}
                           </div>
                         </div>
