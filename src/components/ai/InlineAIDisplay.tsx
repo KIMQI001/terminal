@@ -532,10 +532,10 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                             <span className={isNearest ? 'text-green-600' : 'text-green-500/60'}>▲</span>
                             <span className={`font-bold ${isNearest ? 'text-green-600 text-[10px]' : 'text-green-500/60 text-[9px]'}`}>{point.classification}</span>
                           </div>
-                          <div className={`font-mono ${isNearest ? 'text-green-600 text-[10px]' : 'text-green-500/60 text-[9px]'}`}>
+                          <div className={`font-mono ${isNearest ? 'text-gray-700 text-[10px]' : 'text-gray-500 text-[9px]'}`}>
                             {formatPrice(point.price)}
                           </div>
-                          <div className={`w-14 text-right ${isNearest ? 'text-green-600 text-[9px]' : 'text-green-500/50 text-[8px]'}`}>
+                          <div className={`w-14 text-right ${isNearest ? 'text-gray-600 text-[9px]' : 'text-gray-400 text-[8px]'}`}>
                             +{distance.toFixed(0)}
                           </div>
                         </div>
@@ -568,10 +568,10 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                             <span className={isNearest ? 'text-red-500' : 'text-red-500/60'}>▼</span>
                             <span className={`font-bold ${isNearest ? 'text-red-500 text-[10px]' : 'text-red-500/60 text-[9px]'}`}>{point.classification}</span>
                           </div>
-                          <div className={`font-mono ${isNearest ? 'text-red-500 text-[10px]' : 'text-red-500/60 text-[9px]'}`}>
+                          <div className={`font-mono ${isNearest ? 'text-gray-700 text-[10px]' : 'text-gray-500 text-[9px]'}`}>
                             {formatPrice(point.price)}
                           </div>
-                          <div className={`w-14 text-right ${isNearest ? 'text-red-500 text-[9px]' : 'text-red-500/50 text-[8px]'}`}>
+                          <div className={`w-14 text-right ${isNearest ? 'text-gray-600 text-[9px]' : 'text-gray-400 text-[8px]'}`}>
                             -{distance.toFixed(0)}
                           </div>
                         </div>
