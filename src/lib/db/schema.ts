@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS notification_configs (
   dingtalk_webhook TEXT,
   dingtalk_secret_encrypted TEXT,
   enabled INTEGER DEFAULT 1,
+  position_monitor_enabled INTEGER DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

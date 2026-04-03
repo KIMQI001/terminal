@@ -232,6 +232,7 @@ interface NotificationConfigRow {
   dingtalk_webhook: string | null;
   dingtalk_secret_encrypted: string | null;
   enabled: number;
+  position_monitor_enabled: number;
 }
 
 /**
@@ -256,6 +257,33 @@ export function getUserDingtalkConfig(userId: number): DingtalkConfig | null {
   } catch (error) {
     console.error('[ApiConfigReader] 获取钉钉配置失败:', error);
     return null;
+  }
+}
+
+/**
+ * 获取用户是否启用了仓位监控
+ */
+export function isPositionMonitorEnabled(userId: number): boolean {
+  try {
+    const database = getTerminalDatabase();
+
+    // 首先检查列是否存在
+    const tableInfo = database.prepare('PRAGMA table_info(notification_configs)').all() as { name: string }[];
+    const hasColumn = tableInfo.some(col => col.name === 'position_monitor_enabled');
+
+    if (!hasColumn) {
+      console.log('[ApiConfigReader] notification_configs 表没有 position_monitor_enabled 列，仓位监控默认关闭');
+      return false;
+    }
+
+    const row = database.prepare(`
+      SELECT position_monitor_enabled FROM notification_configs WHERE user_id = ? AND enabled = 1
+    `).get(userId) as { position_monitor_enabled: number } | undefined;
+
+    return row?.position_monitor_enabled === 1;
+  } catch (error) {
+    console.error('[ApiConfigReader] 获取仓位监控配置失败:', error);
+    return false;
   }
 }
 

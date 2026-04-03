@@ -41,6 +41,16 @@ function initializeSchema(database: Database.Database) {
     database.exec(indexSql);
   }
 
+  // 数据库迁移：为 notification_configs 添加 position_monitor_enabled 字段（如果不存在）
+  try {
+    database.exec(`
+      ALTER TABLE notification_configs ADD COLUMN position_monitor_enabled INTEGER DEFAULT 0
+    `);
+    console.log('[DB Migration] Added position_monitor_enabled column to notification_configs');
+  } catch (error) {
+    // 字段可能已存在，忽略错误
+  }
+
   // 检查是否存在 admin 账户，如果没有则创建
   const adminExists = database.prepare('SELECT id FROM users WHERE role = ?').get('admin');
   if (!adminExists) {
@@ -245,6 +255,7 @@ export const notificationConfigQueries = {
       dingtalk_webhook: string | null;
       dingtalk_secret_encrypted: string | null;
       enabled: number;
+      position_monitor_enabled: number;
       created_at: string;
       updated_at: string;
     } | undefined;
@@ -255,19 +266,21 @@ export const notificationConfigQueries = {
     userId: number,
     dingtalkWebhook: string | null,
     dingtalkSecretEncrypted: string | null,
-    enabled: boolean
+    enabled: boolean,
+    positionMonitorEnabled: boolean = false
   ) => {
     const database = getDatabase();
     const stmt = database.prepare(`
-      INSERT INTO notification_configs (user_id, dingtalk_webhook, dingtalk_secret_encrypted, enabled, updated_at)
-      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+      INSERT INTO notification_configs (user_id, dingtalk_webhook, dingtalk_secret_encrypted, enabled, position_monitor_enabled, updated_at)
+      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(user_id) DO UPDATE SET
         dingtalk_webhook = excluded.dingtalk_webhook,
         dingtalk_secret_encrypted = excluded.dingtalk_secret_encrypted,
         enabled = excluded.enabled,
+        position_monitor_enabled = excluded.position_monitor_enabled,
         updated_at = CURRENT_TIMESTAMP
     `);
-    return stmt.run(userId, dingtalkWebhook, dingtalkSecretEncrypted, enabled ? 1 : 0);
+    return stmt.run(userId, dingtalkWebhook, dingtalkSecretEncrypted, enabled ? 1 : 0, positionMonitorEnabled ? 1 : 0);
   },
 
   // 删除通知配置

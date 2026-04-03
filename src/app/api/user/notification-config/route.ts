@@ -36,6 +36,7 @@ export async function GET(request: NextRequest) {
           dingtalkWebhook: null,
           dingtalkSecret: null,
           enabled: true,
+          positionMonitorEnabled: false,
         },
       });
     }
@@ -46,6 +47,7 @@ export async function GET(request: NextRequest) {
         dingtalkWebhook: config.dingtalk_webhook ? maskWebhook(config.dingtalk_webhook) : null,
         dingtalkSecretConfigured: !!config.dingtalk_secret_encrypted,
         enabled: config.enabled === 1,
+        positionMonitorEnabled: config.position_monitor_enabled === 1,
       },
     });
   } catch (error) {
@@ -63,7 +65,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { dingtalkWebhook, dingtalkSecret, enabled } = body;
+    const { dingtalkWebhook, dingtalkSecret, enabled, positionMonitorEnabled } = body;
 
     // 验证 Webhook URL 格式
     if (dingtalkWebhook && !dingtalkWebhook.startsWith('https://oapi.dingtalk.com/robot/send')) {
@@ -78,7 +80,8 @@ export async function POST(request: NextRequest) {
       user.userId,
       dingtalkWebhook || null,
       dingtalkSecretEncrypted,
-      enabled !== false
+      enabled !== false,
+      positionMonitorEnabled === true
     );
 
     return NextResponse.json({ success: true, message: '通知配置已保存' });

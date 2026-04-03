@@ -31,6 +31,7 @@ import {
 } from './binanceOrderApi';
 import * as exchangeAdapter from './exchangeAdapter';
 import { sendDingtalkMarkdownToUser } from '../notification/dingtalk';
+import { isPositionMonitorEnabled } from './apiConfigReader';
 
 // 订单监控器配置
 export interface OrderMonitorConfig {
@@ -47,6 +48,19 @@ let streamManager: UserDataStreamManager | null = null;
 let asterStreamManager: AsterUserDataStreamManager | null = null;
 let config: OrderMonitorConfig | null = null;
 let cleanupInterval: NodeJS.Timeout | null = null;
+
+// 普通订单入场信息存储（用于仓位监控）
+// key: original clientOrderId, value: entry info
+const normalOrderEntries = new Map<string, {
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  positionSide: 'LONG' | 'SHORT';
+  entryPrice: number;
+  quantity: number;
+  stopLossPrice: number;
+  stopLossOrderId: string | null;
+  entryTime: number;
+}>();
 
 /**
  * 获取指定交易所的 API 配置
@@ -76,6 +90,7 @@ function getExchangeConfig(exchange: ExchangeType): exchangeAdapter.ExchangeApiC
 /**
  * 处理订单成交事件
  * 只处理数据库中存在的待处理订单（通过 clientOrderId 匹配）
+ * 也处理普通订单（非守塔、非流动性网格）当仓位监控开启时
  */
 async function handleOrderFilled(event: OrderTradeUpdateEvent): Promise<void> {
   const { order } = event;
@@ -86,11 +101,7 @@ async function handleOrderFilled(event: OrderTradeUpdateEvent): Promise<void> {
   const isTowerOrder = clientOrderId.startsWith('ict_tower');
   const isLiqGridOrder = clientOrderId.startsWith('liq_grid');
 
-  if (!isTowerOrder && !isLiqGridOrder) {
-    return;
-  }
-
-  // 处理止盈止损单成交（记录战绩）
+  // 处理止盈止损单成交（记录战绩）- 所有订单类型都可能触发
   if (order.orderStatus === 'FILLED') {
     if (clientOrderId.includes('_sl_') || clientOrderId.includes('_sl')) {
       console.log(`[OrderMonitor] ${symbol} 止损单成交: ${clientOrderId} @ ${order.averagePrice}`);
@@ -109,32 +120,42 @@ async function handleOrderFilled(event: OrderTradeUpdateEvent): Promise<void> {
     }
   }
 
-  // 核心验证：只处理数据库中存在的待处理订单
-  const pendingOrder = getPendingOrderByClientId(clientOrderId);
-  if (!pendingOrder) {
-    // 不在我们的待处理订单列表中，忽略
-    return;
-  }
-
-  // 验证交易对是否匹配
-  if (pendingOrder.symbol !== symbol) {
-    console.warn(`[OrderMonitor] 交易对不匹配: 期望 ${pendingOrder.symbol}, 实际 ${symbol}`);
-    return;
-  }
-
-  // 处理入场单状态变化
-  if (order.orderStatus === 'FILLED') {
-    console.log(`[OrderMonitor] ${symbol} 入场单成交: ${clientOrderId} @ ${order.averagePrice}`);
-
-    // 根据订单类型选择不同的处理逻辑
-    if (isLiqGridOrder) {
-      await handleLiqGridEntryFilled(clientOrderId, order, pendingOrder);
-    } else {
-      await handleEntryFilled(clientOrderId, order, pendingOrder);
+  // 如果是守塔或流动性网格订单，需要检查数据库中的待处理订单
+  if (isTowerOrder || isLiqGridOrder) {
+    // 核心验证：只处理数据库中存在的待处理订单
+    const pendingOrder = getPendingOrderByClientId(clientOrderId);
+    if (!pendingOrder) {
+      // 不在我们的待处理订单列表中，忽略
+      return;
     }
-  } else if (order.orderStatus === 'CANCELED') {
-    console.log(`[OrderMonitor] ${symbol} 入场单取消: ${clientOrderId}`);
-    await handleEntryCanceled(clientOrderId);
+
+    // 验证交易对是否匹配
+    if (pendingOrder.symbol !== symbol) {
+      console.warn(`[OrderMonitor] 交易对不匹配: 期望 ${pendingOrder.symbol}, 实际 ${symbol}`);
+      return;
+    }
+
+    // 处理入场单状态变化
+    if (order.orderStatus === 'FILLED') {
+      console.log(`[OrderMonitor] ${symbol} 入场单成交: ${clientOrderId} @ ${order.averagePrice}`);
+
+      // 根据订单类型选择不同的处理逻辑
+      if (isLiqGridOrder) {
+        await handleLiqGridEntryFilled(clientOrderId, order, pendingOrder);
+      } else {
+        await handleEntryFilled(clientOrderId, order, pendingOrder);
+      }
+    } else if (order.orderStatus === 'CANCELED') {
+      console.log(`[OrderMonitor] ${symbol} 入场单取消: ${clientOrderId}`);
+      await handleEntryCanceled(clientOrderId);
+    }
+    return;
+  }
+
+  // 普通订单（非守塔、非流动性网格）- 检查是否开启仓位监控
+  if (config && isPositionMonitorEnabled(config.userId)) {
+    // 处理普通订单的成交
+    await handleNormalOrderFilled(event);
   }
 }
 
@@ -570,6 +591,175 @@ async function handleEntryCanceled(clientOrderId: string): Promise<void> {
 }
 
 /**
+ * 处理普通订单（非守塔、非流动性网格）成交
+ * 当用户开启仓位监控时，监听所有订单成交并自动下止损单
+ */
+async function handleNormalOrderFilled(event: OrderTradeUpdateEvent): Promise<void> {
+  const { order } = event;
+  const clientOrderId = order.clientOrderId;
+  const symbol = order.symbol;
+
+  // 只处理入场单成交（NEW -> FILLED）
+  if (order.executionType !== 'NEW' || order.orderStatus !== 'FILLED') {
+    return;
+  }
+
+  // 跳过已经处理过的订单（如果有 _sl, _tp, _tr 后缀）
+  if (clientOrderId.includes('_sl') || clientOrderId.includes('_tp') || clientOrderId.includes('_tr')) {
+    return;
+  }
+
+  // 跳过我们的止损单
+  if (clientOrderId.includes('_normal_sl')) {
+    return;
+  }
+
+  const filledPrice = parseFloat(order.averagePrice);
+  const quantity = parseFloat(order.originalQuantity);
+  const side = order.side;
+  const positionSide = order.positionSide as 'LONG' | 'SHORT';
+
+  console.log(`[OrderMonitor] 普通订单成交: ${clientOrderId} @ ${filledPrice} ${side} ${quantity} ${positionSide}`);
+
+  if (!config) {
+    console.error('[OrderMonitor] 配置未初始化');
+    return;
+  }
+
+  const apiConfig: BinanceApiConfig = {
+    apiKey: config.apiKey,
+    apiSecret: config.apiSecret,
+    isTestnet: config.isTestnet,
+  };
+
+  // 平仓方向 (与入场方向相反)
+  const closeSide = side === 'BUY' ? 'SELL' : 'BUY';
+
+  // 计算 2% 止损价
+  const stopLossPrice = side === 'BUY'
+    ? filledPrice * (1 - 0.02)  // 做多：2% 止损
+    : filledPrice * (1 + 0.02); // 做空：2% 止损
+
+  try {
+    // 检查是否已有止损单
+    const existingOrdersResult = await getOpenOrders(apiConfig, symbol);
+    const existingOrders = existingOrdersResult.success ? (existingOrdersResult.orders || []) : [];
+
+    // 查找是否已有属于这个订单的止损单
+    const myOrders = existingOrders.filter(o => o.clientOrderId?.startsWith(clientOrderId + '_'));
+    const hasStopLoss = myOrders.some(o => o.type === 'STOP_MARKET');
+
+    let slOrderId: string | null = null;
+    let slError: string | null = null;
+    let slClientIdForStorage: string | null = null;
+
+    if (!hasStopLoss) {
+      // 下止损单
+      const slSuffix = Math.random().toString(36).slice(-4);
+      const slClientId = `${clientOrderId}_normal_sl${slSuffix}`;
+      slClientIdForStorage = slClientId;
+      console.log(`[OrderMonitor] 普通订单下止损单: ${slClientId} 止损价=${stopLossPrice}`);
+
+      const slResult = await placeStopLossOrder(apiConfig, {
+        symbol,
+        side: closeSide,
+        positionSide,
+        quantity,
+        stopPrice: stopLossPrice,
+        clientOrderId: slClientId,
+      });
+
+      if (slResult.success) {
+        slOrderId = slResult.orderId?.toString() || null;
+        console.log(`[OrderMonitor] 止损单下单成功: ${slClientId}`);
+      } else {
+        slError = slResult.error || '下单失败';
+        console.error(`[OrderMonitor] 止损单失败: ${slError}`);
+      }
+    } else {
+      console.log(`[OrderMonitor] 止损单已存在，跳过`);
+      slOrderId = 'exists';
+    }
+
+    // 存储入场信息，用于止损触发时计算盈亏
+    normalOrderEntries.set(clientOrderId, {
+      symbol,
+      side,
+      positionSide,
+      entryPrice: filledPrice,
+      quantity,
+      stopLossPrice,
+      stopLossOrderId: slClientIdForStorage,
+      entryTime: Date.now(),
+    });
+
+    // 发送入场成交通知
+    await sendNormalOrderFilledNotification(symbol, side, positionSide, filledPrice, quantity, stopLossPrice, slOrderId, slError);
+
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : '未知错误';
+    console.error(`[OrderMonitor] 普通订单处理异常:`, error);
+
+    // 发送错误通知
+    await sendDingtalkMarkdownToUser(
+      config.userId,
+      '普通订单止损下单失败',
+      `### 普通订单止损下单失败 ❌\n\n` +
+      `- **订单**: ${clientOrderId}\n` +
+      `- **交易对**: ${symbol}\n` +
+      `- **成交价**: $${filledPrice.toFixed(2)}\n` +
+      `- **数量**: ${quantity}\n` +
+      `- **方向**: ${side === 'BUY' ? '做多' : '做空'}\n` +
+      `- **错误**: ${errorMsg}\n\n` +
+      `**请手动下单止损！**`
+    );
+  }
+}
+
+/**
+ * 发送普通订单入场成交通知
+ */
+async function sendNormalOrderFilledNotification(
+  symbol: string,
+  side: 'BUY' | 'SELL',
+  positionSide: string,
+  filledPrice: number,
+  quantity: number,
+  stopLossPrice: number,
+  slOrderId: string | null,
+  slError: string | null
+): Promise<void> {
+  const direction = side === 'BUY' ? '做多' : '做空';
+  const displaySymbol = symbol.replace('USDC', '').replace('USDT', '');
+
+  let statusIcon = '✅';
+  let statusText = '止损已挂单';
+
+  if (slError) {
+    statusIcon = '⚠️';
+    statusText = `止损挂单失败: ${slError}`;
+  }
+
+  if (!slOrderId) {
+    statusIcon = '❌';
+    statusText = '止损挂单失败，请手动处理';
+  }
+
+  const content = [
+    `### ${statusIcon} ${displaySymbol} ${direction}成交`,
+    '',
+    `- **交易对**: ${displaySymbol}`,
+    `- **方向**: ${direction}`,
+    `- **成交价**: $${filledPrice.toFixed(2)}`,
+    `- **数量**: ${quantity.toFixed(3)}`,
+    `- **止损**: $${stopLossPrice.toFixed(2)} (2% 止损)`,
+    `- **状态**: ${statusText}`,
+  ].join('\n');
+
+  await sendDingtalkMarkdownToUser(config!.userId, `${displaySymbol} ${direction}成交`, content);
+}
+
+/**
  * 处理止盈止损单成交（记录战绩）
  */
 async function handleSlTpFilled(
@@ -582,15 +772,26 @@ async function handleSlTpFilled(
 
   // 解析原始入场单的 clientOrderId
   // 格式: ict_tower_4h_OB_95000_sl_1733400000 -> ict_tower_4h_OB_95000
+  // 格式: BTCUSDT_normal_slxxxx -> BTCUSDT (普通订单)
   const originalId = extractOriginalOrderId(clientOrderId);
   if (!originalId) {
     console.warn(`[OrderMonitor] 无法解析原订单ID: ${clientOrderId}`);
     return;
   }
 
-  // 查询原始入场订单
+  // 查询原始入场订单 - 先尝试守塔/流动性网格订单
   const originalOrder = getPendingOrderByClientId(originalId);
+
+  // 如果找不到，尝试普通订单（仓位监控）
   if (!originalOrder) {
+    const normalEntry = normalOrderEntries.get(originalId);
+    if (normalEntry) {
+      // 处理普通订单平仓
+      await handleNormalOrderClosed(normalEntry, closePrice, closeReason);
+      normalOrderEntries.delete(originalId);
+      return;
+    }
+
     console.warn(`[OrderMonitor] 找不到原订单: ${originalId}`);
     return;
   }
@@ -632,11 +833,70 @@ async function handleSlTpFilled(
 }
 
 /**
+ * 处理普通订单（仓位监控）平仓
+ */
+async function handleNormalOrderClosed(
+  entry: {
+    symbol: string;
+    side: 'BUY' | 'SELL';
+    positionSide: 'LONG' | 'SHORT';
+    entryPrice: number;
+    quantity: number;
+    stopLossPrice: number;
+    stopLossOrderId: string | null;
+    entryTime: number;
+  },
+  closePrice: number,
+  closeReason: 'sl' | 'tp' | 'trailing'
+): Promise<void> {
+  const { symbol, side, positionSide, entryPrice, quantity } = entry;
+
+  // 计算盈亏
+  const isLong = positionSide === 'LONG';
+  const pnlAmount = (closePrice - entryPrice) * quantity * (isLong ? 1 : -1);
+  const entryCost = entryPrice * quantity;
+  const pnlPercent = entryCost > 0 ? (pnlAmount / entryCost) * 100 : 0;
+
+  const direction = side === 'BUY' ? '多' : '空';
+  const displaySymbol = symbol.replace('USDC', '').replace('USDT', '');
+
+  const reasonText = {
+    sl: '止损',
+    tp: '止盈',
+    trailing: '追踪止盈',
+  }[closeReason];
+
+  const emoji = pnlAmount >= 0 ? '✅' : '❌';
+  const pnlSign = pnlAmount >= 0 ? '+' : '';
+
+  const content = [
+    `### ${emoji} ${displaySymbol} ${direction}单平仓`,
+    '',
+    `- **平仓原因**: ${reasonText}`,
+    `- **入场价**: $${entryPrice.toFixed(2)}`,
+    `- **平仓价**: $${closePrice.toFixed(2)}`,
+    `- **数量**: ${quantity.toFixed(3)}`,
+    `- **盈亏**: ${pnlSign}${pnlAmount.toFixed(2)} USDT (${pnlSign}${pnlPercent.toFixed(2)}%)`,
+  ].join('\n');
+
+  console.log(`[OrderMonitor] 普通订单平仓通知: ${displaySymbol} ${direction}单 ${reasonText} ${pnlSign}${pnlAmount.toFixed(2)} USDT`);
+
+  await sendDingtalkMarkdownToUser(config!.userId, `${displaySymbol} ${direction}单${reasonText}`, content);
+}
+
+/**
  * 从止盈止损单的 clientOrderId 解析原始入场单 ID
  * 例: ict_tower_4h_OB_95000_slxxxx -> ict_tower_4h_OB_95000
+ * 例: BTCUSDT_normal_slxxxx -> BTCUSDT (普通订单)
  */
 function extractOriginalOrderId(clientOrderId: string): string | null {
-  // 匹配 _sl, _tp, _tr 后缀（新格式4字符后缀，旧格式时间戳后缀）
+  // 匹配普通订单止损单: xxx_normal_slxxxx -> xxx
+  const normalMatch = clientOrderId.match(/^(.+?)_normal_sl[\w]*$/);
+  if (normalMatch) {
+    return normalMatch[1];
+  }
+
+  // 匹配守塔/流动性网格订单止损止盈单: xxx_sl/tp/tr/trailxxxx -> xxx
   const match = clientOrderId.match(/^(.+?)_(sl|tp|tr|trail)[\w]*$/);
   if (match) {
     return match[1];

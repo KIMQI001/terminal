@@ -7,12 +7,14 @@ interface NotificationConfig {
   dingtalkWebhook: string | null;
   dingtalkSecretConfigured?: boolean;
   enabled: boolean;
+  positionMonitorEnabled?: boolean;
 }
 
 export function DingtalkConfigForm() {
   const [webhook, setWebhook] = useState("");
   const [secret, setSecret] = useState("");
   const [enabled, setEnabled] = useState(true);
+  const [positionMonitorEnabled, setPositionMonitorEnabled] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -40,6 +42,7 @@ export function DingtalkConfigForm() {
             setIsConfigured(true);
           }
           setEnabled(config.enabled);
+          setPositionMonitorEnabled(config.positionMonitorEnabled ?? false);
         }
       } catch (error) {
         console.error("Failed to fetch notification config:", error);
@@ -69,6 +72,7 @@ export function DingtalkConfigForm() {
           dingtalkWebhook: webhook || null,
           dingtalkSecret: secret || null,
           enabled,
+          positionMonitorEnabled,
         }),
       });
 
@@ -103,6 +107,7 @@ export function DingtalkConfigForm() {
         setWebhook("");
         setSecret("");
         setEnabled(true);
+        setPositionMonitorEnabled(false);
         setIsConfigured(false);
         setMessage({ type: "success", text: "配置已删除" });
       }
@@ -174,6 +179,19 @@ export function DingtalkConfigForm() {
           />
           <label htmlFor="enabled" className="text-sm text-gray-700">
             启用钉钉通知
+          </label>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="positionMonitorEnabled"
+            checked={positionMonitorEnabled}
+            onChange={(e) => setPositionMonitorEnabled(e.target.checked)}
+            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+          />
+          <label htmlFor="positionMonitorEnabled" className="text-sm text-gray-700">
+            仓位监控（手动下单入场成交后自动挂止损单并发送通知）
           </label>
         </div>
 
