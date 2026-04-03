@@ -16,7 +16,7 @@ export function PositionList() {
 
     const interval = setInterval(() => {
       fetchPositions();
-    }, 3000);
+    }, 10000);
 
     return () => clearInterval(interval);
   }, [fetchPositions]);

@@ -56,7 +56,7 @@ export function OpenOrderList() {
 
     const interval = setInterval(() => {
       fetchOpenOrders(symbol);
-    }, 5000);
+    }, 15000);
 
     return () => clearInterval(interval);
   }, [symbol, fetchOpenOrders]);
