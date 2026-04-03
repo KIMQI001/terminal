@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { useOrderStore, RealOrder, groupOrders } from "@/stores/orderStore";
 import { useChartStore } from "@/stores/chartStore";
@@ -39,27 +39,62 @@ function getDirectionLabel(side: string, positionSide: string): string {
 }
 
 export function OpenOrderList() {
-  const { realOrders, isLoadingOrders, fetchOpenOrders, cancelOrder, cancelAllOrders } = useOrderStore();
+  const {
+    realOrders,
+    isLoadingOrders,
+    fetchOpenOrders,
+    cancelOrder,
+    cancelAllOrders,
+    wsConnected,
+    initUserWebSocket,
+    disconnectUserWebSocket,
+  } = useOrderStore();
   const { symbol } = useChartStore();
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [isCancellingAll, setIsCancellingAll] = useState(false);
   const [cancellingGroup, setCancellingGroup] = useState<number | null>(null);
+  const fallbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // 分组订单 - 必须在所有条件返回之前
   const orderGroups = useMemo(() => groupOrders(realOrders), [realOrders]);
 
-  // 获取真实挂单 + 5秒轮询
+  // 初始化 WebSocket 并获取初始订单
   useEffect(() => {
     if (!symbol) return;
 
+    // 先获取一次订单数据
     fetchOpenOrders(symbol);
 
-    const interval = setInterval(() => {
-      fetchOpenOrders(symbol);
-    }, 15000);
+    // 初始化 WebSocket
+    initUserWebSocket();
 
-    return () => clearInterval(interval);
-  }, [symbol, fetchOpenOrders]);
+    return () => {
+      disconnectUserWebSocket();
+    };
+  }, [symbol, initUserWebSocket, disconnectUserWebSocket, fetchOpenOrders]);
+
+  // Fallback 轮询：当 WebSocket 断开时每 60 秒轮询一次
+  useEffect(() => {
+    if (!wsConnected) {
+      fallbackIntervalRef.current = setInterval(() => {
+        if (symbol) {
+          fetchOpenOrders(symbol);
+        }
+      }, 60000);
+    } else {
+      if (fallbackIntervalRef.current) {
+        clearInterval(fallbackIntervalRef.current);
+        fallbackIntervalRef.current = null;
+      }
+    }
+
+    return () => {
+      if (fallbackIntervalRef.current) {
+        clearInterval(fallbackIntervalRef.current);
+        fallbackIntervalRef.current = null;
+      }
+    };
+  }, [wsConnected, symbol, fetchOpenOrders]);
 
   const handleCancel = async (orderId: string, orderSymbol: string, isAlgo?: boolean) => {
     setCancellingId(orderId);

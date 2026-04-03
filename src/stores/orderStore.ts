@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { Order, OrderFormData, OrderStatus, OrderSide } from "@/types/order";
 import { useUserStore } from "./userStore";
+import { BinanceUserWebSocket } from "@/lib/binance/userWebSocket";
 
 // OTE预填充数据
 export interface OTEPrefillData {
@@ -116,6 +117,8 @@ interface OrderState {
   tradingLines: TradingLine[];
   isPlacingOrder: boolean;
   orderError: string | null;
+  userWs: BinanceUserWebSocket | null;
+  wsConnected: boolean;
 
   // Actions
   openModal: () => void;
@@ -127,11 +130,14 @@ interface OrderState {
   addOrder: (data: OrderFormData, symbol: string) => Order;
   placeOrder: (data: OrderFormData, symbol: string) => Promise<{ success: boolean; error?: string; warnings?: string[] }>;
   updateOrderStatus: (id: string, status: OrderStatus, filledQuantity?: number) => void;
+  updateOrders: (orders: RealOrder[]) => void;
   cancelOrder: (id: string, symbol: string, isAlgo?: boolean) => Promise<boolean>;
   cancelAllOrders: (symbol: string) => Promise<boolean>;
   fetchOpenOrders: (symbol?: string) => Promise<void>;
   getOpenOrders: () => Order[];
   getOrderHistory: () => Order[];
+  initUserWebSocket: () => Promise<void>;
+  disconnectUserWebSocket: () => Promise<void>;
 }
 
 export const useOrderStore = create<OrderState>((set, get) => ({
@@ -143,6 +149,8 @@ export const useOrderStore = create<OrderState>((set, get) => ({
   tradingLines: [],
   isPlacingOrder: false,
   orderError: null,
+  userWs: null,
+  wsConnected: false,
 
   openModal: () => set({ isModalOpen: true }),
   closeModal: () => set({ isModalOpen: false, prefillData: null, tradingLines: [] }),
@@ -254,6 +262,10 @@ export const useOrderStore = create<OrderState>((set, get) => ({
           : order
       ),
     }));
+  },
+
+  updateOrders: (orders) => {
+    set({ realOrders: orders });
   },
 
   cancelOrder: async (id, symbol, isAlgo?: boolean) => {
@@ -373,5 +385,37 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     return get().orders.filter(
       (order) => order.status === "filled" || order.status === "cancelled"
     );
+  },
+
+  initUserWebSocket: async () => {
+    const { userWs } = get();
+    if (userWs) {
+      // 已存在，先断开
+      await userWs.disconnect();
+    }
+
+    const ws = new BinanceUserWebSocket();
+
+    const { updateOrders } = get();
+
+    await ws.connect(
+      () => {
+        // 持仓更新回调（订单 WebSocket 不处理持仓）
+      },
+      (orders) => {
+        // 订单更新回调
+        updateOrders(orders);
+      }
+    );
+
+    set({ userWs: ws, wsConnected: true });
+  },
+
+  disconnectUserWebSocket: async () => {
+    const { userWs } = get();
+    if (userWs) {
+      await userWs.disconnect();
+      set({ userWs: null, wsConnected: false });
+    }
   },
 }));

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { Position, Balance } from "@/types/order";
 import { useUserStore } from "./userStore";
+import { BinanceUserWebSocket } from "@/lib/binance/userWebSocket";
 
 interface PositionState {
   positions: Position[];
@@ -9,10 +10,13 @@ interface PositionState {
   isLoadingPositions: boolean;
   currentLeverage: number;
   isLoadingLeverage: boolean;
+  userWs: BinanceUserWebSocket | null;
+  wsConnected: boolean;
 
   // Actions
   addPosition: (position: Omit<Position, "id" | "unrealizedPnl" | "unrealizedPnlPercent">) => void;
   updatePosition: (id: string, updates: Partial<Position>) => void;
+  updatePositions: (positions: Position[]) => void;
   closePosition: (id: string) => Promise<void>;
   updateCurrentPrice: (symbol: string, price: number) => void;
   setBalances: (balances: Balance[]) => void;
@@ -21,6 +25,8 @@ interface PositionState {
   fetchPositions: () => Promise<void>;
   fetchLeverage: (symbol: string) => Promise<void>;
   setLeverage: (symbol: string, leverage: number) => Promise<boolean>;
+  initUserWebSocket: () => Promise<void>;
+  disconnectUserWebSocket: () => Promise<void>;
 }
 
 export const usePositionStore = create<PositionState>((set, get) => ({
@@ -30,6 +36,8 @@ export const usePositionStore = create<PositionState>((set, get) => ({
   isLoadingPositions: false,
   currentLeverage: 20,
   isLoadingLeverage: false,
+  userWs: null,
+  wsConnected: false,
 
   addPosition: (positionData) => {
     const pnl = (positionData.currentPrice - positionData.entryPrice) * positionData.quantity;
@@ -53,6 +61,10 @@ export const usePositionStore = create<PositionState>((set, get) => ({
         pos.id === id ? { ...pos, ...updates } : pos
       ),
     }));
+  },
+
+  updatePositions: (positions) => {
+    set({ positions });
   },
 
   closePosition: async (id) => {
@@ -284,6 +296,39 @@ export const usePositionStore = create<PositionState>((set, get) => ({
       return false;
     } finally {
       set({ isLoadingLeverage: false });
+    }
+  },
+
+  initUserWebSocket: async () => {
+    const { userWs } = get();
+    if (userWs) {
+      // 已存在，先断开
+      await userWs.disconnect();
+    }
+
+    const ws = new BinanceUserWebSocket();
+
+    // 获取 orderStore 的引用用于更新订单
+    const { updatePositions } = get();
+
+    await ws.connect(
+      (positions) => {
+        // 持仓更新回调
+        updatePositions(positions);
+      },
+      () => {
+        // 订单更新回调（持仓 WebSocket 不处理订单）
+      }
+    );
+
+    set({ userWs: ws, wsConnected: true });
+  },
+
+  disconnectUserWebSocket: async () => {
+    const { userWs } = get();
+    if (userWs) {
+      await userWs.disconnect();
+      set({ userWs: null, wsConnected: false });
     }
   },
 }));

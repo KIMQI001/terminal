@@ -1,25 +1,57 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { usePositionStore } from "@/stores/positionStore";
 import { useChartStore } from "@/stores/chartStore";
 
 export function PositionList() {
-  const { positions, isLoadingPositions, fetchPositions, closePosition } = usePositionStore();
+  const {
+    positions,
+    isLoadingPositions,
+    fetchPositions,
+    closePosition,
+    wsConnected,
+    initUserWebSocket,
+    disconnectUserWebSocket,
+  } = usePositionStore();
   const { symbol } = useChartStore();
   const [closingId, setClosingId] = useState<string | null>(null);
+  const fallbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 获取真实持仓 + 3秒轮询
+  // 初始化 WebSocket 并获取初始持仓
   useEffect(() => {
+    // 先获取一次持仓数据
     fetchPositions();
 
-    const interval = setInterval(() => {
-      fetchPositions();
-    }, 10000);
+    // 初始化 WebSocket
+    initUserWebSocket();
 
-    return () => clearInterval(interval);
-  }, [fetchPositions]);
+    return () => {
+      disconnectUserWebSocket();
+    };
+  }, [initUserWebSocket, disconnectUserWebSocket, fetchPositions]);
+
+  // Fallback 轮询：当 WebSocket 断开时每 60 秒轮询一次
+  useEffect(() => {
+    if (!wsConnected) {
+      fallbackIntervalRef.current = setInterval(() => {
+        fetchPositions();
+      }, 60000);
+    } else {
+      if (fallbackIntervalRef.current) {
+        clearInterval(fallbackIntervalRef.current);
+        fallbackIntervalRef.current = null;
+      }
+    }
+
+    return () => {
+      if (fallbackIntervalRef.current) {
+        clearInterval(fallbackIntervalRef.current);
+        fallbackIntervalRef.current = null;
+      }
+    };
+  }, [wsConnected, fetchPositions]);
 
   // 过滤当前交易对的持仓
   const currentPositions = symbol
