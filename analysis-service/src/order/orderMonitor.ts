@@ -599,8 +599,8 @@ async function handleNormalOrderFilled(event: OrderTradeUpdateEvent): Promise<vo
   const clientOrderId = order.clientOrderId;
   const symbol = order.symbol;
 
-  // 只处理入场单成交（NEW -> FILLED）
-  if (order.executionType !== 'NEW' || order.orderStatus !== 'FILLED') {
+  // 只处理入场单成交（TRADE -> FILLED）
+  if (order.executionType !== 'TRADE' || order.orderStatus !== 'FILLED') {
     return;
   }
 
