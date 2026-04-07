@@ -5,6 +5,31 @@
 
 import WebSocket from 'ws';
 
+// 持仓更新事件
+export interface PositionUpdateEvent {
+  eventType: 'POSITION_UPDATE';
+  eventTime: number;
+  transactionTime: number;
+  positions: {
+    symbol: string;
+    side: 'LONG' | 'SHORT';
+    quantity: number;
+    entryPrice: number;
+    unrealizedPnl: number;
+    leverage: number;
+    liquidationPrice: number;
+    stopLoss?: number;
+    takeProfit?: number;
+    margin: number;
+    positionAmt: string;
+  }[];
+  balances: {
+    asset: string;
+    walletBalance: number;
+    unrealizedPnl: number;
+  }[];
+}
+
 // 订单更新事件
 export interface OrderTradeUpdateEvent {
   eventType: 'ORDER_TRADE_UPDATE';
@@ -36,11 +61,18 @@ export interface OrderTradeUpdateEvent {
   };
 }
 
+// 用户数据流事件（转发给前端）
+export interface UserDataStreamEvent {
+  type: 'position' | 'order';
+  data: PositionUpdateEvent | OrderTradeUpdateEvent;
+}
+
 export interface UserDataStreamConfig {
   apiKey: string;
   apiSecret: string;
   isTestnet: boolean;
   onOrderUpdate: (event: OrderTradeUpdateEvent) => void;
+  onPositionUpdate?: (event: PositionUpdateEvent) => void;
   onError?: (error: Error) => void;
   onConnected?: () => void;
   onDisconnected?: () => void;
@@ -157,12 +189,22 @@ export class UserDataStreamManager {
       try {
         const event = JSON.parse(data.toString());
 
+        // 处理持仓更新事件
+        if (event.e === 'POSITION_UPDATE' || event.e === 'ACCOUNT_UPDATE') {
+          const parsed = this.parsePositionEvent(event);
+          if (parsed) {
+            this.config.onPositionUpdate?.(parsed);
+          }
+        }
         // 处理订单更新事件
         if (event.e === 'ORDER_TRADE_UPDATE') {
           const parsed = this.parseOrderEvent(event);
           this.config.onOrderUpdate(parsed);
         }
-        // 也可处理其他事件如 ACCOUNT_UPDATE 等
+        // 处理 listenKey 过期
+        if (event.e === 'listenKeyExpired') {
+          console.warn('[UserDataStream] listenKey 已过期');
+        }
       } catch (error) {
         console.error('[UserDataStream] 解析消息失败:', error);
       }
@@ -223,6 +265,47 @@ export class UserDataStreamManager {
         isMaker: o.m as boolean,
       },
     };
+  }
+
+  /**
+   * 解析持仓更新事件
+   */
+  private parsePositionEvent(raw: Record<string, unknown>): PositionUpdateEvent | null {
+    try {
+      // Binance 发送的 POSITION_UPDATE 事件结构
+      const a = raw.a as Record<string, unknown>;
+      if (!a) return null;
+
+      const positions = a.p as Array<Record<string, unknown>> || [];
+      const balances = a.B as Array<Record<string, unknown>> || [];
+
+      return {
+        eventType: 'POSITION_UPDATE',
+        eventTime: raw.E as number,
+        transactionTime: raw.T as number,
+        positions: positions.map((p: Record<string, unknown>) => ({
+          symbol: p.s as string,
+          side: p.ps as 'LONG' | 'SHORT',
+          quantity: Math.abs(parseFloat(p.pa as string || '0')),
+          entryPrice: parseFloat(p.ep as string || '0'),
+          unrealizedPnl: parseFloat(p.rv as string || '0'),
+          leverage: parseInt(p.le as string || '1'),
+          liquidationPrice: parseFloat(p.li as string || '0'),
+          stopLoss: p.sl ? parseFloat(p.sl as string) : undefined,
+          takeProfit: p.tp ? parseFloat(p.tp as string) : undefined,
+          margin: parseFloat(p.mm as string || '0'),
+          positionAmt: p.pa as string || '0',
+        })),
+        balances: balances.map((b: Record<string, unknown>) => ({
+          asset: b.a as string,
+          walletBalance: parseFloat(b.wb as string || '0'),
+          unrealizedPnl: parseFloat(b.rp as string || '0'),
+        })),
+      };
+    } catch (error) {
+      console.error('[UserDataStream] 解析持仓事件失败:', error);
+      return null;
+    }
   }
 
   /**

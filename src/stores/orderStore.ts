@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { Order, OrderFormData, OrderStatus, OrderSide } from "@/types/order";
 import { useUserStore } from "./userStore";
-import { BinanceUserWebSocket } from "@/lib/binance/userWebSocket";
 
 // OTE预填充数据
 export interface OTEPrefillData {
@@ -117,7 +116,7 @@ interface OrderState {
   tradingLines: TradingLine[];
   isPlacingOrder: boolean;
   orderError: string | null;
-  userWs: BinanceUserWebSocket | null;
+  eventSource: EventSource | null;
   wsConnected: boolean;
 
   // Actions
@@ -149,7 +148,7 @@ export const useOrderStore = create<OrderState>((set, get) => ({
   tradingLines: [],
   isPlacingOrder: false,
   orderError: null,
-  userWs: null,
+  eventSource: null,
   wsConnected: false,
 
   openModal: () => set({ isModalOpen: true }),
@@ -388,34 +387,89 @@ export const useOrderStore = create<OrderState>((set, get) => ({
   },
 
   initUserWebSocket: async () => {
-    const { userWs } = get();
-    if (userWs) {
+    const { eventSource } = get();
+    if (eventSource) {
       // 已存在，先断开
-      await userWs.disconnect();
+      eventSource.close();
     }
 
-    const ws = new BinanceUserWebSocket();
+    // 创建 SSE 连接订阅后端订单更新
+    const ws = new EventSource('/api/user/order-stream');
 
-    const { updateOrders } = get();
+    ws.onopen = () => {
+      console.log('[OrderStore] SSE 连接已打开');
+      set({ wsConnected: true });
+    };
 
-    await ws.connect(
-      () => {
-        // 持仓更新回调（订单 WebSocket 不处理持仓）
-      },
-      (orders) => {
-        // 订单更新回调
-        updateOrders(orders);
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        // 处理订单更新
+        if (data.type === 'order' && data.data) {
+          const { order } = data.data;
+
+          // 转换订单数据格式
+          const realOrder: RealOrder = {
+            id: order.orderId?.toString() || '',
+            clientOrderId: order.clientOrderId || '',
+            symbol: order.symbol,
+            side: order.side,
+            positionSide: order.positionSide,
+            type: order.orderType,
+            quantity: parseFloat(order.originalQuantity || order.quantity || '0'),
+            price: order.price ? parseFloat(order.price) : undefined,
+            stopPrice: order.stopPrice ? parseFloat(order.stopPrice) : undefined,
+            status: order.orderStatus,
+            time: order.orderTime || order.time || Date.now(),
+            isAlgo: ['STOP', 'TAKE_PROFIT', 'TRAILING_STOP_MARKET'].includes(order.orderType),
+          };
+
+          // 更新本地订单列表
+          const { realOrders } = get();
+          const existingIndex = realOrders.findIndex(o => o.id === realOrder.id);
+
+          if (existingIndex >= 0) {
+            // 更新现有订单
+            const updated = [...realOrders];
+            updated[existingIndex] = realOrder;
+            set({ realOrders: updated });
+          } else {
+            // 添加新订单
+            set({ realOrders: [realOrder, ...realOrders] });
+          }
+        }
+
+        // 处理连接状态
+        if (data.type === 'connected') {
+          console.log('[OrderStore] 后端 WebSocket 已连接');
+          set({ wsConnected: true });
+        }
+        if (data.type === 'disconnected') {
+          console.log('[OrderStore] 后端 WebSocket 已断开');
+          set({ wsConnected: false });
+        }
+        if (data.type === 'error') {
+          console.error('[OrderStore] SSE 错误:', data.message);
+        }
+      } catch (error) {
+        console.error('[OrderStore] 解析 SSE 数据失败:', error);
       }
-    );
+    };
 
-    set({ userWs: ws, wsConnected: true });
+    ws.onerror = (error) => {
+      console.error('[OrderStore] SSE 错误:', error);
+      set({ wsConnected: false });
+    };
+
+    set({ eventSource: ws, wsConnected: true });
   },
 
   disconnectUserWebSocket: async () => {
-    const { userWs } = get();
-    if (userWs) {
-      await userWs.disconnect();
-      set({ userWs: null, wsConnected: false });
+    const { eventSource } = get();
+    if (eventSource) {
+      eventSource.close();
+      set({ eventSource: null, wsConnected: false });
     }
   },
 }));

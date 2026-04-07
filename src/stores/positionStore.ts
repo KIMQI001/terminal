@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { Position, Balance } from "@/types/order";
 import { useUserStore } from "./userStore";
-import { BinanceUserWebSocket } from "@/lib/binance/userWebSocket";
 
 interface PositionState {
   positions: Position[];
@@ -10,7 +9,7 @@ interface PositionState {
   isLoadingPositions: boolean;
   currentLeverage: number;
   isLoadingLeverage: boolean;
-  userWs: BinanceUserWebSocket | null;
+  eventSource: EventSource | null;
   wsConnected: boolean;
 
   // Actions
@@ -36,7 +35,7 @@ export const usePositionStore = create<PositionState>((set, get) => ({
   isLoadingPositions: false,
   currentLeverage: 20,
   isLoadingLeverage: false,
-  userWs: null,
+  eventSource: null,
   wsConnected: false,
 
   addPosition: (positionData) => {
@@ -300,35 +299,87 @@ export const usePositionStore = create<PositionState>((set, get) => ({
   },
 
   initUserWebSocket: async () => {
-    const { userWs } = get();
-    if (userWs) {
+    const { eventSource } = get();
+    if (eventSource) {
       // 已存在，先断开
-      await userWs.disconnect();
+      eventSource.close();
     }
 
-    const ws = new BinanceUserWebSocket();
+    // 创建 SSE 连接订阅后端持仓更新
+    const ws = new EventSource('/api/user/position-stream');
 
-    // 获取 orderStore 的引用用于更新订单
-    const { updatePositions } = get();
+    ws.onopen = () => {
+      console.log('[PositionStore] SSE 连接已打开');
+      set({ wsConnected: true });
+    };
 
-    await ws.connect(
-      (positions) => {
-        // 持仓更新回调
-        updatePositions(positions);
-      },
-      () => {
-        // 订单更新回调（持仓 WebSocket 不处理订单）
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        // 处理持仓更新
+        if (data.type === 'position' && data.data) {
+          const { positions: posUpdates, balances } = data.data;
+
+          // 转换持仓数据格式
+          const positions: Position[] = (posUpdates || []).map((p: {
+            symbol: string;
+            side: 'LONG' | 'SHORT';
+            quantity: number;
+            entryPrice: number;
+            unrealizedPnl: number;
+            leverage: number;
+            liquidationPrice: number;
+            stopLoss?: number;
+            takeProfit?: number;
+          }) => ({
+            id: `${p.symbol}_${p.side}`,
+            symbol: p.symbol,
+            side: p.side.toLowerCase() as 'long' | 'short',
+            quantity: p.quantity,
+            entryPrice: p.entryPrice,
+            currentPrice: p.entryPrice + (p.unrealizedPnl / (p.quantity || 1)),
+            unrealizedPnl: p.unrealizedPnl,
+            unrealizedPnlPercent: p.entryPrice > 0 ? (p.unrealizedPnl / (p.entryPrice * p.quantity)) * 100 : 0,
+            leverage: p.leverage,
+            liquidationPrice: p.liquidationPrice,
+            stopLoss: p.stopLoss,
+            takeProfit: p.takeProfit,
+          }));
+
+          set({ positions });
+        }
+
+        // 处理连接状态
+        if (data.type === 'connected') {
+          console.log('[PositionStore] 后端 WebSocket 已连接');
+          set({ wsConnected: true });
+        }
+        if (data.type === 'disconnected') {
+          console.log('[PositionStore] 后端 WebSocket 已断开');
+          set({ wsConnected: false });
+        }
+        if (data.type === 'error') {
+          console.error('[PositionStore] SSE 错误:', data.message);
+        }
+      } catch (error) {
+        console.error('[PositionStore] 解析 SSE 数据失败:', error);
       }
-    );
+    };
 
-    set({ userWs: ws, wsConnected: true });
+    ws.onerror = (error) => {
+      console.error('[PositionStore] SSE 错误:', error);
+      set({ wsConnected: false });
+    };
+
+    set({ eventSource: ws, wsConnected: true });
   },
 
   disconnectUserWebSocket: async () => {
-    const { userWs } = get();
-    if (userWs) {
-      await userWs.disconnect();
-      set({ userWs: null, wsConnected: false });
+    const { eventSource } = get();
+    if (eventSource) {
+      eventSource.close();
+      set({ eventSource: null, wsConnected: false });
     }
   },
 }));
