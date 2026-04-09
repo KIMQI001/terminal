@@ -31,7 +31,7 @@ import {
 } from './binanceOrderApi';
 import * as exchangeAdapter from './exchangeAdapter';
 import { sendDingtalkMarkdownToUser } from '../notification/dingtalk';
-import { isPositionMonitorEnabled } from './apiConfigReader';
+import { isPositionMonitorEnabled, isOrderNotifyEnabled } from './apiConfigReader';
 
 // 订单监控器配置
 export interface OrderMonitorConfig {
@@ -152,8 +152,8 @@ async function handleOrderFilled(event: OrderTradeUpdateEvent): Promise<void> {
     return;
   }
 
-  // 普通订单（非守塔、非流动性网格）- 检查是否开启仓位监控
-  if (config && isPositionMonitorEnabled(config.userId)) {
+  // 普通订单（非守塔、非流动性网格）- 检查是否开启订单通知或仓位监控
+  if (config && isOrderNotifyEnabled(config.userId)) {
     // 处理普通订单的成交
     await handleNormalOrderFilled(event);
   }
@@ -592,7 +592,8 @@ async function handleEntryCanceled(clientOrderId: string): Promise<void> {
 
 /**
  * 处理普通订单（非守塔、非流动性网格）成交
- * 当用户开启仓位监控时，监听所有订单成交并自动下止损单
+ * order_notify_enabled: 发送钉钉通知
+ * position_monitor_enabled: 自动下止损单
  */
 async function handleNormalOrderFilled(event: OrderTradeUpdateEvent): Promise<void> {
   const { order } = event;
@@ -626,81 +627,89 @@ async function handleNormalOrderFilled(event: OrderTradeUpdateEvent): Promise<vo
     return;
   }
 
-  const apiConfig: BinanceApiConfig = {
-    apiKey: config.apiKey,
-    apiSecret: config.apiSecret,
-    isTestnet: config.isTestnet,
-  };
-
-  // 平仓方向 (与入场方向相反)
-  const closeSide = side === 'BUY' ? 'SELL' : 'BUY';
+  // 检查是否开启了仓位监控（自动下止损）
+  const isPositionMonitor = isPositionMonitorEnabled(config.userId);
 
   // 计算 2% 止损价
   const stopLossPrice = side === 'BUY'
     ? filledPrice * (1 - 0.02)  // 做多：2% 止损
     : filledPrice * (1 + 0.02); // 做空：2% 止损
 
-  try {
-    // 检查是否已有止损单
-    const existingOrdersResult = await getOpenOrders(apiConfig, symbol);
-    const existingOrders = existingOrdersResult.success ? (existingOrdersResult.orders || []) : [];
+  let slOrderId: string | null = null;
+  let slError: string | null = null;
+  let slClientIdForStorage: string | null = null;
 
-    // 查找是否已有属于这个订单的止损单
-    const myOrders = existingOrders.filter(o => o.clientOrderId?.startsWith(clientOrderId + '_'));
-    const hasStopLoss = myOrders.some(o => o.type === 'STOP_MARKET');
+  // 只有开启仓位监控时才自动下止损
+  if (isPositionMonitor) {
+    const apiConfig: BinanceApiConfig = {
+      apiKey: config.apiKey,
+      apiSecret: config.apiSecret,
+      isTestnet: config.isTestnet,
+    };
 
-    let slOrderId: string | null = null;
-    let slError: string | null = null;
-    let slClientIdForStorage: string | null = null;
+    // 平仓方向 (与入场方向相反)
+    const closeSide = side === 'BUY' ? 'SELL' : 'BUY';
 
-    if (!hasStopLoss) {
-      // 下止损单
-      const slSuffix = Math.random().toString(36).slice(-4);
-      const slClientId = `${clientOrderId}_normal_sl${slSuffix}`;
-      slClientIdForStorage = slClientId;
-      console.log(`[OrderMonitor] 普通订单下止损单: ${slClientId} 止损价=${stopLossPrice}`);
+    try {
+      // 检查是否已有止损单
+      const existingOrdersResult = await getOpenOrders(apiConfig, symbol);
+      const existingOrders = existingOrdersResult.success ? (existingOrdersResult.orders || []) : [];
 
-      const slResult = await placeStopLossOrder(apiConfig, {
-        symbol,
-        side: closeSide,
-        positionSide,
-        quantity,
-        stopPrice: stopLossPrice,
-        clientOrderId: slClientId,
-      });
+      // 查找是否已有属于这个订单的止损单
+      const myOrders = existingOrders.filter(o => o.clientOrderId?.startsWith(clientOrderId + '_'));
+      const hasStopLoss = myOrders.some(o => o.type === 'STOP_MARKET');
 
-      if (slResult.success) {
-        slOrderId = slResult.orderId?.toString() || null;
-        console.log(`[OrderMonitor] 止损单下单成功: ${slClientId}`);
+      if (!hasStopLoss) {
+        // 下止损单
+        const slSuffix = Math.random().toString(36).slice(-4);
+        const slClientId = `${clientOrderId}_normal_sl${slSuffix}`;
+        slClientIdForStorage = slClientId;
+        console.log(`[OrderMonitor] 普通订单下止损单: ${slClientId} 止损价=${stopLossPrice}`);
+
+        const slResult = await placeStopLossOrder(apiConfig, {
+          symbol,
+          side: closeSide,
+          positionSide,
+          quantity,
+          stopPrice: stopLossPrice,
+          clientOrderId: slClientId,
+        });
+
+        if (slResult.success) {
+          slOrderId = slResult.orderId?.toString() || null;
+          console.log(`[OrderMonitor] 止损单下单成功: ${slClientId}`);
+        } else {
+          slError = slResult.error || '下单失败';
+          console.error(`[OrderMonitor] 止损单失败: ${slError}`);
+        }
       } else {
-        slError = slResult.error || '下单失败';
-        console.error(`[OrderMonitor] 止损单失败: ${slError}`);
+        console.log(`[OrderMonitor] 止损单已存在，跳过`);
+        slOrderId = 'exists';
       }
-    } else {
-      console.log(`[OrderMonitor] 止损单已存在，跳过`);
-      slOrderId = 'exists';
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : '未知错误';
+      console.error(`[OrderMonitor] 普通订单处理异常:`, error);
+      slError = errorMsg;
     }
+  }
 
-    // 存储入场信息，用于止损触发时计算盈亏
-    normalOrderEntries.set(clientOrderId, {
-      symbol,
-      side,
-      positionSide,
-      entryPrice: filledPrice,
-      quantity,
-      stopLossPrice,
-      stopLossOrderId: slClientIdForStorage,
-      entryTime: Date.now(),
-    });
+  // 存储入场信息，用于止损触发时计算盈亏
+  normalOrderEntries.set(clientOrderId, {
+    symbol,
+    side,
+    positionSide,
+    entryPrice: filledPrice,
+    quantity,
+    stopLossPrice,
+    stopLossOrderId: slClientIdForStorage,
+    entryTime: Date.now(),
+  });
 
-    // 发送入场成交通知
-    await sendNormalOrderFilledNotification(symbol, side, positionSide, filledPrice, quantity, stopLossPrice, slOrderId, slError);
+  // 发送入场成交通知
+  await sendNormalOrderFilledNotification(symbol, side, positionSide, filledPrice, quantity, stopLossPrice, slOrderId, slError);
 
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : '未知错误';
-    console.error(`[OrderMonitor] 普通订单处理异常:`, error);
-
-    // 发送错误通知
+  // 如果开启了仓位监控但止损单失败，发送错误通知
+  if (isPositionMonitor && slError) {
     await sendDingtalkMarkdownToUser(
       config.userId,
       '普通订单止损下单失败',
@@ -710,7 +719,7 @@ async function handleNormalOrderFilled(event: OrderTradeUpdateEvent): Promise<vo
       `- **成交价**: $${filledPrice.toFixed(2)}\n` +
       `- **数量**: ${quantity}\n` +
       `- **方向**: ${side === 'BUY' ? '做多' : '做空'}\n` +
-      `- **错误**: ${errorMsg}\n\n` +
+      `- **错误**: ${slError}\n\n` +
       `**请手动下单止损！**`
     );
   }

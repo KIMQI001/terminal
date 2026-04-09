@@ -288,6 +288,34 @@ export function isPositionMonitorEnabled(userId: number): boolean {
 }
 
 /**
+ * 获取用户是否启用了订单成交通知
+ */
+export function isOrderNotifyEnabled(userId: number): boolean {
+  try {
+    const database = getTerminalDatabase();
+
+    // 首先检查列是否存在
+    const tableInfo = database.prepare('PRAGMA table_info(notification_configs)').all() as { name: string }[];
+    const hasColumn = tableInfo.some(col => col.name === 'order_notify_enabled');
+
+    if (!hasColumn) {
+      console.log('[ApiConfigReader] notification_configs 表没有 order_notify_enabled 列，订单通知默认开启');
+      return true;
+    }
+
+    const row = database.prepare(`
+      SELECT order_notify_enabled FROM notification_configs WHERE user_id = ? AND enabled = 1
+    `).get(userId) as { order_notify_enabled: number } | undefined;
+
+    // 默认开启
+    return row?.order_notify_enabled !== 0;
+  } catch (error) {
+    console.error('[ApiConfigReader] 获取订单通知配置失败:', error);
+    return true;
+  }
+}
+
+/**
  * 关闭数据库连接
  */
 export function closeApiConfigReader(): void {
