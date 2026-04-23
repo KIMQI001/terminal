@@ -54,7 +54,6 @@ export interface Killzone {
 
 export interface IndicatorState {
   swingPoints: boolean;
-  engulfingPinbar: boolean;
   orderBlocks: boolean;
   fvg: boolean;
   bos: boolean;

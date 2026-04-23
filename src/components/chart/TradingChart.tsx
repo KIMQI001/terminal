@@ -54,6 +54,7 @@ export function TradingChart() {
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const highLineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const lowLineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const engulfingPinbarSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const wsRef = useRef<BinanceWebSocket | null>(null);
 
   // ICT Primitives
@@ -233,11 +234,9 @@ export function TradingChart() {
         setInducements(inducements);
       }
 
-      // Engulfing Pinbar
-      if (enabled.engulfingPinbar) {
-        const pinbars = detectEngulfingPinbar(candleData);
-        setEngulfingPinbars(pinbars);
-      }
+      // Engulfing Pinbar (始终计算，用于蜡烛染色)
+      const pinbars = detectEngulfingPinbar(candleData);
+      setEngulfingPinbars(pinbars);
     },
     [enabled, timeframe, setSwingPoints, setMissedPivots, setGhostLevels, setEngulfingPinbars, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend]
   );
@@ -350,6 +349,18 @@ export function TradingChart() {
       visible: false,
     });
     lowLineSeriesRef.current = lowLineSeries;
+
+    // Engulfing Pinbar Histogram Series (用于蜡烛染色)
+    const engulfingPinbarSeries = chart.addHistogramSeries({
+      color: "transparent",
+      priceFormat: { type: "price" },
+      priceScaleId: "engulfing",
+    });
+    // 将 enguling 价格 scale 置于左侧但不影响主图
+    chart.priceScale("engulfing").applyOptions({
+      scaleMargins: { top: 0, bottom: 0 },
+    });
+    engulfingPinbarSeriesRef.current = engulfingPinbarSeries;
 
     // Initialize ICT Primitives
     const obPrimitive = new OrderBlockPrimitive();
@@ -846,24 +857,23 @@ export function TradingChart() {
     }
   }, [swingPoints, enabled.swingPoints, chartType]);
 
-  // Update Engulfing Pinbar Markers
+  // Engulfing Pinbar Bar Coloring - 使用 histogram overlay 渲染蜡烛染色
   useEffect(() => {
-    if (!candleSeriesRef.current) return;
+    if (!chartRef.current || !engulfingPinbarSeriesRef.current) return;
 
-    if (enabled.engulfingPinbar && engulfingPinbars.length > 0) {
-      const markers: SeriesMarker<Time>[] = engulfingPinbars.map((pinbar) => ({
+    if (engulfingPinbars.length > 0) {
+      // 构建染色数据 - 使用 histogram 在对应时间显示颜色
+      const colorData = engulfingPinbars.map((pinbar) => ({
         time: pinbar.time as Time,
-        position: pinbar.type === "bullish" ? "belowBar" as const : "aboveBar" as const,
+        value: pinbar.price,
         color: pinbar.type === "bullish" ? "#3b82f6" : "#f97316", // 蓝色=看涨, 橙色=看跌
-        shape: "arrowUp" as const,
-        text: pinbar.type === "bullish" ? "Bull EP" : "Bear EP",
       }));
 
-      candleSeriesRef.current.setMarkers(markers);
+      engulfingPinbarSeriesRef.current.setData(colorData as any);
     } else {
-      candleSeriesRef.current.setMarkers([]);
+      engulfingPinbarSeriesRef.current.setData([]);
     }
-  }, [engulfingPinbars, enabled.engulfingPinbar]);
+  }, [engulfingPinbars]);
 
   // Update Trading Lines (Entry, Stop Loss, Take Profit, Orders, Positions)
   useEffect(() => {
