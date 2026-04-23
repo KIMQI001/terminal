@@ -5,6 +5,7 @@ import { OTEZone } from "@/lib/chart/indicators/ote";
 import { BreakerBlock } from "@/lib/chart/indicators/breakerBlocks";
 import { Inducement } from "@/lib/chart/indicators/inducement";
 import { MissedPivot, GhostLevel } from "@/lib/chart/indicators/swingPoints";
+import { EngulfingPinbar } from "@/lib/chart/indicators/engulfingPinbar";
 
 // 多周期 OTE 类型
 interface MultiTimeframeOTE {
@@ -53,6 +54,7 @@ interface IndicatorStoreState {
   swingPoints: SwingPoint[];
   missedPivots: MissedPivot[];
   ghostLevels: GhostLevel[];
+  engulfingPinbars: EngulfingPinbar[];
   orderBlocks: OrderBlock[];
   fvgs: FVG[];
   bosSignals: BOS[];
@@ -70,6 +72,7 @@ interface IndicatorStoreState {
   setSwingPoints: (points: SwingPoint[]) => void;
   setMissedPivots: (pivots: MissedPivot[]) => void;
   setGhostLevels: (levels: GhostLevel[]) => void;
+  setEngulfingPinbars: (pinbars: EngulfingPinbar[]) => void;
   setOrderBlocks: (blocks: OrderBlock[]) => void;
   setFVGs: (fvgs: FVG[]) => void;
   setBOSSignals: (signals: BOS[]) => void;
@@ -88,6 +91,7 @@ interface IndicatorStoreState {
 export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
   enabled: {
     swingPoints: false,
+    engulfingPinbar: false,
     orderBlocks: false,
     fvg: false,
     bos: false,
@@ -101,6 +105,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
   swingPoints: [],
   missedPivots: [],
   ghostLevels: [],
+  engulfingPinbars: [],
   orderBlocks: [],
   fvgs: [],
   bosSignals: [],
@@ -152,6 +157,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
   setSwingPoints: (points) => set({ swingPoints: points }),
   setMissedPivots: (pivots) => set({ missedPivots: pivots }),
   setGhostLevels: (levels) => set({ ghostLevels: levels }),
+  setEngulfingPinbars: (pinbars) => set({ engulfingPinbars: pinbars }),
   setOrderBlocks: (blocks) => set({ orderBlocks: blocks }),
   setFVGs: (fvgs) => set({ fvgs }),
   setBOSSignals: (signals) => set({ bosSignals: signals }),
@@ -193,6 +199,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
       swingPoints: [],
       missedPivots: [],
       ghostLevels: [],
+      engulfingPinbars: [],
       orderBlocks: [],
       fvgs: [],
       bosSignals: [],

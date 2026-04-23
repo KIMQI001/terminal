@@ -30,6 +30,7 @@ import { fetchKlines } from "@/lib/binance/api";
 import { BinanceWebSocket } from "@/lib/binance/websocket";
 import { detectSwingPoints, detectPivotsFull, detectAllPivots, classifyPivots } from "@/lib/chart/indicators/swingPoints";
 import { detectOrderBlocks } from "@/lib/chart/indicators/orderBlocks";
+import { detectEngulfingPinbar } from "@/lib/chart/indicators/engulfingPinbar";
 import { detectFVGs } from "@/lib/chart/indicators/fvg";
 import { detectStructure } from "@/lib/chart/indicators/structure";
 import { detectLiquidityZones } from "@/lib/chart/indicators/liquidity";
@@ -86,6 +87,7 @@ export function TradingChart() {
   const {
     enabled,
     swingPoints,
+    engulfingPinbars,
     missedPivots,
     ghostLevels,
     orderBlocks,
@@ -96,6 +98,7 @@ export function TradingChart() {
     setSwingPoints,
     setMissedPivots,
     setGhostLevels,
+    setEngulfingPinbars,
     setOrderBlocks,
     setFVGs,
     setBOSSignals,
@@ -229,8 +232,14 @@ export function TradingChart() {
         const inducements = detectInducements(candleData, pivotResult.pivots);
         setInducements(inducements);
       }
+
+      // Engulfing Pinbar
+      if (enabled.engulfingPinbar) {
+        const pinbars = detectEngulfingPinbar(candleData);
+        setEngulfingPinbars(pinbars);
+      }
     },
-    [enabled, timeframe, setSwingPoints, setMissedPivots, setGhostLevels, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend]
+    [enabled, timeframe, setSwingPoints, setMissedPivots, setGhostLevels, setEngulfingPinbars, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend]
   );
 
   // Initialize chart
@@ -836,6 +845,25 @@ export function TradingChart() {
       lowLineSeriesRef.current.setMarkers([]);
     }
   }, [swingPoints, enabled.swingPoints, chartType]);
+
+  // Update Engulfing Pinbar Markers
+  useEffect(() => {
+    if (!candleSeriesRef.current) return;
+
+    if (enabled.engulfingPinbar && engulfingPinbars.length > 0) {
+      const markers: SeriesMarker<Time>[] = engulfingPinbars.map((pinbar) => ({
+        time: pinbar.time as Time,
+        position: pinbar.type === "bullish" ? "belowBar" as const : "aboveBar" as const,
+        color: pinbar.type === "bullish" ? "#3b82f6" : "#f97316", // 蓝色=看涨, 橙色=看跌
+        shape: "arrowUp" as const,
+        text: pinbar.type === "bullish" ? "Bull EP" : "Bear EP",
+      }));
+
+      candleSeriesRef.current.setMarkers(markers);
+    } else {
+      candleSeriesRef.current.setMarkers([]);
+    }
+  }, [engulfingPinbars, enabled.engulfingPinbar]);
 
   // Update Trading Lines (Entry, Stop Loss, Take Profit, Orders, Positions)
   useEffect(() => {
