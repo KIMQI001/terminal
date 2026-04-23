@@ -90,7 +90,7 @@ interface IndicatorStoreState {
 
 export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
   enabled: {
-    swingPoints: false,
+    swingPoints: true,
     orderBlocks: false,
     fvg: false,
     bos: false,
