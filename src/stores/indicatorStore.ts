@@ -4,6 +4,7 @@ import { SwingPoint, Timeframe } from "@/types/chart";
 import { OTEZone } from "@/lib/chart/indicators/ote";
 import { BreakerBlock } from "@/lib/chart/indicators/breakerBlocks";
 import { Inducement } from "@/lib/chart/indicators/inducement";
+import { MissedPivot, GhostLevel } from "@/lib/chart/indicators/swingPoints";
 
 // 多周期 OTE 类型
 interface MultiTimeframeOTE {
@@ -50,6 +51,8 @@ interface MultiTimeframeTrend {
 interface IndicatorStoreState {
   enabled: IndicatorState;
   swingPoints: SwingPoint[];
+  missedPivots: MissedPivot[];
+  ghostLevels: GhostLevel[];
   orderBlocks: OrderBlock[];
   fvgs: FVG[];
   bosSignals: BOS[];
@@ -65,6 +68,8 @@ interface IndicatorStoreState {
 
   toggleIndicator: (key: keyof IndicatorState) => void;
   setSwingPoints: (points: SwingPoint[]) => void;
+  setMissedPivots: (pivots: MissedPivot[]) => void;
+  setGhostLevels: (levels: GhostLevel[]) => void;
   setOrderBlocks: (blocks: OrderBlock[]) => void;
   setFVGs: (fvgs: FVG[]) => void;
   setBOSSignals: (signals: BOS[]) => void;
@@ -94,6 +99,8 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
     inducement: false,
   },
   swingPoints: [],
+  missedPivots: [],
+  ghostLevels: [],
   orderBlocks: [],
   fvgs: [],
   bosSignals: [],
@@ -143,6 +150,8 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
     })),
 
   setSwingPoints: (points) => set({ swingPoints: points }),
+  setMissedPivots: (pivots) => set({ missedPivots: pivots }),
+  setGhostLevels: (levels) => set({ ghostLevels: levels }),
   setOrderBlocks: (blocks) => set({ orderBlocks: blocks }),
   setFVGs: (fvgs) => set({ fvgs }),
   setBOSSignals: (signals) => set({ bosSignals: signals }),
@@ -182,6 +191,8 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
   clearAll: () =>
     set({
       swingPoints: [],
+      missedPivots: [],
+      ghostLevels: [],
       orderBlocks: [],
       fvgs: [],
       bosSignals: [],

@@ -28,7 +28,7 @@ import { OBPanel } from "./OBPanel";
 import { OrderCancelOverlay } from "./OrderCancelOverlay";
 import { fetchKlines } from "@/lib/binance/api";
 import { BinanceWebSocket } from "@/lib/binance/websocket";
-import { detectSwingPoints, detectAllPivots, classifyPivots } from "@/lib/chart/indicators/swingPoints";
+import { detectSwingPoints, detectPivotsFull, detectAllPivots, classifyPivots } from "@/lib/chart/indicators/swingPoints";
 import { detectOrderBlocks } from "@/lib/chart/indicators/orderBlocks";
 import { detectFVGs } from "@/lib/chart/indicators/fvg";
 import { detectStructure } from "@/lib/chart/indicators/structure";
@@ -86,12 +86,16 @@ export function TradingChart() {
   const {
     enabled,
     swingPoints,
+    missedPivots,
+    ghostLevels,
     orderBlocks,
     fvgs,
     liquidityZones,
     oteZones,
     breakerBlocks,
     setSwingPoints,
+    setMissedPivots,
+    setGhostLevels,
     setOrderBlocks,
     setFVGs,
     setBOSSignals,
@@ -155,10 +159,11 @@ export function TradingChart() {
     (candleData: Candle[]) => {
       if (candleData.length < 10) return;
 
-      // Swing points (needed for other indicators)
-      // 使用 leftBars=10, rightBars=10, minSwingPercent=1.5%（TradingView 风格）
-      const detectedSwingPoints = detectSwingPoints(candleData);
-      setSwingPoints(detectedSwingPoints);
+      // Swing points (LuxAlgo 风格 length=50，包含 missed pivots 和 ghost levels)
+      const pivotResult = detectPivotsFull(candleData, 50);
+      setSwingPoints(pivotResult.pivots);
+      setMissedPivots(pivotResult.missedPivots);
+      setGhostLevels(pivotResult.ghostLevels);
 
       // OB 始终计算（面板需要数据）
       const obs = detectOrderBlocks(candleData);
@@ -181,7 +186,7 @@ export function TradingChart() {
 
       // BOS/CHoCH 始终计算（MTF Trend 面板需要数据）
       const lastPriceForStructure = candleData[candleData.length - 1].close;
-      const { bos, choch } = detectStructure(detectedSwingPoints, lastPriceForStructure);
+      const { bos, choch } = detectStructure(pivotResult.pivots, lastPriceForStructure);
       if (enabled.bos) setBOSSignals(bos);
       if (enabled.choch) setCHoCHSignals(choch);
 
@@ -198,13 +203,13 @@ export function TradingChart() {
       }
 
       if (enabled.liquidityZones) {
-        const zones = detectLiquidityZones(candleData, detectedSwingPoints);
+        const zones = detectLiquidityZones(candleData, pivotResult.pivots);
         setLiquidityZones(zones);
       }
 
       // OTE zones 始终计算（面板需要数据）
       const lastPrice = candleData[candleData.length - 1].close;
-      const otes = detectOTEZones(detectedSwingPoints, lastPrice, candleData);
+      const otes = detectOTEZones(pivotResult.pivots, lastPrice, candleData);
       setOTEZones(otes);
       // 保存到多周期 OTE 存储（只保存最新的一个）
       const targetTimeframes3 = ['5m', '15m', '1h', '4h', '1d'] as const;
@@ -221,11 +226,11 @@ export function TradingChart() {
 
       // Inducement
       if (enabled.inducement) {
-        const inducements = detectInducements(candleData, detectedSwingPoints);
+        const inducements = detectInducements(candleData, pivotResult.pivots);
         setInducements(inducements);
       }
     },
-    [enabled, timeframe, setSwingPoints, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend]
+    [enabled, timeframe, setSwingPoints, setMissedPivots, setGhostLevels, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend]
   );
 
   // Initialize chart

@@ -35,11 +35,28 @@ interface RenderedLeg {
   direction: "up" | "down";
 }
 
+interface RenderedMissedPivot {
+  x: number;
+  y: number;
+  pivotType: "high" | "low";
+  color: string;
+}
+
+interface RenderedGhostLevel {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color: string;
+}
+
 export function ICTOverlay({ chartRef, seriesRef, containerRef }: ICTOverlayProps) {
   const [lines, setLines] = useState<RenderedLine[]>([]);
   const [inducements, setRenderedInducements] = useState<RenderedInducement[]>([]);
   const [legs, setLegs] = useState<RenderedLeg[]>([]);
-  const { enabled, bosSignals, chochSignals, inducements: inducementSignals, swingPoints } = useIndicatorStore();
+  const [missedPivots, setMissedPivots] = useState<RenderedMissedPivot[]>([]);
+  const [ghostLevels, setGhostLevels] = useState<RenderedGhostLevel[]>([]);
+  const { enabled, bosSignals, chochSignals, inducements: inducementSignals, swingPoints, missedPivots: missedPivotsData, ghostLevels: ghostLevelsData } = useIndicatorStore();
   const { candles } = useChartStore();
 
   // Convert BOS/CHoCH signals to screen coordinates
@@ -114,6 +131,44 @@ export function ICTOverlay({ chartRef, seriesRef, containerRef }: ICTOverlayProp
     }
     setRenderedInducements(renderedInducements);
 
+    // Render Missed Pivots (Ghost Levels)
+    const renderedMissedPivots: RenderedMissedPivot[] = [];
+    const renderedGhostLevels: RenderedGhostLevel[] = [];
+
+    if (enabled.swingPoints) {
+      // Missed Pivots
+      for (const mp of missedPivotsData) {
+        const x = timeScale.timeToCoordinate(mp.time as Time);
+        const y = series.priceToCoordinate(mp.price);
+
+        if (x !== null && y !== null) {
+          const color = mp.pivotType === "high" ? "#ef5350" : "#26a69a";
+          renderedMissedPivots.push({ x, y, pivotType: mp.pivotType, color });
+        }
+      }
+
+      // Ghost Levels
+      for (const gl of ghostLevelsData) {
+        const x1 = timeScale.timeToCoordinate(gl.startIndex as Time);
+        const x2 = timeScale.timeToCoordinate(gl.endIndex as Time);
+        const y1 = series.priceToCoordinate(gl.startPrice);
+        const y2 = series.priceToCoordinate(gl.endPrice);
+
+        if (x1 !== null && x2 !== null && y1 !== null && y2 !== null) {
+          renderedGhostLevels.push({
+            x1,
+            y1,
+            x2,
+            y2: y1, // Ghost level is horizontal
+            color: gl.color,
+          });
+        }
+      }
+    }
+
+    setMissedPivots(renderedMissedPivots);
+    setGhostLevels(renderedGhostLevels);
+
     // Render Swing Point Legs
     const renderedLegs: RenderedLeg[] = [];
     if (enabled.swingPoints && swingPoints.length > 1) {
@@ -134,7 +189,7 @@ export function ICTOverlay({ chartRef, seriesRef, containerRef }: ICTOverlayProp
       }
     }
     setLegs(renderedLegs);
-  }, [chartRef, seriesRef, containerRef, enabled.bos, enabled.choch, enabled.inducement, enabled.swingPoints, bosSignals, chochSignals, inducementSignals, swingPoints]);
+  }, [chartRef, seriesRef, containerRef, enabled.bos, enabled.choch, enabled.inducement, enabled.swingPoints, bosSignals, chochSignals, inducementSignals, swingPoints, missedPivotsData, ghostLevelsData]);
 
   // Update on data changes or scroll/zoom
   useEffect(() => {
@@ -157,7 +212,7 @@ export function ICTOverlay({ chartRef, seriesRef, containerRef }: ICTOverlayProp
     updateLines();
   }, [candles, updateLines]);
 
-  if (lines.length === 0 && inducements.length === 0 && legs.length === 0) return null;
+  if (lines.length === 0 && inducements.length === 0 && legs.length === 0 && missedPivots.length === 0 && ghostLevels.length === 0) return null;
 
   return (
     <svg
@@ -187,6 +242,37 @@ export function ICTOverlay({ chartRef, seriesRef, containerRef }: ICTOverlayProp
           />
         );
       })}
+
+      {/* Ghost Levels */}
+      {ghostLevels.map((gl, index) => (
+        <line
+          key={`ghost-${index}`}
+          x1={gl.x1}
+          y1={gl.y1}
+          x2={gl.x2}
+          y2={gl.y2}
+          stroke={gl.color}
+          strokeWidth={1}
+          strokeDasharray="4,4"
+          opacity={0.5}
+        />
+      ))}
+
+      {/* Missed Pivots (Ghost Labels) */}
+      {missedPivots.map((mp, index) => (
+        <g key={`missed-${index}`}>
+          {/* Ghost emoji marker */}
+          <text
+            x={mp.x}
+            y={mp.y + 5}
+            textAnchor="middle"
+            fontSize="12"
+            opacity={0.8}
+          >
+            👻
+          </text>
+        </g>
+      ))}
 
       {lines.map((line, index) => {
         const isBullish = line.direction === "bullish";

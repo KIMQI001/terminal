@@ -17,35 +17,54 @@ import {
 } from "./pivotDetector";
 
 /**
- * 检测 Swing Points（兼容旧接口）
- * 使用 LuxAlgo 风格的算法
+ * 检测 Swing Points（默认使用 LuxAlgo 风格 length=50）
+ * 使用 LuxAlgo 风格的算法，包含 Missed Reversal 检测
  *
  * @param candles - K线数据
- * @param leftBars - 左侧确认K线数量（用于分类 HH/HL/LH/LL）
- * @param rightBars - 右侧确认K线数量
- * @param minSwingPercent - 两个swing point之间的最小价格变化百分比（默认1.5%）
- * @deprecated 使用 detectAllPivots 或 detectPivotsWithMissed 代替
+ * @param length - Pivot 回溯周期（默认50，与 LuxAlgo 一致）
+ * @deprecated 使用 detectPivotsFull 代替
  */
 export function detectSwingPoints(
   candles: Candle[],
-  leftBars: number = 3,
-  rightBars: number = 3,
-  minSwingPercent: number = 1.5
+  length: number = 50
 ): SwingPointType[] {
-  // 使用新的 LuxAlgo 风格算法
-  const length = leftBars + rightBars;
-  const result = detectPivots(candles, length, true, false);
+  const result = detectPivots(candles, length, true, true);
 
-  // 分类并过滤
-  const classified = classifyPivotsNew(result.pivots);
-  const filtered = filterBySwingPercent(classified, minSwingPercent);
-
-  return filtered.map((p) => ({
-    type: p.type,
+  return result.pivots.map((p) => ({
+    type: p.pivotType,
     price: p.price,
     time: p.time,
     index: p.index,
   }));
+}
+
+/**
+ * 完整版 Pivot 检测（LuxAlgo 风格）
+ * 返回 regular pivots + missed pivots + ghost levels
+ *
+ * @param candles - K线数据
+ * @param length - Pivot 回溯周期（默认50）
+ */
+export function detectPivotsFull(
+  candles: Candle[],
+  length: number = 50
+): {
+  pivots: SwingPointType[];
+  missedPivots: MissedPivot[];
+  ghostLevels: GhostLevel[];
+} {
+  const result = detectPivots(candles, length, true, true);
+
+  return {
+    pivots: result.pivots.map((p) => ({
+      type: p.pivotType,
+      price: p.price,
+      time: p.time,
+      index: p.index,
+    })),
+    missedPivots: result.missedPivots,
+    ghostLevels: result.ghostLevels,
+  };
 }
 
 /**
@@ -70,34 +89,6 @@ export function detectAllPivots(
     time: p.time,
     index: p.index,
   }));
-}
-
-/**
- * 检测带 Missed Reversal 的 Pivots（完整版）
- *
- * @param candles - K线数据
- * @param length - Pivot 回溯周期（默认50）
- */
-export function detectPivotsWithMissed(
-  candles: Candle[],
-  length: number = 50
-): {
-  pivots: SwingPointType[];
-  missedPivots: MissedPivot[];
-  ghostLevels: GhostLevel[];
-} {
-  const result = detectPivots(candles, length, true, true);
-
-  return {
-    pivots: result.pivots.map((p) => ({
-      type: p.pivotType,
-      price: p.price,
-      time: p.time,
-      index: p.index,
-    })),
-    missedPivots: result.missedPivots,
-    ghostLevels: result.ghostLevels,
-  };
 }
 
 /**
