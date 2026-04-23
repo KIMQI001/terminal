@@ -7,6 +7,7 @@
  */
 
 import { Candle } from "@/types/chart";
+import { SwingPoint } from "@/types/chart";
 
 /**
  * Engulfing Pinbar 类型
@@ -25,17 +26,25 @@ export interface EngulfingPinbar {
  * 检测 Engulfing Pinbar
  *
  * @param candles - K线数据
- * @param wickSize - 影线与实体比例阈值（默认0.3，即30%）
- * @param oppositeWickFilter - 对向影线过滤（默认0.6，即影线超过对向60%时过滤）
+ * @param swingPoints - Swing Points（用于过滤：看跌只在H点附近，看涨只在L点附近）
+ * @param range - Swing Point 附近范围（默认5根K线）
  */
 export function detectEngulfingPinbar(
   candles: Candle[],
-  wickSize: number = 0.3,
-  oppositeWickFilter: number = 0.6
+  swingPoints: SwingPoint[] = [],
+  range: number = 5
 ): EngulfingPinbar[] {
   const results: EngulfingPinbar[] = [];
 
   if (candles.length < 2) return results;
+
+  // 构建 Swing Point 索引集合
+  const swingHighIndices = new Set(
+    swingPoints.filter(sp => sp.type === "high").map(sp => sp.index)
+  );
+  const swingLowIndices = new Set(
+    swingPoints.filter(sp => sp.type === "low").map(sp => sp.index)
+  );
 
   for (let i = 1; i < candles.length; i++) {
     const current = candles[i];
@@ -46,18 +55,12 @@ export function detectEngulfingPinbar(
     const currentBottomWick = Math.abs(Math.min(current.close, current.open) - current.low);
     const currentBody = Math.abs(current.close - current.open);
 
-    // 计算前一根蜡烛数据
-    const prevTopWick = Math.abs(Math.max(prev.close, prev.open) - prev.high);
-    const prevBottomWick = Math.abs(Math.min(prev.close, prev.open) - prev.low);
-    const prevBody = Math.abs(prev.close - prev.open);
-
     // 跳过实体太小的蜡烛（防止除零）
-    if (currentBody === 0 || prevBody === 0) continue;
+    if (currentBody === 0) continue;
 
     // === Bullish Engulfing Pinbar ===
-    // 1. 前一根是阴线
-    // 2. 当前是阳线
-    // 3. 当前阳线吞没前一根阴线
+    // 条件：前一根是阴线，当前是阳线，吞没前一根
+    // 额外：在 L 点附近（前后5根）
     const isBullish =
       prev.close <= prev.open && // 前一根阴线
       current.close > current.open && // 当前阳线
@@ -65,21 +68,28 @@ export function detectEngulfingPinbar(
       current.open <= prev.close; // 吞没前一根收盘
 
     if (isBullish) {
-      results.push({
-        type: "bullish",
-        time: current.time,
-        index: i,
-        price: current.close,
-        bodySize: currentBody,
-        topWickSize: currentTopWick,
-        bottomWickSize: currentBottomWick,
-      });
+      // 检查是否在 L 点附近
+      const nearSwingLow = swingPoints.some(sp =>
+        sp.type === "low" &&
+        Math.abs(i - sp.index) <= range
+      );
+
+      if (nearSwingLow || swingPoints.length === 0) {
+        results.push({
+          type: "bullish",
+          time: current.time,
+          index: i,
+          price: current.close,
+          bodySize: currentBody,
+          topWickSize: currentTopWick,
+          bottomWickSize: currentBottomWick,
+        });
+      }
     }
 
     // === Bearish Engulfing Pinbar ===
-    // 1. 前一根是阳线
-    // 2. 当前是阴线
-    // 3. 当前阴线吞没前一根阳线
+    // 条件：前一根是阳线，当前是阴线，吞没前一根
+    // 额外：在 H 点附近（前后5根）
     const isBearish =
       prev.close >= prev.open && // 前一根阳线
       current.close < current.open && // 当前阴线
@@ -87,15 +97,23 @@ export function detectEngulfingPinbar(
       current.open >= prev.close; // 吞没前一根收盘
 
     if (isBearish) {
-      results.push({
-        type: "bearish",
-        time: current.time,
-        index: i,
-        price: current.close,
-        bodySize: currentBody,
-        topWickSize: currentTopWick,
-        bottomWickSize: currentBottomWick,
-      });
+      // 检查是否在 H 点附近
+      const nearSwingHigh = swingPoints.some(sp =>
+        sp.type === "high" &&
+        Math.abs(i - sp.index) <= range
+      );
+
+      if (nearSwingHigh || swingPoints.length === 0) {
+        results.push({
+          type: "bearish",
+          time: current.time,
+          index: i,
+          price: current.close,
+          bodySize: currentBody,
+          topWickSize: currentTopWick,
+          bottomWickSize: currentBottomWick,
+        });
+      }
     }
   }
 

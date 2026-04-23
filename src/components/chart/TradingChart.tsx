@@ -432,8 +432,9 @@ export function TradingChart() {
         calculateIndicators(data);
 
         if (candleSeriesRef.current && chartRef.current) {
-          // 先计算 Engulfing Pinbar
-          const pinbars = detectEngulfingPinbar(data);
+          // 先计算 Swing Points
+          const pivotResult = detectPivotsFull(data, 50);
+          const pinbars = detectEngulfingPinbar(data, pivotResult.pivots, 5);
           const pinbarTimes = new Set(pinbars.map(p => p.time));
 
           // 构建带颜色的蜡烛数据
