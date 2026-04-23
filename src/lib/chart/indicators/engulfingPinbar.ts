@@ -58,17 +58,11 @@ export function detectEngulfingPinbar(
     // 1. 前一根是阴线
     // 2. 当前是阳线
     // 3. 当前阳线吞没前一根阴线
-    // 4. 下影线够长（WickSize%）
-    // 5. 上影线要短（oppositeWickFilter%以下）
     const isBullish =
       prev.close <= prev.open && // 前一根阴线
       current.close > current.open && // 当前阳线
       current.close >= prev.open && // 吞没前一根开盘
-      current.open <= prev.close && // 吞没前一根收盘
-      currentBottomWick / currentBody >= wickSize && // 下影线够长
-      currentTopWick / currentBody < oppositeWickFilter && // 上影线要短
-      current.close >= prev.high && // 必须吞没前一根最高
-      current.low < prev.low; // 必须跌破前一根最低
+      current.open <= prev.close; // 吞没前一根收盘
 
     if (isBullish) {
       results.push({
@@ -86,17 +80,11 @@ export function detectEngulfingPinbar(
     // 1. 前一根是阳线
     // 2. 当前是阴线
     // 3. 当前阴线吞没前一根阳线
-    // 4. 上影线够长
-    // 5. 下影线要短
     const isBearish =
       prev.close >= prev.open && // 前一根阳线
       current.close < current.open && // 当前阴线
       current.close <= prev.open && // 吞没前一根开盘
-      current.open >= prev.close && // 吞没前一根收盘
-      currentTopWick / currentBody >= wickSize && // 上影线够长
-      currentBottomWick / currentBody < oppositeWickFilter && // 下影线要短
-      current.close <= prev.low && // 必须吞没前一根最低
-      current.high > prev.high; // 必须突破前一根最高
+      current.open >= prev.close; // 吞没前一根收盘
 
     if (isBearish) {
       results.push({
