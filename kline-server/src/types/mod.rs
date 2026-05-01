@@ -288,6 +288,12 @@ pub fn aggregate_klines(klines: &[Kline], target_timeframe: &str, count: usize) 
 
 /// 计算4D K线的起始时间
 /// 以 UTC 2020-01-01 为锚点，每4天为一个周期
+///
+/// 注意：4D 聚合使用 UTC 锚点，与前端上海时区显示不同。
+/// 这是设计选择，因为：
+/// 1. 4D 主要用于指标计算（P/D 区域），不直接用于时间显示
+/// 2. 保持与 Binance 原始数据的 UTC 一致性
+/// 3. 避免夏令时导致的周期边界混乱
 pub fn get_4d_period_start(timestamp_secs: i64) -> i64 {
     // 2020-01-01 00:00:00 UTC = 1577836800
     const ANCHOR: i64 = 1577836800;

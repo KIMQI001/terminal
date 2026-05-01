@@ -26,6 +26,24 @@ interface KlineHistoryData {
   klines: KlineUpdateData[];
 }
 
+// 根据 timeframe 动态调整超时时间（低频周期需要更长的超时）
+const TIMEFRAME_TIMEOUT_MS: Record<Timeframe, number> = {
+  '1m': 15000,
+  '3m': 20000,
+  '5m': 30000,
+  '15m': 45000,
+  '30m': 60000,
+  '1h': 90000,
+  '2h': 180000,
+  '4h': 300000,    // 5 分钟
+  '6h': 450000,    // 7.5 分钟
+  '8h': 600000,    // 10 分钟
+  '12h': 900000,   // 15 分钟
+  '1d': 1800000,   // 30 分钟
+  '4d': 7200000,   // 2 小时
+  '1w': 28800000,  // 8 小时
+};
+
 export class BinanceWebSocket {
   private ws: WebSocket | null = null;
   private symbol: string;
@@ -37,7 +55,7 @@ export class BinanceWebSocket {
   private lastKlineTime: number = 0;
   private dataTimeout: NodeJS.Timeout | null = null;
   private lastDataTime: number = 0;
-  private readonly DATA_TIMEOUT_MS = 15000; // 15秒无数据则重连
+  private dataTimeoutMs: number;
 
   constructor(
     symbol: string,
@@ -47,6 +65,8 @@ export class BinanceWebSocket {
     this.symbol = symbol.toUpperCase();
     this.interval = interval;
     this.onKline = onKline;
+    // 根据 timeframe 设置超时时间
+    this.dataTimeoutMs = TIMEFRAME_TIMEOUT_MS[interval] || 15000;
   }
 
   connect() {
@@ -152,8 +172,8 @@ export class BinanceWebSocket {
 
     this.dataTimeout = setInterval(() => {
       const timeSinceLastData = Date.now() - this.lastDataTime;
-      if (timeSinceLastData > this.DATA_TIMEOUT_MS) {
-        console.warn(`WebSocket 数据超时 (${Math.round(timeSinceLastData / 1000)}s)，触发重连...`);
+      if (timeSinceLastData > this.dataTimeoutMs) {
+        console.warn(`WebSocket 数据超时 (${Math.round(timeSinceLastData / 1000)}s > ${this.dataTimeoutMs / 1000}s)，触发重连...`);
         this.forceReconnect();
       }
     }, 10000); // 每 10 秒检查一次

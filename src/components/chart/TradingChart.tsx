@@ -274,11 +274,9 @@ export function TradingChart() {
         timeVisible: true,
         secondsVisible: false,
         tickMarkFormatter: (timestamp: number) => {
-          // 转换为上海时间 (UTC+8)
+          // 转换为上海时间 (UTC+8)，使用 Intl 避免夏令时问题
           const date = new Date(timestamp * 1000);
-          const shanghaiOffset = 8 * 60;
-          const localOffset = date.getTimezoneOffset();
-          const shanghaiTime = new Date(date.getTime() + (shanghaiOffset + localOffset) * 60 * 1000);
+          const shanghaiTime = new Date(date.toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" }));
 
           const month = String(shanghaiTime.getMonth() + 1).padStart(2, '0');
           const day = String(shanghaiTime.getDate()).padStart(2, '0');
@@ -290,11 +288,9 @@ export function TradingChart() {
       },
       localization: {
         timeFormatter: (timestamp: number) => {
-          // 转换为上海时间 (UTC+8)
+          // 转换为上海时间 (UTC+8)，使用 Intl 避免夏令时问题
           const date = new Date(timestamp * 1000);
-          const shanghaiOffset = 8 * 60; // UTC+8 in minutes
-          const localOffset = date.getTimezoneOffset();
-          const shanghaiTime = new Date(date.getTime() + (shanghaiOffset + localOffset) * 60 * 1000);
+          const shanghaiTime = new Date(date.toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" }));
 
           const month = String(shanghaiTime.getMonth() + 1).padStart(2, '0');
           const day = String(shanghaiTime.getDate()).padStart(2, '0');

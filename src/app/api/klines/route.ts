@@ -1,8 +1,11 @@
 /**
  * K线数据 API
  * GET /api/klines?symbol=BTC&interval=1h&limit=200
+ * 代理到 kline-server (Rust)，保持与前端 fetchKlines 一致的数据源
  */
 import { NextRequest, NextResponse } from 'next/server';
+
+const KLINE_API_URL = process.env.NEXT_PUBLIC_KLINE_API || "http://localhost:3001";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -11,8 +14,9 @@ export async function GET(request: NextRequest) {
   const limit = parseInt(searchParams.get('limit') || '200');
 
   try {
+    // 代理到 kline-server，与 src/lib/binance/api.ts 保持一致
     const res = await fetch(
-      `https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=${interval}&limit=${limit}`
+      `${KLINE_API_URL}/api/klines/${symbol.toUpperCase()}/${interval}?limit=${limit}`
     );
 
     if (!res.ok) {
@@ -21,19 +25,12 @@ export async function GET(request: NextRequest) {
 
     const data = await res.json();
 
-    const candles = data.map((k: [number, string, string, string, string, string, number]) => ({
-      time: k[0] / 1000,
-      open: parseFloat(k[1]),
-      high: parseFloat(k[2]),
-      low: parseFloat(k[3]),
-      close: parseFloat(k[4]),
-      volume: parseFloat(k[5]),
-    }));
-
+    // kline-server 返回 { symbol, timeframe, klines: [...] }
+    // 每个 kline 格式：{ time, open, high, low, close, volume }
     return NextResponse.json({
-      symbol,
+      symbol: data.symbol,
       interval,
-      candles,
+      candles: data.klines,
       timestamp: Date.now(),
     });
   } catch (error) {
