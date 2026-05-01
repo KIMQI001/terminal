@@ -27,7 +27,7 @@ impl ExchangeFactory {
             }
             ExchangeType::Okx => {
                 // OKX 实现预留
-                let config = ExchangeConfig {
+                let _config = ExchangeConfig {
                     exchange_type: ExchangeType::Okx,
                     rest_url: "https://www.okx.com".to_string(),
                     ws_url: "wss://ws.okx.com:8443".to_string(),
@@ -39,7 +39,7 @@ impl ExchangeFactory {
             }
             ExchangeType::Bybit => {
                 // Bybit 实现预留
-                let config = ExchangeConfig {
+                let _config = ExchangeConfig {
                     exchange_type: ExchangeType::Bybit,
                     rest_url: "https://api.bybit.com".to_string(),
                     ws_url: "wss://stream.bybit.com".to_string(),

@@ -80,6 +80,12 @@ pub trait ExchangeWs: Send + Sync {
 pub trait ExchangeWsRunner: Send + Sync {
     /// 启动 WebSocket 连接（阻塞，内部处理重连）
     async fn run(&self) -> Result<()>;
+
+    /// 添加订阅
+    fn subscribe(&mut self, symbol: &str, timeframe: &str);
+
+    /// 移除订阅
+    fn unsubscribe(&mut self, symbol: &str, timeframe: &str);
 }
 
 /// 交易所实例（组合 REST + WebSocket）

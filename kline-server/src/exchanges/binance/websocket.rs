@@ -217,6 +217,18 @@ impl ExchangeWsRunner for BinanceWs {
 
         Ok(())
     }
+
+    fn subscribe(&mut self, symbol: &str, timeframe: &str) {
+        let key = SubscriptionKey::new(symbol, timeframe);
+        if !self.subscriptions.contains(&key) {
+            self.subscriptions.push(key);
+        }
+    }
+
+    fn unsubscribe(&mut self, symbol: &str, timeframe: &str) {
+        let key = SubscriptionKey::new(symbol, timeframe);
+        self.subscriptions.retain(|s| s != &key);
+    }
 }
 
 /// Binance 组合流消息格式

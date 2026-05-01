@@ -657,9 +657,10 @@ impl KlineManager {
         // 创建 WebSocket 客户端
         let mut ws_runner = exchange.create_ws(tx);
 
-        // 通过 downcast 获取可变引用来添加订阅
-        // 注意：由于 trait object 的限制，这里需要使用一个变通方法
-        // 我们在创建 ws 时就传入订阅信息
+        // 添加订阅
+        for (symbol, timeframe) in &subscriptions {
+            ws_runner.subscribe(symbol, timeframe);
+        }
 
         // 启动消息处理任务
         let manager = Arc::clone(&self);
