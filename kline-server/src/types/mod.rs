@@ -194,17 +194,24 @@ impl std::fmt::Display for Timeframe {
 #[serde(tag = "type", content = "data")]
 pub enum WsMessage {
     /// 订阅请求
+    #[serde(rename = "Subscribe")]
     Subscribe { symbol: String, timeframe: String },
     /// 取消订阅
+    #[serde(rename = "Unsubscribe")]
     Unsubscribe { symbol: String, timeframe: String },
     /// K线更新
-    KlineUpdate(KlineSimple),
+    #[serde(rename = "KlineUpdate")]
+    KlineUpdate { data: KlineSimple },
     /// 历史K线数据（初次订阅时发送）
+    #[serde(rename = "KlineHistory")]
     KlineHistory { symbol: String, timeframe: String, klines: Vec<KlineSimple> },
     /// 错误消息
+    #[serde(rename = "Error")]
     Error { message: String },
     /// Ping/Pong
+    #[serde(rename = "Ping")]
     Ping,
+    #[serde(rename = "Pong")]
     Pong,
 }
 

@@ -116,7 +116,8 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                 Ok((key, kline)) = broadcast_rx.recv() => {
                     let s = send_session.read().await;
                     if s.is_subscribed(&key) {
-                        let msg = WsMessage::KlineUpdate(kline);
+                        // 使用正确的格式: { type: "KlineUpdate", data: {...} }
+                        let msg = WsMessage::KlineUpdate { data: kline };
                         let json = serde_json::to_string(&msg).unwrap();
                         drop(s);
                         if ws_sink.send(Message::Text(json)).await.is_err() {
@@ -174,7 +175,7 @@ async fn handle_client_message(
                     let mut s = session.write().await;
                     s.subscribe(&symbol, &timeframe);
 
-                    // 发送历史数据
+                    // 发送历史数据，格式: { type: "KlineHistory", data: { symbol, timeframe, klines } }
                     let history_msg = WsMessage::KlineHistory {
                         symbol: symbol.to_uppercase(),
                         timeframe: timeframe.clone(),

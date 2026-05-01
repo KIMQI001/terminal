@@ -11,6 +11,7 @@ interface WsMessage {
   data?: unknown;
 }
 
+// K线数据结构
 interface KlineUpdateData {
   time: number;
   open: number;
@@ -18,6 +19,12 @@ interface KlineUpdateData {
   low: number;
   close: number;
   volume: number;
+}
+
+// KlineUpdate 消息格式：{ type: "KlineUpdate", data: KlineUpdateData }
+interface KlineUpdateMessage {
+  type: "KlineUpdate";
+  data: KlineUpdateData;
 }
 
 interface KlineHistoryData {
@@ -93,17 +100,19 @@ export class BinanceWebSocket {
           return;
         }
 
-        const msg: WsMessage = JSON.parse(data);
+        const msg = JSON.parse(data);
 
         switch (msg.type) {
           case "KlineUpdate":
+            // 格式: { type: "KlineUpdate", data: { time, open, high, low, close, volume } }
             this.handleKlineUpdate(msg.data as KlineUpdateData);
             break;
           case "KlineHistory":
+            // 格式: { type: "KlineHistory", data: { symbol, timeframe, klines: [...] } }
             this.handleKlineHistory(msg.data as KlineHistoryData);
             break;
           case "Error":
-            console.error("WebSocket error:", msg.data);
+            console.error("WebSocket error:", msg.data?.message || msg.data);
             break;
           case "Pong":
             // 心跳响应
