@@ -678,12 +678,13 @@ impl KlineManager {
         self: Arc<Self>,
         subscriptions: Vec<(String, String)>,
     ) -> anyhow::Result<()> {
-        // 使用旧的 BinanceWs 以保持向后兼容
-        use crate::binance::BinanceWs;
+        // 使用新的 exchanges::binance::BinanceWs，它支持代理配置
+        use crate::exchanges::binance::BinanceExchange;
 
+        let exchange = BinanceExchange::default_futures();
         let (tx, mut rx) = mpsc::unbounded_channel();
 
-        let mut ws = BinanceWs::new(tx);
+        let mut ws = exchange.create_ws(tx);
         for (symbol, timeframe) in &subscriptions {
             ws.subscribe(symbol, timeframe);
         }

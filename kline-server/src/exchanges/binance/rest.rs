@@ -16,8 +16,21 @@ pub struct BinanceRest {
 
 impl BinanceRest {
     pub fn new(config: ExchangeConfig) -> Self {
+        // 创建带代理支持的 HTTP 客户端
+        let client = if let Some(ref proxy) = config.proxy {
+            // 使用 SOCKS5 代理
+            let proxy_url = reqwest::Proxy::all(format!("socks5://{}", proxy))
+                .expect("valid proxy URL");
+            reqwest::Client::builder()
+                .proxy(proxy_url)
+                .build()
+                .expect("HTTP client with proxy")
+        } else {
+            reqwest::Client::new()
+        };
+
         Self {
-            client: reqwest::Client::new(),
+            client,
             config,
         }
     }
