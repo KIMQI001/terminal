@@ -27,7 +27,8 @@ interface KlineHistoryData {
 }
 
 // 根据 timeframe 动态调整超时时间（低频周期需要更长的超时）
-const TIMEFRAME_TIMEOUT_MS: Record<Timeframe, number> = {
+// 注意：Timeframe 类型可能不包含所有这里定义的周期，使用可选链和默认值处理
+const TIMEFRAME_TIMEOUT_MS: Record<string, number> = {
   '1m': 15000,
   '3m': 20000,
   '5m': 30000,
@@ -35,13 +36,13 @@ const TIMEFRAME_TIMEOUT_MS: Record<Timeframe, number> = {
   '30m': 60000,
   '1h': 90000,
   '2h': 180000,
-  '4h': 300000,    // 5 分钟
-  '6h': 450000,    // 7.5 分钟
-  '8h': 600000,    // 10 分钟
-  '12h': 900000,   // 15 分钟
-  '1d': 1800000,   // 30 分钟
-  '4d': 7200000,   // 2 小时
-  '1w': 28800000,  // 8 小时
+  '4h': 300000,
+  '6h': 450000,
+  '8h': 600000,
+  '12h': 900000,
+  '1d': 1800000,
+  '4d': 7200000,
+  '1w': 28800000,
 };
 
 export class BinanceWebSocket {
