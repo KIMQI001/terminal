@@ -27,7 +27,6 @@ import { LiquidityGridPanel } from "./LiquidityGridPanel";
 import { OBPanel } from "./OBPanel";
 import { OrderCancelOverlay } from "./OrderCancelOverlay";
 import { fetchKlines } from "@/lib/binance/api";
-import { BinanceWebSocket } from "@/lib/binance/websocket";
 import { detectSwingPoints, detectPivotsFull, detectAllPivots, classifyPivots } from "@/lib/chart/indicators/swingPoints";
 import { detectOrderBlocks } from "@/lib/chart/indicators/orderBlocks";
 import { detectEngulfingPinbar } from "@/lib/chart/indicators/engulfingPinbar";
@@ -54,7 +53,8 @@ export function TradingChart() {
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const highLineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const lowLineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-  const wsRef = useRef<BinanceWebSocket | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastKlineTimeRef = useRef<number>(0);
 
   // ICT Primitives
   const orderBlockPrimitiveRef = useRef<OrderBlockPrimitive | null>(null);
@@ -384,17 +384,17 @@ export function TradingChart() {
     };
   }, []);
 
-  // Fetch data and setup WebSocket
+  // Fetch data and setup polling (HTTP 轮询替代 WebSocket)
   useEffect(() => {
     // 使用标记来处理竞态条件
     let isCancelled = false;
     const currentSymbol = symbol;
     const currentTimeframe = timeframe;
 
-    // 立即断开旧的 WebSocket，防止旧数据继续推送
-    if (wsRef.current) {
-      wsRef.current.disconnect();
-      wsRef.current = null;
+    // 停止旧的轮询
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
     }
 
     // 清空旧数据，防止闪烁
@@ -475,68 +475,87 @@ export function TradingChart() {
           chartRef.current.timeScale().fitContent();
         }
 
-        // 数据加载完成后再启动 WebSocket
-        if (!isCancelled) {
-          wsRef.current = new BinanceWebSocket(currentSymbol, currentTimeframe, (candle, isClosed) => {
-            // 再次检查是否已取消
-            if (isCancelled) return;
-
-            updateCandle(candle);
-
-            if (candleSeriesRef.current) {
-              candleSeriesRef.current.update({
-                time: candle.time as Time,
-                open: candle.open,
-                high: candle.high,
-                low: candle.low,
-                close: candle.close,
-              });
-            }
-
-            // 更新折线图
-            if (highLineSeriesRef.current) {
-              highLineSeriesRef.current.update({
-                time: candle.time as Time,
-                value: candle.high,
-              });
-            }
-            if (lowLineSeriesRef.current) {
-              lowLineSeriesRef.current.update({
-                time: candle.time as Time,
-                value: candle.low,
-              });
-            }
-
-            if (isClosed) {
-              // Recalculate indicators when a candle closes
-              const updatedCandles = useChartStore.getState().candles;
-              calculateIndicators(updatedCandles);
-            }
-          });
-
-          wsRef.current.connect();
-          setConnected(true);
+        // 记录最后一根 K 线时间
+        if (data.length > 0) {
+          lastKlineTimeRef.current = data[data.length - 1].time;
         }
+
+        setConnected(true);
+        setLoading(false);
       } catch (error) {
         if (!isCancelled) {
           console.error("Failed to load klines:", error);
-        }
-      } finally {
-        if (!isCancelled) {
           setLoading(false);
         }
       }
     };
 
-    loadData();
+    // 轮询获取最新数据
+    const startPolling = () => {
+      // 计算轮询间隔（比周期多 5 秒）
+      const tfMs: Record<string, number> = {
+        '1m': 65000, '3m': 185000, '5m': 305000, '15m': 905000,
+        '30m': 1805000, '1h': 3605000, '2h': 7205000, '4h': 14405000,
+        '6h': 21605000, '8h': 28805000, '12h': 43205000,
+        '1d': 86405000, '4d': 345600000, '1w': 604800000,
+      };
+      const pollInterval = tfMs[currentTimeframe] || 65000;
+
+      console.log(`[TradingChart] 启动轮询: ${currentSymbol}@${currentTimeframe}, 间隔: ${pollInterval}ms`);
+
+      pollIntervalRef.current = setInterval(async () => {
+        if (isCancelled) return;
+
+        try {
+          const data = await fetchKlines(currentSymbol, currentTimeframe, 2);
+
+          if (data.length === 0 || isCancelled) return;
+
+          const latest = data[data.length - 1];
+
+          // 检查是否有新数据
+          if (latest.time > lastKlineTimeRef.current) {
+            console.log(`[TradingChart] 新K线: ${latest.time}`);
+            lastKlineTimeRef.current = latest.time;
+
+            updateCandle(latest);
+
+            if (candleSeriesRef.current) {
+              candleSeriesRef.current.update({
+                time: latest.time as Time,
+                open: latest.open,
+                high: latest.high,
+                low: latest.low,
+                close: latest.close,
+              });
+            }
+
+            // 检查 K 线是否已收盘（超过 1 分钟）
+            const isClosed = latest.time < Date.now() / 1000 - 60;
+            if (isClosed) {
+              const updatedCandles = useChartStore.getState().candles;
+              calculateIndicators(updatedCandles);
+            }
+          }
+        } catch (error) {
+          console.error("[TradingChart] 轮询失败:", error);
+        }
+      }, pollInterval);
+    };
+
+    loadData().then(() => {
+      if (!isCancelled) {
+        startPolling();
+      }
+    });
 
     return () => {
       isCancelled = true;
-      if (wsRef.current) {
-        wsRef.current.disconnect();
-        wsRef.current = null;
-        setConnected(false);
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
       }
+      setConnected(false);
     };
   }, [symbol, timeframe, setCandles, updateCandle, setLoading, setConnected, calculateIndicators]);
 
