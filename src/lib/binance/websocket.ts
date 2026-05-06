@@ -106,7 +106,9 @@ export class BinanceWebSocket {
         switch (msg.type) {
           case "KlineUpdate":
             // 格式: { type: "KlineUpdate", data: { time, open, high, low, close, volume } }
-            this.handleKlineUpdate(msg.data as KlineUpdateData);
+            // 有些实现会嵌套 data.data，需要处理这种情况
+            const klineData = msg.data?.data || msg.data;
+            this.handleKlineUpdate(klineData as KlineUpdateData);
             break;
           case "KlineHistory":
             // 格式: { type: "KlineHistory", data: { symbol, timeframe, klines: [...] } }
