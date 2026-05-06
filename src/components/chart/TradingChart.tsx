@@ -73,6 +73,9 @@ export function TradingChart() {
   // Shift 键状态
   const [isShiftPressed, setIsShiftPressed] = useState(false);
 
+  // OHLCV 显示数据
+  const [ohlcvData, setOhlcvData] = useState<{ time: number; open: number; high: number; low: number; close: number; volume: number } | null>(null);
+
   const {
     symbol,
     timeframe,
@@ -324,6 +327,24 @@ export function TradingChart() {
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
+
+    // 订阅十字光标移动事件以更新 OHLCV 显示
+    chart.subscribeCrosshairMove((param) => {
+      if (!param.time || !param.seriesData) {
+        return;
+      }
+      const candleData = param.seriesData.get(candleSeries);
+      if (candleData && 'open' in candleData) {
+        setOhlcvData({
+          time: param.time as number,
+          open: candleData.open,
+          high: candleData.high,
+          low: candleData.low,
+          close: candleData.close,
+          volume: candleData.volume ?? 0,
+        });
+      }
+    });
 
     // High Line Series (红色)
     const highLineSeries = chart.addLineSeries({
@@ -1168,13 +1189,37 @@ export function TradingChart() {
   };
 
   return (
-    <div
-      ref={chartContainerRef}
-      className="w-full h-full relative"
-      style={{ minHeight: "400px", cursor: getCursor() }}
-      onClick={handleClick}
-      onMouseMove={handleMouseMove}
-    >
+    <div className="w-full h-full relative">
+      {/* OHLCV 显示栏 - TradingView 风格 */}
+      {ohlcvData && (
+        <div className="absolute top-0 left-0 right-0 z-20 bg-[#ffffff]/95 backdrop-blur-sm border-b border-gray-200 px-3 py-1.5 flex items-center gap-4 text-xs font-mono pointer-events-none">
+          <span className="text-gray-500">
+            {new Date(ohlcvData.time * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+          </span>
+          <span className={ohlcvData.close >= ohlcvData.open ? 'text-green-600' : 'text-red-600'}>
+            O <span className="font-semibold">{ohlcvData.open.toFixed(2)}</span>
+          </span>
+          <span className="text-gray-700">
+            H <span className="font-semibold">{ohlcvData.high.toFixed(2)}</span>
+          </span>
+          <span className="text-gray-700">
+            L <span className="font-semibold">{ohlcvData.low.toFixed(2)}</span>
+          </span>
+          <span className={ohlcvData.close >= ohlcvData.open ? 'text-green-600' : 'text-red-600'}>
+            C <span className="font-semibold">{ohlcvData.close.toFixed(2)}</span>
+          </span>
+          <span className="text-gray-500">
+            V <span className="font-semibold">{ohlcvData.volume.toFixed(2)}</span>
+          </span>
+        </div>
+      )}
+      <div
+        ref={chartContainerRef}
+        className="w-full h-full relative"
+        style={{ minHeight: "400px", cursor: getCursor() }}
+        onClick={handleClick}
+        onMouseMove={handleMouseMove}
+      >
       <ICTOverlay
         chartRef={chartRef}
         seriesRef={candleSeriesRef}
