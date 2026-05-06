@@ -101,6 +101,7 @@ export class BinanceWebSocket {
         }
 
         const msg = JSON.parse(data);
+        console.log('[WS] 收到消息:', JSON.stringify(msg).substring(0, 200));
 
         switch (msg.type) {
           case "KlineUpdate":
@@ -149,6 +150,11 @@ export class BinanceWebSocket {
   }
 
   private handleKlineUpdate(data: KlineUpdateData) {
+    if (!data || typeof data.time !== 'number') {
+      console.warn('[WS] Invalid KlineUpdate data:', data);
+      return;
+    }
+
     // 更新最后收到数据的时间（用于超时检测）
     this.lastDataTime = Date.now();
 
