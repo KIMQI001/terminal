@@ -42,7 +42,11 @@ impl BinanceWs {
             .map(|s| format!("{}@kline_{}", s.symbol.to_lowercase(), s.timeframe))
             .collect();
 
-        format!("{}/stream?streams={}", self.config.ws_url, streams.join("/"))
+        format!(
+            "{}/{}",
+            self.config.ws_url,
+            streams.join("/")
+        )
     }
 
     /// 获取 WS 主机名（从 URL 中提取）
@@ -53,7 +57,7 @@ impl BinanceWs {
             .trim_start_matches("ws://")
             .split('/')
             .next()
-            .unwrap_or("fstream.binance.com")
+            .unwrap_or("ws-fapi.binance.com")
     }
 
     async fn connect_and_listen(&self, url: &str) -> Result<()> {

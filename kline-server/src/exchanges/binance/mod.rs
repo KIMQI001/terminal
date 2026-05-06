@@ -30,7 +30,7 @@ impl BinanceExchange {
         Self::new(ExchangeConfig {
             exchange_type: ExchangeType::Binance,
             rest_url: "https://fapi.binance.com".to_string(),
-            ws_url: "wss://fstream.binance.com".to_string(),
+            ws_url: "wss://ws-fapi.binance.com/ws-fapi/v1".to_string(),
             proxy: std::env::var("SOCKS5_PROXY").ok(),
             rate_limit_ms: 100,
         })
