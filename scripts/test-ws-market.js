@@ -1,6 +1,5 @@
 /**
  * Binance WebSocket 测试 (Market 入口)
- * 参考: https://developers.binance.com/docs/zh-CN/derivatives/usds-margined-futures/websocket-market-streams/Continuous-Contract-Kline-Candlestick-Streams
  *
  * 用法:
  *   node test-ws-market.js
@@ -12,8 +11,8 @@ console.log('===========================================');
 console.log('Binance WebSocket 测试 (Market 入口)');
 console.log('===========================================');
 
-// 连续合约 K线: <pair>_<contractType>@continuousKline_<interval>
-const stream = 'BTCUSDT_PERPETUAL@continuousKline_1m';
+// 尝试普通 K线格式
+const stream = 'btcusdt@kline_1m';
 const url = `wss://fstream.binance.com/market/ws/${stream}`;
 
 console.log('Stream:', stream);
@@ -38,24 +37,21 @@ ws.on('open', () => {
 
 ws.on('message', (data) => {
   const msg = JSON.parse(data.toString());
-  console.log('[<] 收到消息');
+  console.log('[<] 收到:', JSON.stringify(msg).substring(0, 200));
 
-  // Binance 连续合约 K线格式
-  // {"e":"continuous_kline","E":1607443058651,"ps":"BTCUSDT","ct":"PERPETUAL","k":{...}}
-  if (msg.e === 'continuous_kline' && msg.k) {
+  // 普通 K线格式: {"stream":"btcusdt@kline_1m","data":{"e":"kline",...}}
+  const k = msg.data?.k || msg.k;
+  const e = msg.data?.e || msg.e;
+
+  if (e === 'kline' && k) {
     msgCount++;
-    const k = msg.k;
     console.log('');
     console.log('[✓] K线数据 #' + msgCount + '!');
-    console.log('    交易对:', msg.ps);
-    console.log('    合约类型:', msg.ct);
+    console.log('    交易对:', k.s);
     console.log('    时间周期:', k.i);
-    console.log('    开盘时间:', new Date(k.t).toISOString());
     console.log('    开盘:', k.o, '| 当前:', k.c);
     console.log('    最高:', k.h, '| 最低:', k.l);
     console.log('    成交量:', k.v);
-    console.log('    成交笔数:', k.n);
-    console.log('    收盘:', k.x ? '是' : '否');
 
     if (msgCount >= 2) {
       clearTimeout(timeout);
