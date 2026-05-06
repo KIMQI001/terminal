@@ -11,8 +11,8 @@ console.log('===========================================');
 console.log('Binance WebSocket 测试 (Market 入口)');
 console.log('===========================================');
 
-// 尝试普通 K线格式
-const stream = 'btcusdt@kline_1m';
+// USDC 合约 K线
+const stream = 'btcusdc@kline_1m';
 const url = `wss://fstream.binance.com/market/ws/${stream}`;
 
 console.log('Stream:', stream);
