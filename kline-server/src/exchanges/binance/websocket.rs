@@ -42,8 +42,9 @@ impl BinanceWs {
             .map(|s| format!("{}@kline_{}", s.symbol.to_lowercase(), s.timeframe))
             .collect();
 
+        // 使用 stream query 参数，保持响应格式兼容
         format!(
-            "{}/{}",
+            "{}?streams={}",
             self.config.ws_url,
             streams.join("/")
         )
@@ -151,28 +152,55 @@ impl BinanceWs {
     }
 
     async fn handle_message(&self, text: &str) -> Result<()> {
-        // Binance 组合流格式: {"stream":"btcusdt@kline_1m","data":{...}}
-        let msg: BinanceStreamMessage = serde_json::from_str(text)?;
+        // 尝试解析两种格式：
+        // 1. 组合流格式: {"stream":"btcusdt@kline_1m","data":{...}}
+        // 2. 直接 K线格式: {"e":"kline","s":"BTCUSDT","k":{...}}
 
-        if let Some(kline_data) = msg.data.k {
-            let kline = Kline {
-                symbol: kline_data.s,
-                timeframe: kline_data.i,
-                open_time: kline_data.t / 1000, // 毫秒转秒
-                open: kline_data.o.parse()?,
-                high: kline_data.h.parse()?,
-                low: kline_data.l.parse()?,
-                close: kline_data.c.parse()?,
-                volume: kline_data.v.parse()?,
-                close_time: kline_data.T / 1000, // 毫秒转秒
-                quote_volume: kline_data.q.parse()?,
-                trades: kline_data.n,
-                is_closed: kline_data.x,
-            };
-
-            self.kline_tx.send(kline)?;
+        // 先尝试直接 K线格式（无 stream 字段）
+        if let Ok(msg) = serde_json::from_str::<DirectKlineMessage>(text) {
+            if let Some(kline_data) = msg.k {
+                let kline = Kline {
+                    symbol: kline_data.s,
+                    timeframe: kline_data.i,
+                    open_time: kline_data.t / 1000,
+                    open: kline_data.o.parse()?,
+                    high: kline_data.h.parse()?,
+                    low: kline_data.l.parse()?,
+                    close: kline_data.c.parse()?,
+                    volume: kline_data.v.parse()?,
+                    close_time: kline_data.T / 1000,
+                    quote_volume: kline_data.q.parse()?,
+                    trades: kline_data.n,
+                    is_closed: kline_data.x,
+                };
+                self.kline_tx.send(kline)?;
+            }
+            return Ok(());
         }
 
+        // 尝试组合流格式
+        if let Ok(msg) = serde_json::from_str::<BinanceStreamMessage>(text) {
+            if let Some(kline_data) = msg.data.k {
+                let kline = Kline {
+                    symbol: kline_data.s,
+                    timeframe: kline_data.i,
+                    open_time: kline_data.t / 1000,
+                    open: kline_data.o.parse()?,
+                    high: kline_data.h.parse()?,
+                    low: kline_data.l.parse()?,
+                    close: kline_data.c.parse()?,
+                    volume: kline_data.v.parse()?,
+                    close_time: kline_data.T / 1000,
+                    quote_volume: kline_data.q.parse()?,
+                    trades: kline_data.n,
+                    is_closed: kline_data.x,
+                };
+                self.kline_tx.send(kline)?;
+            }
+            return Ok(());
+        }
+
+        warn!("[Binance] 无法解析消息格式: {}", &text[..100.min(text.len())]);
         Ok(())
     }
 }
@@ -280,4 +308,14 @@ struct BinanceKlineData {
     V: String, // 主动买入成交量
     #[allow(dead_code)]
     Q: String, // 主动买入成交额
+}
+
+/// 直接 K线消息格式（无 stream 包装）
+#[derive(serde::Deserialize)]
+#[allow(non_snake_case)]
+struct DirectKlineMessage {
+    e: String, // 事件类型 "kline"
+    E: i64,    // 事件时间
+    s: String,  // 交易对
+    k: Option<BinanceKlineData>,
 }
