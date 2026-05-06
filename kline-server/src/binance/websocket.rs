@@ -9,9 +9,9 @@ use tracing::{debug, error, info, warn};
 
 use crate::types::{Kline, SubscriptionKey};
 
-/// Binance 合约 WebSocket 地址
-const BINANCE_WS_BASE: &str = "wss://ws-fapi.binance.com/ws-fapi/v1";
-const BINANCE_WS_HOST: &str = "ws-fapi.binance.com";
+/// Binance 合约 WebSocket 地址 (Market 入口 - 常规市场数据)
+const BINANCE_WS_BASE: &str = "wss://fstream.binance.com/market/ws";
+const BINANCE_WS_HOST: &str = "fstream.binance.com";
 const BINANCE_WS_PORT: u16 = 443;
 
 /// Binance WebSocket 客户端

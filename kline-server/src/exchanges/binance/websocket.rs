@@ -57,7 +57,7 @@ impl BinanceWs {
             .trim_start_matches("ws://")
             .split('/')
             .next()
-            .unwrap_or("ws-fapi.binance.com")
+            .unwrap_or("fstream.binance.com")
     }
 
     async fn connect_and_listen(&self, url: &str) -> Result<()> {

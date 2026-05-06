@@ -19,7 +19,7 @@ impl ExchangeFactory {
                 let config = ExchangeConfig {
                     exchange_type: ExchangeType::Binance,
                     rest_url: "https://fapi.binance.com".to_string(),
-                    ws_url: "wss://ws-fapi.binance.com/ws-fapi/v1".to_string(),
+                    ws_url: "wss://fstream.binance.com/market/ws".to_string(),
                     proxy,
                     rate_limit_ms: 100,
                 };
