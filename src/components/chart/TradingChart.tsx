@@ -330,18 +330,20 @@ export function TradingChart() {
 
     // 订阅十字光标移动事件以更新 OHLCV 显示
     chart.subscribeCrosshairMove((param) => {
-      if (!param.time || !param.seriesData) {
+      if (!param.time) {
         return;
       }
-      const candleData = param.seriesData.get(candleSeries);
-      if (candleData && 'open' in candleData) {
+      // 从 chartStore 获取当前 candles 数据
+      const candles = useChartStore.getState().candles;
+      const candle = candles.find(c => c.time === (param.time as number));
+      if (candle) {
         setOhlcvData({
-          time: param.time as number,
-          open: candleData.open,
-          high: candleData.high,
-          low: candleData.low,
-          close: candleData.close,
-          volume: candleData.volume ?? 0,
+          time: candle.time,
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          volume: candle.volume ?? 0,
         });
       }
     });
@@ -1190,7 +1192,6 @@ export function TradingChart() {
 
   return (
     <div className="w-full h-full relative">
-      {/* OHLCV 显示栏 - TradingView 风格 */}
       {ohlcvData && (
         <div className="absolute top-0 left-0 right-0 z-20 bg-[#ffffff]/95 backdrop-blur-sm border-b border-gray-200 px-3 py-1.5 flex items-center gap-4 text-xs font-mono pointer-events-none">
           <span className="text-gray-500">
@@ -1219,7 +1220,7 @@ export function TradingChart() {
         style={{ minHeight: "400px", cursor: getCursor() }}
         onClick={handleClick}
         onMouseMove={handleMouseMove}
-      >
+      />
       <ICTOverlay
         chartRef={chartRef}
         seriesRef={candleSeriesRef}
