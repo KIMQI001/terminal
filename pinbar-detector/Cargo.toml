@@ -1,0 +1,18 @@
+[package]
+name = "pinbar-detector"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+reqwest = { version = "0.12", features = ["json"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1.0"
+async-trait = "0.1"
+futures-util = "0.3"
+native-tls = "0.2"
+tokio-native-tls = "0.3"
+tokio-tungstenite = "0.24"
