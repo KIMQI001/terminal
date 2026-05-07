@@ -8,7 +8,6 @@ use futures_util::{SinkExt, StreamExt};
 use pinbar_detector::{detect_recent_pinbars, Candle};
 use serde::Deserialize;
 use std::collections::HashMap;
-use tokio::io::AsyncReadExt;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -119,26 +118,59 @@ impl KlineCache {
         );
 
         if !signals.is_empty() {
-            info!("\n========== {} {} Pinbar 信号 ==========", symbol, self.timeframe);
+            println!("\n╔═══════════════════════════════════════════════════════════╗");
+            println!("║           {} {} PINBAR 信号检测                            ║", symbol, self.timeframe);
+            println!("╠═══════════════════════════════════════════════════════════╣");
+
             for (i, sig) in signals.iter().enumerate() {
-                let direction = if sig.signal_type == "bullish" { "做多" } else { "做空" };
+                let direction = if sig.signal_type == "bullish" { "🐂 看涨吞没" } else { "🐻 看跌吞没" };
                 let near = match sig.near_swing.as_str() {
-                    "low" => "Swing Low",
-                    "high" => "Swing High",
-                    _ => "远离",
+                    "low" => "靠近 Swing Low",
+                    "high" => "靠近 Swing High",
+                    _ => "远离结构",
                 };
-                println!(
-                    "  [{}/{}] {} | 价格: {:.2} | 强度: {:.2} | 上影: {:.2} 下影: {:.2} | {}",
-                    i + 1,
-                    signals.len(),
-                    direction,
-                    sig.price,
-                    sig.strength,
-                    sig.top_wick_size,
-                    sig.bottom_wick_size,
-                    near
-                );
+
+                // 转换时间戳
+                let dt = chrono::DateTime::from_timestamp(sig.time, 0)
+                    .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                    .unwrap_or_else(|| sig.time.to_string());
+
+                println!("║");
+                println!("║ 📌 信号 #{}", i + 1);
+                println!("║    类型: {}", direction);
+                println!("║    时间: {} (UTC)", dt);
+                println!("║    触发价格: {:.2}", sig.price);
+
+                // 计算涨跌
+                let prev = self.candles.iter().find(|c| c.time == sig.time)
+                    .or_else(|| self.candles.iter().rev().nth(1));
+                if let Some(prev_candle) = prev {
+                    let change = (sig.price - prev_candle.close) / prev_candle.close * 100.0;
+                    let arrow = if change >= 0.0 { "↑" } else { "↓" };
+                    println!("║    变化: {}{:.2}%", arrow, change.abs());
+                }
+
+                println!("║    强度评分: {:.0}%", sig.strength * 100.0);
+                println!("║");
+                println!("║    📊 形态详情:");
+                println!("║       实体大小: {:.2}", sig.body_size);
+                println!("║       上影线:   {:.2}", sig.top_wick_size);
+                println!("║       下影线:   {:.2}", sig.bottom_wick_size);
+                println!("║");
+                println!("║    📍 位置: {}", near);
+
+                // 信号质量评估
+                let quality = if sig.strength > 0.7 && sig.near_swing != "none" {
+                    "⭐⭐⭐ 优质信号"
+                } else if sig.strength > 0.5 {
+                    "⭐⭐ 良好信号"
+                } else {
+                    "⭐ 常规信号"
+                };
+                println!("║    评估: {}", quality);
             }
+
+            println!("╚═══════════════════════════════════════════════════════════╝");
             println!();
         }
     }
@@ -162,11 +194,6 @@ async fn main() -> anyhow::Result<()> {
         ("BTCUSDC", "1h"),
         ("BTCUSDC", "4h"),
         ("BTCUSDC", "1d"),
-        ("ETHUSDC", "5m"),
-        ("ETHUSDC", "15m"),
-        ("ETHUSDC", "1h"),
-        ("ETHUSDC", "4h"),
-        ("ETHUSDC", "1d"),
     ];
 
     // 初始化缓存
