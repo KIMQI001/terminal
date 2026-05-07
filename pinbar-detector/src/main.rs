@@ -15,7 +15,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 const KLINE_SERVER_URL: &str = "ws://localhost:3001/ws";
 
 /// 前端推送地址
-const FRONTEND_LISTEN_ADDR: &str = "0.0.0.0:3002";
+const FRONTEND_LISTEN_ADDR: &str = "0.0.0.0:3003";
 
 /// 每个周期返回的最近信号数量
 const RECENT_SIGNALS_LIMIT: usize = 5;
