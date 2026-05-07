@@ -1,18 +1,23 @@
 //! Pinbar 实时检测服务（命令行版本）
 //!
-//! 从 kline-server WebSocket 获取 K 线数据，实时检测 Pinbar 信号并输出到终端
+//! 1. 先通过 REST API 获取历史 K 线数据
+//! 2. WebSocket 实时更新 K 线
+//! 3. 实时检测 Pinbar 信号并输出到终端
 
 use futures_util::{SinkExt, StreamExt};
 use pinbar_detector::{detect_recent_pinbars, Candle};
 use serde::Deserialize;
 use std::collections::HashMap;
-use tokio::net::TcpStream;
+use tokio::io::AsyncReadExt;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /// K线服务器地址
 const KLINE_SERVER_URL: &str = "ws://localhost:3001/ws";
+
+/// REST API 地址
+const REST_API_URL: &str = "http://localhost:3001/api/klines";
 
 /// 每个周期返回的最近信号数量
 const RECENT_SIGNALS_LIMIT: usize = 5;
@@ -23,14 +28,7 @@ const SWING_LENGTH: usize = 50;
 /// Swing Point 附近范围
 const SWING_RANGE: usize = 5;
 
-/// K线服务器 WebSocket 消息
-#[derive(Debug, Deserialize)]
-struct KlineMsg {
-    #[serde(rename = "type")]
-    msg_type: String,
-    data: Option<KlineData>,
-}
-
+/// K线数据
 #[derive(Debug, Deserialize)]
 struct KlineData {
     time: i64,
@@ -41,42 +39,96 @@ struct KlineData {
     volume: f64,
 }
 
+/// REST API 响应
+#[derive(Debug, Deserialize)]
+struct KlineResponse {
+    #[allow(dead_code)]
+    symbol: String,
+    #[allow(dead_code)]
+    timeframe: String,
+    klines: Vec<KlineData>,
+}
+
+/// WebSocket 消息
+#[derive(Debug, Deserialize)]
+struct WsMessage {
+    #[serde(rename = "type")]
+    msg_type: String,
+    data: Option<KlineData>,
+}
+
 /// 缓存的 K 线数据
 struct KlineCache {
-    data: Vec<Candle>,
+    candles: Vec<Candle>,
     timeframe: String,
+    update_count: usize,
 }
 
 impl KlineCache {
     fn new(timeframe: &str) -> Self {
         Self {
-            data: Vec::new(),
+            candles: Vec::new(),
             timeframe: timeframe.to_string(),
+            update_count: 0,
         }
+    }
+
+    fn load_from_api(&mut self, data: Vec<KlineData>) {
+        self.candles = data
+            .into_iter()
+            .map(|k| Candle {
+                time: k.time,
+                open: k.open,
+                high: k.high,
+                low: k.low,
+                close: k.close,
+                volume: k.volume,
+            })
+            .collect();
+        info!("Loaded {} candles for {}", self.candles.len(), self.timeframe);
     }
 
     fn push(&mut self, candle: Candle) {
-        self.data.push(candle);
-        // 限制缓存大小
-        if self.data.len() > 5000 {
-            self.data.remove(0);
+        // 检查是否是新股或者更新最后一根
+        if let Some(last) = self.candles.last() {
+            if last.time == candle.time {
+                // 更新最后一根
+                self.candles.pop();
+                self.candles.push(candle);
+                return;
+            }
         }
+        self.candles.push(candle);
+        // 限制缓存大小
+        if self.candles.len() > 5000 {
+            self.candles.remove(0);
+        }
+        self.update_count += 1;
     }
 
-    fn detect_pinbars(&self) {
-        if self.data.len() < 100 {
+    fn detect_and_print(&self, symbol: &str) {
+        if self.candles.len() < 50 {
             return;
         }
 
-        let signals = detect_recent_pinbars(&self.data, SWING_LENGTH, SWING_RANGE, RECENT_SIGNALS_LIMIT);
+        let signals = detect_recent_pinbars(
+            &self.candles,
+            SWING_LENGTH,
+            SWING_RANGE,
+            RECENT_SIGNALS_LIMIT,
+        );
 
         if !signals.is_empty() {
-            info!("\n========== {} Pinbar 信号 ==========", self.timeframe);
+            info!("\n========== {} {} Pinbar 信号 ==========", symbol, self.timeframe);
             for (i, sig) in signals.iter().enumerate() {
                 let direction = if sig.signal_type == "bullish" { "做多" } else { "做空" };
-                let near = if sig.near_swing == "none" { "远离" } else { sig.near_swing.as_str() };
+                let near = match sig.near_swing.as_str() {
+                    "low" => "Swing Low",
+                    "high" => "Swing High",
+                    _ => "远离",
+                };
                 println!(
-                    "  [{}/{}] {} | 价格: {:.2} | 强度: {:.2} | 影线: 上{:.2} 下{:.2} | 位置: {}",
+                    "  [{}/{}] {} | 价格: {:.2} | 强度: {:.2} | 上影: {:.2} 下影: {:.2} | {}",
                     i + 1,
                     signals.len(),
                     direction,
@@ -100,19 +152,10 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    info!("Starting Pinbar Detector (CLI)...");
-    info!("K-line server: {}", KLINE_SERVER_URL);
-    println!("\n监控交易对: BTCUSDC, ETHUSDC");
-    println!("时间周期: 5m, 15m, 1h, 4h, 1d");
-    println!("每收到 100 根 K 线检测一次 Pinbar 信号\n");
+    println!("\n==========================================");
+    println!("         Pinbar 实时检测服务 (CLI)");
+    println!("==========================================\n");
 
-    // 连接到 K 线服务器
-    info!("Connecting to K-line server...");
-    let (ws_stream, _) = connect_async(KLINE_SERVER_URL).await?;
-    let (mut write, mut read) = ws_stream.split();
-    info!("Connected to K-line server");
-
-    // 订阅 K 线数据
     let subscriptions = vec![
         ("BTCUSDC", "5m"),
         ("BTCUSDC", "15m"),
@@ -126,35 +169,63 @@ async fn main() -> anyhow::Result<()> {
         ("ETHUSDC", "1d"),
     ];
 
+    // 初始化缓存
+    let mut caches: HashMap<String, KlineCache> = subscriptions
+        .iter()
+        .map(|(s, t)| {
+            let key = format!("{}@{}", s, t);
+            (key, KlineCache::new(t))
+        })
+        .collect();
+
+    // 1. 先通过 REST API 获取历史 K 线数据
+    info!("Fetching historical klines via REST API...");
+
+    for (symbol, tf) in &subscriptions {
+        let key = format!("{}@{}", symbol, tf);
+        let url = format!("{}/{}/{}?limit=1000", REST_API_URL, symbol, tf);
+
+        match reqwest::get(&url).await {
+            Ok(resp) => {
+                if let Ok(data) = resp.json::<KlineResponse>().await {
+                    if let Some(cache) = caches.get_mut(&key) {
+                        cache.load_from_api(data.klines);
+                        // 加载后立即检测一次
+                        cache.detect_and_print(symbol);
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to fetch {}: {}", key, e);
+            }
+        }
+    }
+
+    println!("\n历史数据加载完成，开始监听实时 K 线...\n");
+
+    // 2. 连接到 WebSocket 实时更新
+    info!("Connecting to WebSocket for real-time updates...");
+    let (ws_stream, _) = connect_async(KLINE_SERVER_URL).await?;
+    let (mut write, mut read) = ws_stream.split();
+    info!("Connected to K-line server");
+
+    // 订阅实时 K 线
     for (symbol, tf) in &subscriptions {
         let msg = serde_json::json!({
             "type": "Subscribe",
             "data": { "symbol": symbol, "timeframe": tf }
         });
         write.send(Message::Text(msg.to_string())).await?;
-        info!("Subscribed to {}@{}", symbol, tf);
     }
+    info!("Subscribed to all timeframes");
 
-    // K 线缓存：symbol@timeframe -> KlineCache
-    let mut caches: HashMap<String, KlineCache> = subscriptions
-        .iter()
-        .map(|(s, t)| (format!("{}@{}", s, t), KlineCache::new(t)))
-        .collect();
-
-    // 统计
-    let mut update_counts: HashMap<String, usize> = subscriptions
-        .iter()
-        .map(|(s, t)| (format!("{}@{}", s, t), 0))
-        .collect();
-
-    // 处理消息
+    // 3. 处理实时 K 线
     while let Some(msg) = read.next().await {
         match msg? {
             Message::Text(text) => {
-                if let Ok(kline_msg) = serde_json::from_str::<KlineMsg>(&text) {
-                    if kline_msg.msg_type == "KlineUpdate" {
-                        if let Some(data) = kline_msg.data {
-                            // 尝试匹配缓存（简化处理：从 time 反推 timeframe）
+                if let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&text) {
+                    if ws_msg.msg_type == "KlineUpdate" {
+                        if let Some(data) = ws_msg.data {
                             let candle = Candle {
                                 time: data.time,
                                 open: data.open,
@@ -164,17 +235,15 @@ async fn main() -> anyhow::Result<()> {
                                 volume: data.volume,
                             };
 
-                            // 遍历所有缓存更新
+                            // 更新所有匹配的缓存（简化处理：更新所有）
                             for (key, cache) in caches.iter_mut() {
-                                // 简单策略：每种 timeframe 都更新（会有重复，但不影响检测）
-                                let parts: Vec<&str> = key.split('@').collect();
-                                if parts.len() == 2 {
-                                    cache.push(candle.clone());
-                                    *update_counts.get_mut(key).unwrap() += 1;
+                                cache.push(candle.clone());
 
-                                    // 每 100 根 K 线检测一次
-                                    if update_counts[key] % 100 == 0 && update_counts[key] > 0 {
-                                        cache.detect_pinbars();
+                                // 每 10 根 K 线检测一次
+                                if cache.update_count > 0 && cache.update_count % 10 == 0 {
+                                    let parts: Vec<&str> = key.split('@').collect();
+                                    if parts.len() == 2 {
+                                        cache.detect_and_print(parts[0]);
                                     }
                                 }
                             }
