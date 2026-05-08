@@ -3,6 +3,9 @@
 //! 1. 先通过 REST API 获取历史 K 线数据
 //! 2. WebSocket 实时更新 K 线
 //! 3. 实时检测 Pinbar 信号并输出到终端
+//! 4. 检测 15m 倍量报警并发送钉钉通知
+
+mod notification;
 
 use futures_util::{SinkExt, StreamExt};
 use pinbar_detector::{detect_recent_pinbars, Candle};
@@ -54,6 +57,94 @@ struct WsMessage {
     #[serde(rename = "type")]
     msg_type: String,
     data: Option<KlineData>,
+}
+
+/// 倍量报警检测
+/// 检测条件：
+/// 1. 当前成交量 >= 前一根的 2 倍
+/// 2. 倍量K线往后两根K线的实体都小于 100 美元
+fn check_volume_alert(candles: &[Candle]) -> Option<(usize, f64, f64, bool)> {
+    if candles.len() < 4 {
+        return None;
+    }
+
+    // 从倒数第 2 根开始检查（倒数第 1 根可能还在更新）
+    let len = candles.len();
+    for i in (1..len - 2).rev() {
+        let prev = &candles[i - 1];
+        let current = &candles[i];
+
+        // 倍量检测：当前成交量 >= 前一根的 2 倍
+        if prev.volume > 0.0 && current.volume >= prev.volume * 2.0 {
+            let ratio = current.volume / prev.volume;
+
+            // 检查后续两根 K 线实体是否都小于 100
+            let next1_body = (candles[i + 1].close - candles[i + 1].open).abs();
+            let next2_body = (candles[i + 2].close - candles[i + 2].open).abs();
+
+            let valid_retracement = next1_body < 100.0 && next2_body < 100.0;
+
+            println!(
+                "[VolumeAlert] 检测到倍量: 位置={}, 比例={:.1}x, 后续两根实体={:.2}/{:.2}, 验证={}",
+                i, ratio, next1_body, next2_body, valid_retracement
+            );
+
+            return Some((i, ratio, prev.volume, valid_retracement));
+        }
+    }
+
+    None
+}
+
+/// 格式化倍量报警消息并发送钉钉
+async fn send_volume_alert(
+    symbol: &str,
+    candles: &[Candle],
+    index: usize,
+    ratio: f64,
+    _prev_volume: f64,
+    valid_retracement: bool,
+) {
+    let candle = &candles[index];
+    let direction = if candle.close >= candle.open { "阳线" } else { "阴线" };
+    let emoji = if candle.close >= candle.open { "🟢" } else { "🔴" };
+
+    // UTC+8 时间
+    let dt = chrono::DateTime::from_timestamp(candle.time, 0)
+        .map(|dt| {
+            let offset = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+            dt.with_timezone(&offset)
+        })
+        .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| candle.time.to_string());
+
+    let retracement_status = if valid_retracement { "✅ 通过" } else { "❌ 未通过" };
+
+    let message = format!(
+        "### 📊 15m 倍量报警
+
+- **交易对**: {}
+- **时间**: {} UTC+8
+- **价格**: ${:.2}
+- **方向**: {} {}
+- **成交量倍数**: {:.1}x
+- **延伸验证**: {}
+
+---",
+        symbol,
+        dt,
+        candle.close,
+        emoji,
+        direction,
+        ratio,
+        retracement_status
+    );
+
+    println!("[VolumeAlert] 发送钉钉通知...");
+
+    if let Err(e) = notification::send_dingtalk_markdown("15m 倍量报警", &message).await {
+        eprintln!("[VolumeAlert] 钉钉通知发送失败: {}", e);
+    }
 }
 
 /// 缓存的 K 线数据
@@ -255,13 +346,37 @@ async fn main() -> anyhow::Result<()> {
 
                             // 更新所有匹配的缓存（简化处理：更新所有）
                             for (key, cache) in caches.iter_mut() {
+                                let prev_len = cache.candles.len();
                                 cache.push(candle.clone());
 
-                                // 每 10 根 K 线检测一次
+                                // 每 10 根 K 线检测一次 Pinbar
                                 if cache.update_count > 0 && cache.update_count % 10 == 0 {
                                     let parts: Vec<&str> = key.split('@').collect();
                                     if parts.len() == 2 {
                                         cache.detect_and_print(parts[0]);
+                                    }
+                                }
+
+                                // 倍量报警检测（每次 K 线更新都检测）
+                                // 只有当 K 线数量增加（新的完整 K 线）时才检测
+                                if cache.candles.len() > prev_len && cache.candles.len() >= 4 {
+                                    if let Some((index, ratio, prev_vol, valid_retracement)) =
+                                        check_volume_alert(&cache.candles)
+                                    {
+                                        let parts: Vec<&str> = key.split('@').collect();
+                                        if parts.len() == 2 {
+                                            let symbol = parts[0];
+                                            let candles = cache.candles.clone();
+                                            send_volume_alert(
+                                                symbol,
+                                                &candles,
+                                                index,
+                                                ratio,
+                                                prev_vol,
+                                                valid_retracement,
+                                            )
+                                            .await;
+                                        }
                                     }
                                 }
                             }
