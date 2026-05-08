@@ -535,9 +535,9 @@ pub async fn get_positions(config: &BinanceConfig, symbol: &str) -> anyhow::Resu
     Ok(positions)
 }
 
-/// 下追踪止盈单 (使用 /fapi/v1/order 的 STOP_LOSS/TAKE_PROFIT + trailingDelta)
-/// activationPrice: 激活价格（盈利至此价格后开始追踪）
-/// trailingDelta: 回调点数（从激活价回撤多少点后触发）
+/// 下追踪止盈单 (使用 /fapi/v1/algoOrder + STOP_LOSS/TAKE_PROFIT + trailingDelta)
+/// activation_price: 激活价格（盈利至此价格后开始追踪）
+/// trailing_delta: 回调点数（从激活价回撤多少点后触发）
 /// 盈利300点激活，回调100点触发
 pub async fn place_trailing_stop_order(
     config: &BinanceConfig,
@@ -553,8 +553,9 @@ pub async fn place_trailing_stop_order(
     let (qty_precision, price_precision) = get_precision(symbol);
     // 使用 STOP_LOSS 或 TAKE_PROFIT + trailingDelta 实现追踪止盈
     let order_type = if side == "SELL" { "STOP_LOSS" } else { "TAKE_PROFIT" };
+    // Algo Order API 使用 stopPrice 作为触发价格，trailingDelta 作为回调
     let query = format!(
-        "symbol={}&side={}&positionSide={}&type={}&quantity={}&stopPrice={}&trailingDelta={}&timestamp={}&newClientOrderId={}",
+        "symbol={}&side={}&positionSide={}&type={}&quantity={}&stopPrice={}&trailingDelta={}&timestamp={}&newClientOrderId={}&algoType=CONDITIONAL",
         symbol, side, position_side, order_type,
         format_quantity(quantity, qty_precision),
         format_price(activation_price, price_precision),
@@ -563,7 +564,7 @@ pub async fn place_trailing_stop_order(
         client_order_id
     );
     let signature = generate_signature(&query, &config.api_secret);
-    let url = format!("{}/fapi/v1/order?{}&signature={}", config.base_url(), query, signature);
+    let url = format!("{}/fapi/v1/algoOrder?{}&signature={}", config.base_url(), query, signature);
 
     let client = reqwest::Client::new();
     let resp = client
@@ -585,10 +586,10 @@ pub async fn place_trailing_stop_order(
         }
     };
 
-    if let Some(order_id) = data.get("orderId").and_then(|v| v.as_u64()) {
-        println!("[Binance] 追踪止盈成功: {} {} {} 激活=${:.2} 回调={}点 orderId={}",
-            position_side, side, quantity, activation_price, trailing_delta as i64, order_id);
-        return Ok(order_id.to_string());
+    if let Some(algo_id) = data.get("algoId").and_then(|v| v.as_u64()) {
+        println!("[Binance] 追踪止盈成功: {} {} {} 激活=${:.2} 回调={}点 algoId={}",
+            position_side, side, quantity, activation_price, trailing_delta as i64, algo_id);
+        return Ok(algo_id.to_string());
     }
 
     let msg = data.get("msg").and_then(|v| v.as_str()).unwrap_or("未知错误");
