@@ -287,6 +287,37 @@ impl KlineCache {
                     near,
                     quality
                 );
+
+                // 发送钉钉通知（最新信号）
+                if i == 0 {
+                    let signal_msg = format!(
+                        "### 📊 PINBAR 信号\n\n\
+                        - **交易对**: {}\n\
+                        - **周期**: {}\n\
+                        - **类型**: {}\n\
+                        - **时间**: {} UTC+8\n\
+                        - **价格**: ${:.2}\n\
+                        - **强度**: {:.0}%\n\
+                        - **实体**: {:.2}\n\
+                        - **上影**: {:.2}\n\
+                        - **下影**: {:.2}\n\
+                        - **位置**: {}\n\
+                        - **评估**: {}",
+                        symbol,
+                        self.timeframe,
+                        direction,
+                        dt,
+                        sig.price,
+                        sig.strength * 100.0,
+                        sig.body_size,
+                        sig.top_wick_size,
+                        sig.bottom_wick_size,
+                        near,
+                        quality
+                    );
+
+                    let _ = notification::send_dingtalk_markdown("PINBAR 信号", &signal_msg);
+                }
             }
 
             println!("└─────────────────────────────────────────────────────────────────────────────┘");
