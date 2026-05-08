@@ -118,59 +118,54 @@ impl KlineCache {
         );
 
         if !signals.is_empty() {
-            println!("\n╔═══════════════════════════════════════════════════════════╗");
-            println!("║           {} {} PINBAR 信号检测                            ║", symbol, self.timeframe);
-            println!("╠═══════════════════════════════════════════════════════════╣");
+            println!();
+            println!("┌─────────────────────────────────────────────────────────────────────────────┐");
+            println!("│                      {} {} PINBAR 信号检测                                  │", symbol, self.timeframe);
+            println!("├─────┬────────┬───────────┬────────┬────────┬────────┬────────┬────────────┤");
+            println!("│ #   │ 类型    │ 时间(UTC+8)│ 价格   │ 强度   │ 实体   │ 上影   │ 下影   │ 位置    │ 评估       │");
+            println!("├─────┼────────┼───────────┼────────┼────────┼────────┼────────┼────────┼────────────┤");
 
             for (i, sig) in signals.iter().enumerate() {
-                let direction = if sig.signal_type == "bullish" { "🐂 看涨吞没" } else { "🐻 看跌吞没" };
+                let direction = if sig.signal_type == "bullish" { "🐂做多" } else { "🐻做空" };
                 let near = match sig.near_swing.as_str() {
-                    "low" => "靠近 Swing Low",
-                    "high" => "靠近 Swing High",
+                    "low" => "Swing Low",
+                    "high" => "Swing High",
                     _ => "远离结构",
                 };
 
-                // 转换时间戳
+                // UTC+8 时间
                 let dt = chrono::DateTime::from_timestamp(sig.time, 0)
-                    .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                    .map(|dt| {
+                        let offset = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+                        dt.with_timezone(&offset)
+                    })
+                    .map(|d| d.format("%m-%d %H:%M").to_string())
                     .unwrap_or_else(|| sig.time.to_string());
 
-                println!("║");
-                println!("║ 📌 信号 #{}", i + 1);
-                println!("║    类型: {}", direction);
-                println!("║    时间: {} (UTC)", dt);
-                println!("║    触发价格: {:.2}", sig.price);
-
-                // 计算涨跌
-                let prev = self.candles.iter().find(|c| c.time == sig.time)
-                    .or_else(|| self.candles.iter().rev().nth(1));
-                if let Some(prev_candle) = prev {
-                    let change = (sig.price - prev_candle.close) / prev_candle.close * 100.0;
-                    let arrow = if change >= 0.0 { "↑" } else { "↓" };
-                    println!("║    变化: {}{:.2}%", arrow, change.abs());
-                }
-
-                println!("║    强度评分: {:.0}%", sig.strength * 100.0);
-                println!("║");
-                println!("║    📊 形态详情:");
-                println!("║       实体大小: {:.2}", sig.body_size);
-                println!("║       上影线:   {:.2}", sig.top_wick_size);
-                println!("║       下影线:   {:.2}", sig.bottom_wick_size);
-                println!("║");
-                println!("║    📍 位置: {}", near);
-
-                // 信号质量评估
                 let quality = if sig.strength > 0.7 && sig.near_swing != "none" {
-                    "⭐⭐⭐ 优质信号"
+                    "⭐⭐⭐优质"
                 } else if sig.strength > 0.5 {
-                    "⭐⭐ 良好信号"
+                    "⭐⭐良好"
                 } else {
-                    "⭐ 常规信号"
+                    "⭐一般"
                 };
-                println!("║    评估: {}", quality);
+
+                println!(
+                    "│ {:3} │ {:6} │ {} │ {:7.2} │ {:5.0}% │ {:6.2} │ {:6.2} │ {:6.2} │ {:10} │ {} │",
+                    i + 1,
+                    direction,
+                    dt,
+                    sig.price,
+                    sig.strength * 100.0,
+                    sig.body_size,
+                    sig.top_wick_size,
+                    sig.bottom_wick_size,
+                    near,
+                    quality
+                );
             }
 
-            println!("╚═══════════════════════════════════════════════════════════╝");
+            println!("└─────────────────────────────────────────────────────────────────────────────┘");
             println!();
         }
     }
