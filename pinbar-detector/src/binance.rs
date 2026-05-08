@@ -570,7 +570,20 @@ pub async fn place_trailing_stop_order(
         .send()
         .await?;
 
-    let data: serde_json::Value = resp.json().await?;
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+
+    // 打印响应状态和内容用于调试
+    println!("[Binance] 追踪止盈响应: status={}, body={}", status, body);
+
+    // 尝试解析 JSON
+    let data: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            println!("[Binance] JSON 解析失败: {} body={}", e, body);
+            anyhow::bail!("追踪止盈响应解析失败: {} body={}", e, body);
+        }
+    };
 
     if let Some(algo_id) = data.get("algoId").and_then(|v| v.as_str()) {
         println!("[Binance] 追踪止盈成功: {} {} {} 激活=${:.2} 回撤={}%",
