@@ -163,7 +163,8 @@ pub async fn get_balance(config: &BinanceConfig, asset: &str) -> anyhow::Result<
     let timestamp = chrono::Utc::now().timestamp_millis();
     let query = format!("timestamp={}", timestamp);
     let signature = generate_signature(&query, &config.api_secret);
-    let url = format!("{}/fapi/v2/balance?{}&signature={}", config.base_url(), query, signature);
+    // 使用 /fapi/v2/account 端点，和前端一致
+    let url = format!("{}/fapi/v2/account?{}&signature={}", config.base_url(), query, signature);
 
     let client = reqwest::Client::new();
     let resp = client
