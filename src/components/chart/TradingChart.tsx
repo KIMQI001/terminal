@@ -510,11 +510,25 @@ export function TradingChart() {
 
           // 设置成交量数据
           if (volumeSeriesRef.current) {
-            const volumeData = data.map(c => ({
-              time: c.time as Time,
-              value: c.volume ?? 0,
-              color: c.close >= c.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 68, 68, 0.5)',
-            }));
+            const volumeData = data.map((c, i) => {
+              const prevVolume = i > 0 ? (data[i - 1].volume ?? 0) : 0;
+              const isHighVolume = prevVolume > 0 && (c.volume ?? 0) >= prevVolume * 2;
+
+              // 普通：阳k白色透明，阴k黑色透明
+              // 倍量：阳k绿色，阴k红色
+              let color: string;
+              if (isHighVolume) {
+                color = c.close >= c.open ? 'rgba(34, 197, 94, 0.7)' : 'rgba(239, 68, 68, 0.7)';
+              } else {
+                color = c.close >= c.open ? 'rgba(0, 0, 0, 0.2)' : 'rgba(0, 0, 0, 0.4)';
+              }
+
+              return {
+                time: c.time as Time,
+                value: c.volume ?? 0,
+                color,
+              };
+            });
             volumeSeriesRef.current.setData(volumeData);
           }
 
@@ -575,6 +589,27 @@ export function TradingChart() {
             high: candle.high,
             low: candle.low,
             close: candle.close,
+          });
+        }
+
+        // 更新成交量
+        if (volumeSeriesRef.current) {
+          const prevVolume = lastKlineTimeRef.current > 0
+            ? useChartStore.getState().candles.find(c => c.time === lastKlineTimeRef.current)?.volume ?? 0
+            : 0;
+          const isHighVolume = prevVolume > 0 && (candle.volume ?? 0) >= prevVolume * 2;
+
+          let color: string;
+          if (isHighVolume) {
+            color = candle.close >= candle.open ? 'rgba(34, 197, 94, 0.7)' : 'rgba(239, 68, 68, 0.7)';
+          } else {
+            color = candle.close >= candle.open ? 'rgba(0, 0, 0, 0.2)' : 'rgba(0, 0, 0, 0.4)';
+          }
+
+          volumeSeriesRef.current.update({
+            time: candle.time as Time,
+            value: candle.volume ?? 0,
+            color,
           });
         }
 
