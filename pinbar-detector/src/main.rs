@@ -161,7 +161,7 @@ async fn send_volume_alert(
             match crate::binance::get_balance(config, "USDC").await {
                 Ok(balance) => {
                     let use_amount = balance / 2.0; // 可用金额的一半
-                    let leverage = 20;
+                    let leverage = 100;
                     quantity = (use_amount * leverage as f64) / entry_price;
                     let client_order_id_prefix = format!("vol_{}", chrono::Utc::now().timestamp_millis());
 
