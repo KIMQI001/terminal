@@ -51,12 +51,17 @@ struct KlineResponse {
     klines: Vec<KlineData>,
 }
 
-/// WebSocket 消息
+/// WebSocket 消息（K线更新）
 #[derive(Debug, Deserialize)]
 struct WsMessage {
     #[serde(rename = "type")]
     msg_type: String,
-    data: Option<KlineData>,
+    data: Option<WsDataEnvelope>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WsDataEnvelope {
+    data: KlineData,
 }
 
 /// 倍量报警检测
@@ -489,22 +494,20 @@ async fn main() -> anyhow::Result<()> {
     info!("Subscribed to all timeframes");
 
     // 3. 处理实时 K 线
-    println!("等待 WebSocket 消息...");
     while let Some(msg) = read.next().await {
-        println!("[{}] 收到 WebSocket 消息: {:?}", chrono::Local::now().format("%H:%M:%S"), msg);
         match msg? {
             Message::Text(text) => {
-                println!("[{}] 消息内容: {}", chrono::Local::now().format("%H:%M:%S"), text);
                 if let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&text) {
                     if ws_msg.msg_type == "KlineUpdate" {
-                        if let Some(data) = ws_msg.data {
+                        if let Some(envelope) = ws_msg.data {
+                            let kline = envelope.data;
                             let candle = Candle {
-                                time: data.time,
-                                open: data.open,
-                                high: data.high,
-                                low: data.low,
-                                close: data.close,
-                                volume: data.volume,
+                                time: kline.time,
+                                open: kline.open,
+                                high: kline.high,
+                                low: kline.low,
+                                close: kline.close,
+                                volume: kline.volume,
                             };
 
                             // 更新所有缓存（简化处理：更新所有）
