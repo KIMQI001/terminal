@@ -21,10 +21,40 @@ struct DingtalkResponse {
     errmsg: String,
 }
 
+/// 生成钉钉签名 (HMAC-SHA256)
+fn generate_sign(timestamp: i64, secret: &str) -> String {
+    let string_to_sign = format!("{}\n{}", timestamp, secret);
+    let key = secret.as_bytes();
+
+    // 使用 hmac crate
+    use hmac::{Hmac, Mac};
+    type HmacSha256 = Hmac<sha2::Sha256>;
+
+    let mut mac = HmacSha256::new_from_slice(key).unwrap();
+    mac.update(string_to_sign.as_bytes());
+    let result = mac.finalize();
+
+    // 转换为 hex 字符串
+    let sign: String = result
+        .into_bytes()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect();
+
+    // URL encode
+    urlencoding::encode(&sign).to_string()
+}
+
 /// 发送 Markdown 消息到钉钉
 pub async fn send_dingtalk_markdown(title: &str, text: &str) -> anyhow::Result<()> {
-    let webhook = std::env::var("DINGTALK_WEBHOOK")
-        .expect("DINGTALK_WEBHOOK must be set");
+    // 钉钉 Webhook 配置
+    let webhook = "https://oapi.dingtalk.com/robot/send?access_token=55406d8790e82483e866e9388c2877befe9c69fb188e63b090e1b5563479fb1f";
+    let secret = "SECc84a436bc1f37629247c2a4dd9179554862537943b904075b2bf207fc3db0219";
+
+    // 生成签名
+    let timestamp = chrono::Utc::now().timestamp_millis();
+    let sign = generate_sign(timestamp, secret);
+    let url = format!("{}&timestamp={}&sign={}", webhook, timestamp, sign);
 
     let message = DingtalkMessage {
         msgtype: "markdown",
@@ -36,7 +66,7 @@ pub async fn send_dingtalk_markdown(title: &str, text: &str) -> anyhow::Result<(
 
     let client = reqwest::Client::new();
     let response = client
-        .post(&webhook)
+        .post(&url)
         .json(&message)
         .send()
         .await?;
