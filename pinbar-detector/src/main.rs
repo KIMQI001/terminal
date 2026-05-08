@@ -865,16 +865,24 @@ async fn main() -> anyhow::Result<()> {
     }
     info!("Subscribed to all timeframes");
 
-    // 3. 启动仓位监控（定期检查现有仓位，添加追踪止盈）
+    // 3. 启动时先执行一次仓位监控
+    if let Some(ref config) = binance_config {
+        info!("[启动] 执行仓位监控...");
+        monitor_positions(config, &subscriptions.first().unwrap().0).await;
+    }
+
+    // 4. 启动仓位监控（定期检查现有仓位，添加追踪止盈）
     let binance_config_clone = binance_config.clone();
     let monitor_symbol = subscriptions.first().unwrap().0.clone();
     tokio::spawn(async move {
         if let Some(config) = binance_config_clone {
+            // 先等待一小段时间，避免与启动时的监控重复
+            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
             monitor_positions(&config, &monitor_symbol).await;
         }
     });
 
-    // 4. 处理实时 K 线
+    // 5. 处理实时 K 线
     while let Some(msg) = read.next().await {
         match msg? {
             Message::Text(text) => {
