@@ -516,6 +516,8 @@ async fn main() -> anyhow::Result<()> {
 
                                 // 只有在新K线添加时（非更新最后一根）才检测
                                 if cache.candles.len() > prev_len {
+                                    println!("[Kline] 新K线到达: {} len={}", key, cache.candles.len());
+
                                     // PINBAR 检测（新的完整K线）
                                     let parts: Vec<&str> = key.split('@').collect();
                                     if parts.len() == 2 {
