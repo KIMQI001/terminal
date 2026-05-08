@@ -38,6 +38,14 @@ fn get_fixed_profit_points() -> f64 {
         .unwrap_or(300.0)
 }
 
+/// 追踪止盈激活点数（从环境变量读取，默认300点）
+fn get_trailing_activation_points() -> f64 {
+    env::var("TRAILING_ACTIVATION_POINTS")
+        .unwrap_or_else(|_| "300".to_string())
+        .parse::<f64>()
+        .unwrap_or(300.0)
+}
+
 /// 回调点数（从环境变量读取，默认100点）
 fn get_callback_profit_points() -> f64 {
     env::var("CALLBACK_PROFIT_POINTS")
@@ -253,11 +261,12 @@ async fn send_volume_alert(
                             }
                         }
 
-                        // 下追踪止盈单（盈利固定点数激活）
+                        // 下追踪止盈单（盈利追踪激活点数后激活）
+                        let trailing_activation_points = get_trailing_activation_points();
                         let activation_price = if order_side == "BUY" {
-                            entry_price + fixed_profit_points
+                            entry_price + trailing_activation_points
                         } else {
-                            entry_price - fixed_profit_points
+                            entry_price - trailing_activation_points
                         };
                         let callback_rate = 13.0;  // 13基点 = 0.13%
                         let trail_client_id = format!("{}_tr", client_order_id_prefix);
@@ -394,7 +403,7 @@ async fn send_volume_alert(
 
 /// 监控现有仓位，为没有追踪止盈的仓位添加追踪止盈
 async fn monitor_positions(config: &crate::binance::BinanceConfig, symbol: &str) {
-    let activation_profit = get_fixed_profit_points();  // 从环境变量读取
+    let activation_profit = get_trailing_activation_points();  // 从环境变量读取
     let callback_profit = get_callback_profit_points();  // 从环境变量读取
 
     // 第一次执行不等待，直接检查
