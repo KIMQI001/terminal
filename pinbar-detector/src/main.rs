@@ -290,6 +290,18 @@ impl KlineCache {
 
                 // 发送钉钉通知（最新信号）
                 if i == 0 {
+                    // 找到对应的 K 线获取 OHLC
+                    let candle = self.candles.iter().find(|c| c.time == sig.time);
+
+                    let ohlc_msg = if let Some(c) = candle {
+                        format!(
+                            "\n**OHLC:**\n- **O**: {:.2}\n- **H**: {:.2}\n- **L**: {:.2}\n- **C**: {:.2}",
+                            c.open, c.high, c.low, c.close
+                        )
+                    } else {
+                        String::new()
+                    };
+
                     let signal_msg = format!(
                         "### 📊 PINBAR 信号\n\n\
                         - **交易对**: {}\n\
@@ -302,7 +314,7 @@ impl KlineCache {
                         - **上影**: {:.2}\n\
                         - **下影**: {:.2}\n\
                         - **位置**: {}\n\
-                        - **评估**: {}",
+                        - **评估**: {}{}",
                         symbol,
                         self.timeframe,
                         direction,
@@ -313,7 +325,8 @@ impl KlineCache {
                         sig.top_wick_size,
                         sig.bottom_wick_size,
                         near,
-                        quality
+                        quality,
+                        ohlc_msg
                     );
 
                     let _ = notification::send_dingtalk_markdown("PINBAR 信号", &signal_msg);
