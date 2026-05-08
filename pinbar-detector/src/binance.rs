@@ -551,8 +551,9 @@ pub async fn place_trailing_stop_order(
 ) -> anyhow::Result<String> {
     let timestamp = chrono::Utc::now().timestamp_millis();
     let (qty_precision, price_precision) = get_precision(symbol);
+    // 追踪止盈用 activatePrice 而非 triggerPrice，clientOrderId 改为 clientAlgoId
     let query = format!(
-        "symbol={}&side={}&positionSide={}&type=TRAILING_STOP_MARKET&quantity={}&callbackRate={}&triggerPrice={}&timestamp={}&newClientOrderId={}&algoType=CONDITIONAL",
+        "symbol={}&side={}&positionSide={}&type=TRAILING_STOP_MARKET&quantity={}&callbackRate={}&activatePrice={}&timestamp={}&clientAlgoId={}&algoType=CONDITIONAL",
         symbol, side, position_side,
         format_quantity(quantity, qty_precision),
         callback_rate,
@@ -561,7 +562,7 @@ pub async fn place_trailing_stop_order(
         client_order_id
     );
     let signature = generate_signature(&query, &config.api_secret);
-    let url = format!("{}/fapi/v1/orderAlgo?{}&signature={}", config.base_url(), query, signature);
+    let url = format!("{}/fapi/v1/algoOrder?{}&signature={}", config.base_url(), query, signature);
 
     let client = reqwest::Client::new();
     let resp = client
