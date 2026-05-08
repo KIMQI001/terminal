@@ -242,7 +242,7 @@ async fn send_volume_alert(
                         } else {
                             entry_price - 300.0
                         };
-                        let callback_rate = 0.13;  // 约0.13%
+                        let callback_rate = 13.0;  // 13基点 = 0.13%
                         let trail_client_id = format!("{}_tr", client_order_id_prefix);
                         match crate::binance::place_trailing_stop_order(
                             config,
@@ -399,16 +399,15 @@ async fn monitor_positions(config: &crate::binance::BinanceConfig, symbol: &str)
 
                     info!("[仓位监控] 发现持仓: {} {} @ ${:.2}", position_side, quantity, entry_price);
 
-                    // 计算激活价格（盈利300点）和回调比例
+                    // 计算激活价格（盈利300点）和回调基点
+                    // callbackRate 单位是基点（0.01%），例如 500 = 5%
+                    // 100点/80000 ≈ 0.125% = 12.5基点，Binance要求整数
                     let activation_price = if position_side == "LONG" {
                         entry_price + activation_profit
                     } else {
                         entry_price - activation_profit
                     };
-                    // callbackRate 最小值是 0.1（代表 0.1%），100点/80000 ≈ 0.125% 接近最小值
-                    // 为了确保有效，使用固定值 0.2（0.2%）或者按比例但最低 0.1
-                    let raw_callback = callback_profit / activation_price * 100.0;
-                    let callback_rate = raw_callback.max(0.1).min(10.0);  // 确保在有效范围 0.1-10
+                    let callback_bps = ((callback_profit / activation_price * 10000.0) as i64).max(10).min(1000);  // 最小10基点（0.1%），最大1000（10%）
 
                     // 检查是否已有追踪止盈单
                     match crate::binance::get_algo_orders(config, symbol).await {
@@ -427,8 +426,8 @@ async fn monitor_positions(config: &crate::binance::BinanceConfig, symbol: &str)
                             let close_side = if position_side == "LONG" { "SELL" } else { "BUY" };
                             let client_id = format!("mon_tr_{}_{}", position_side.to_lowercase(), chrono::Utc::now().timestamp_millis());
 
-                            info!("[仓位监控] 添加追踪止盈: {} {} 激活价=${:.2} 回调={}%",
-                                position_side, quantity, activation_price, callback_rate);
+                            info!("[仓位监控] 添加追踪止盈: {} {} 激活价=${:.2} 回调={}基点({:.1})",
+                                position_side, quantity, activation_price, callback_bps, callback_bps as f64 / 100.0);
 
                             match crate::binance::place_trailing_stop_order(
                                 config,
@@ -437,7 +436,7 @@ async fn monitor_positions(config: &crate::binance::BinanceConfig, symbol: &str)
                                 position_side,
                                 quantity,
                                 activation_price,
-                                callback_rate,
+                                callback_bps as f64,
                                 &client_id,
                             ).await {
                                 Ok(algo_id) => {
@@ -448,9 +447,9 @@ async fn monitor_positions(config: &crate::binance::BinanceConfig, symbol: &str)
                                         - **持仓**: {} {} @ ${:.2}\n\
                                         - **方向**: {}\n\
                                         - **激活价**: ${:.2} (盈利300点)\n\
-                                        - **回调**: {:.2}%\n\
+                                        - **回调**: {}基点({:.2}%)\n\
                                         - **数量**: {:.4}",
-                                        symbol, direction, entry_price, direction, activation_price, callback_rate, quantity
+                                        symbol, direction, entry_price, direction, activation_price, callback_bps, callback_bps as f64 / 100.0, quantity
                                     );
                                     let _ = notification::send_dingtalk_markdown("仓位监控 - 追踪止盈", &msg);
                                 }
