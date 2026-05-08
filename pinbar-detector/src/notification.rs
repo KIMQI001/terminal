@@ -102,6 +102,6 @@ pub async fn send_dingtalk_markdown(title: &str, text: &str) -> anyhow::Result<(
         anyhow::bail!("钉钉 API 错误: {}", result.errmsg);
     }
 
-    println!("[Dingtalk] 消息发送成功: {}", title);
+    tracing::info!("钉钉消息发送成功: {}", title);
     Ok(())
 }

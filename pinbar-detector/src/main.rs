@@ -85,17 +85,11 @@ fn check_volume_alert(candles: &[Candle]) -> Option<(usize, f64, usize)> {
 
             // 返回满足条件的小K线位置
             if next1_body < 100.0 {
-                println!(
-                    "[VolumeAlert] 检测到倍量反转: 位置={}, 比例={:.1}x, 小K线位置={}, 实体={:.2}",
-                    i, ratio, i + 1, next1_body
-                );
+                info!("倍量反转: 位置={}, 比例={:.1}x, 小K线位置={}, 实体={:.2}", i, ratio, i + 1, next1_body);
                 return Some((i, ratio, i + 1));
             }
             if next2_body < 100.0 {
-                println!(
-                    "[VolumeAlert] 检测到倍量反转: 位置={}, 比例={:.1}x, 小K线位置={}, 实体={:.2}",
-                    i, ratio, i + 2, next2_body
-                );
+                info!("倍量反转: 位置={}, 比例={:.1}x, 小K线位置={}, 实体={:.2}", i, ratio, i + 2, next2_body);
                 return Some((i, ratio, i + 2));
             }
         }
@@ -173,10 +167,10 @@ async fn send_volume_alert(
         small_direction
     );
 
-    println!("[VolumeAlert] 发送钉钉通知...");
+    info!("发送钉钉通知: 15m 倍量报警");
 
     if let Err(e) = notification::send_dingtalk_markdown("15m 倍量报警", &message).await {
-        eprintln!("[VolumeAlert] 钉钉通知发送失败: {}", e);
+        warn!("钉钉通知发送失败: {}", e);
     }
 }
 
