@@ -535,32 +535,29 @@ pub async fn get_positions(config: &BinanceConfig, symbol: &str) -> anyhow::Resu
     Ok(positions)
 }
 
-/// 下追踪止盈单 (使用 /fapi/v1/algoOrder + STOP_LOSS_LIMIT/TAKE_PROFIT_LIMIT + trailingDelta)
-/// activation_price: 激活价格（盈利至此价格后开始追踪，price 参数）
-/// trailing_delta: 回调百分比（500 = 5%，即盈利超过5%后开始追踪，回调5%触发）
-/// 盈利300点激活，回调约0.13%（100/80000 ≈ 0.125%，对应 trailingDelta=125）
+/// 下追踪止盈单 (使用 /fapi/v1/algoOrder + TRAILING_STOP_MARKET)
+/// activation_price: 激活价格（盈利至此价格后开始追踪）
+/// callback_rate: 回撤比例（0.1-10，代表 0.1%-10%）
+/// 盈利300点激活，回调约0.125%（100点/80000）
 pub async fn place_trailing_stop_order(
     config: &BinanceConfig,
     symbol: &str,
     side: &str,           // 平仓方向 BUY(空头平) or SELL(多头平)
     position_side: &str,  // LONG or SHORT
     quantity: f64,
-    activation_price: f64,  // 激活价格（设置为 price 参数）
-    trailing_delta: f64,   // 回调百分比（500 = 5%，这里是 125 = 1.25%）
+    activation_price: f64,  // 激活价格
+    callback_rate: f64,     // 回撤比例 0.1-10
     client_order_id: &str,
 ) -> anyhow::Result<String> {
     let timestamp = chrono::Utc::now().timestamp_millis();
     let (qty_precision, price_precision) = get_precision(symbol);
-    // 使用 STOP_LOSS_LIMIT 或 TAKE_PROFIT_LIMIT + trailingDelta 实现追踪止盈
-    let order_type = if side == "SELL" { "STOP_LOSS_LIMIT" } else { "TAKE_PROFIT_LIMIT" };
-    // trailingDelta 的单位是基点（0.01%），所以 125 = 1.25%
-    // price 是激活价格，stopPrice 可选（作为保险止损）
+    // 使用 TRAILING_STOP_MARKET 类型
     let query = format!(
-        "symbol={}&side={}&positionSide={}&type={}&quantity={}&price={}&timeInForce=GTC&trailingDelta={}&timestamp={}&newClientOrderId={}&algoType=CONDITIONAL",
-        symbol, side, position_side, order_type,
+        "symbol={}&side={}&positionSide={}&type=TRAILING_STOP_MARKET&quantity={}&callbackRate={}&activatePrice={}&timestamp={}&clientAlgoId={}&algoType=CONDITIONAL",
+        symbol, side, position_side,
         format_quantity(quantity, qty_precision),
+        callback_rate,
         format_price(activation_price, price_precision),
-        trailing_delta as i64,  // trailingDelta 必须是整数（基点）
         timestamp,
         client_order_id
     );
@@ -588,8 +585,8 @@ pub async fn place_trailing_stop_order(
     };
 
     if let Some(algo_id) = data.get("algoId").and_then(|v| v.as_u64()) {
-        println!("[Binance] 追踪止盈成功: {} {} {} 激活=${:.2} 回调={}基点({:.2}%) algoId={}",
-            position_side, side, quantity, activation_price, trailing_delta as i64, trailing_delta as f64 / 100.0, algo_id);
+        println!("[Binance] 追踪止盈成功: {} {} {} 激活=${:.2} 回撤={}% algoId={}",
+            position_side, side, quantity, activation_price, callback_rate, algo_id);
         return Ok(algo_id.to_string());
     }
 
