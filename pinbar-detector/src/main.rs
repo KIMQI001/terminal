@@ -170,7 +170,7 @@ async fn send_volume_alert(
                         warn!("取消挂单失败: {}", e);
                     }
 
-                    // 下限价单（入场）
+                    // 下限价单（入场）- clientOrderId 只允许 [.A-Z:/a-z0-9_-]
                     let order_id = match crate::binance::place_limit_order(
                         config,
                         symbol,
@@ -178,7 +178,7 @@ async fn send_volume_alert(
                         position_side,
                         entry_price,
                         quantity,
-                        &format!("{}@entry", client_order_id_prefix),
+                        &format!("{}_entry", client_order_id_prefix),
                     ).await {
                         Ok(id) => {
                             info!("入场单成功: orderId={}", id);
@@ -190,10 +190,10 @@ async fn send_volume_alert(
                         }
                     };
 
-                    // 下止损单
+                    // 下止损单 - clientOrderId 只允许 [.A-Z:/a-z0-9_-]
                     if order_id.is_some() {
                         let stop_side = if order_side == "BUY" { "SELL" } else { "BUY" };
-                        let stop_client_id = format!("{}@stop", client_order_id_prefix);
+                        let stop_client_id = format!("{}_stop", client_order_id_prefix);
                         match crate::binance::place_stop_loss_order(
                             config,
                             symbol,
@@ -211,13 +211,13 @@ async fn send_volume_alert(
                             }
                         }
 
-                        // 下止盈单（300点止盈）
+                        // 下止盈单（300点止盈）- clientOrderId 只允许 [.A-Z:/a-z0-9_-]
                         let take_profit_price = if order_side == "BUY" {
                             entry_price + 300.0
                         } else {
                             entry_price - 300.0
                         };
-                        let tp_client_id = format!("{}@tp", client_order_id_prefix);
+                        let tp_client_id = format!("{}_tp", client_order_id_prefix);
                         match crate::binance::place_take_profit_order(
                             config,
                             symbol,
