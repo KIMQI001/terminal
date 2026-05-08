@@ -184,6 +184,8 @@ struct KlineCache {
     candles: Vec<Candle>,
     timeframe: String,
     update_count: usize,
+    last_pinbar_time: Option<i64>,  // 上次发送 PINBAR 通知的时间
+    last_volume_time: Option<i64>,   // 上次发送倍量通知的时间
 }
 
 impl KlineCache {
@@ -192,6 +194,8 @@ impl KlineCache {
             candles: Vec::new(),
             timeframe: timeframe.to_string(),
             update_count: 0,
+            last_pinbar_time: None,
+            last_volume_time: None,
         }
     }
 
@@ -230,7 +234,7 @@ impl KlineCache {
     }
 
     /// 检测并打印 PINBAR 信号（仅在完整的旧K线后调用）
-    fn detect_and_notify(&self, symbol: &str) {
+    fn detect_and_notify(&mut self, symbol: &str) {
         if self.candles.len() < 50 {
             return;
         }
@@ -243,6 +247,15 @@ impl KlineCache {
         );
 
         if !signals.is_empty() {
+            let sig = signals.first().unwrap();
+
+            // 去重：如果信号的 K 线时间等于上次发送的时间，则跳过
+            if self.last_pinbar_time == Some(sig.time) {
+                println!("[PINBAR] 去重跳过: {}", sig.time);
+                return;
+            }
+            self.last_pinbar_time = Some(sig.time);
+
             let ts = chrono::Local::now().format("%H:%M:%S");
             println!();
             println!("┌─────────────────────────────────────────────────────────────────────────────┐");
@@ -398,10 +411,13 @@ async fn main() -> anyhow::Result<()> {
     // 发送最近 PINBAR 信号的钉钉通知（启动时证明检测能力）
     for (symbol, tf) in &subscriptions {
         let key = format!("{}@{}", symbol, tf);
-        if let Some(cache) = caches.get(&key) {
+        if let Some(cache) = caches.get_mut(&key) {
             if cache.candles.len() >= 50 {
                 let signals = detect_recent_pinbars(&cache.candles, SWING_LENGTH, SWING_RANGE, 1);
                 if let Some(sig) = signals.first() {
+                    // 设置 last_pinbar_time 避免启动后再发一次
+                    cache.last_pinbar_time = Some(sig.time);
+
                     let direction = if sig.signal_type == "bullish" { "🐂做多" } else { "🐻做空" };
                     let near = match sig.near_swing.as_str() {
                         "low" => "Swing Low",
@@ -466,10 +482,12 @@ async fn main() -> anyhow::Result<()> {
     // 发送最近倍量反转信号的钉钉通知
     for (symbol, tf) in &subscriptions {
         let key = format!("{}@{}", symbol, tf);
-        if let Some(cache) = caches.get(&key) {
+        if let Some(cache) = caches.get_mut(&key) {
             if cache.candles.len() >= 4 {
                 // 检测倍量反转形态
                 if let Some((index, ratio, small_index)) = check_volume_alert(&cache.candles) {
+                    // 设置 last_volume_time 避免启动后再发一次
+                    cache.last_volume_time = Some(cache.candles[index].time);
                     let candles = cache.candles.clone();
                     send_volume_alert(symbol, &candles, index, ratio, small_index).await;
                 }
@@ -530,21 +548,28 @@ async fn main() -> anyhow::Result<()> {
 
                                     // 倍量报警检测
                                     if cache.candles.len() >= 4 {
-                                        if let Some((index, ratio, small_index)) =
+                                        if let Some((vol_index, ratio, small_index)) =
                                             check_volume_alert(&cache.candles)
                                         {
-                                            let parts: Vec<&str> = key.split('@').collect();
-                                            if parts.len() == 2 {
-                                                let symbol = parts[0];
-                                                let candles = cache.candles.clone();
-                                                send_volume_alert(
-                                                    symbol,
-                                                    &candles,
-                                                    index,
-                                                    ratio,
-                                                    small_index,
-                                                )
-                                                .await;
+                                            // 去重：如果倍量K线时间等于上次发送的时间，则跳过
+                                            let vol_time = cache.candles[vol_index].time;
+                                            if cache.last_volume_time == Some(vol_time) {
+                                                println!("[Volume] 去重跳过: {}", vol_time);
+                                            } else {
+                                                cache.last_volume_time = Some(vol_time);
+                                                let parts: Vec<&str> = key.split('@').collect();
+                                                if parts.len() == 2 {
+                                                    let symbol = parts[0];
+                                                    let candles = cache.candles.clone();
+                                                    send_volume_alert(
+                                                        symbol,
+                                                        &candles,
+                                                        vol_index,
+                                                        ratio,
+                                                        small_index,
+                                                    )
+                                                    .await;
+                                                }
                                             }
                                         }
                                     }
