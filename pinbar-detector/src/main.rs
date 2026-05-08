@@ -271,7 +271,7 @@ async fn send_volume_alert(
                 account_info.push_str(&format!("\n**账户余额**: ${:.2} USDC\n", balance));
             }
             // 获取挂单
-            match crate::binance::get_open_orders(config, symbol).await {
+            match crate::binance::get_all_open_orders(config, symbol).await {
                 Ok(orders) => {
                     if orders.is_empty() {
                         account_info.push_str("**当前挂单**: 无\n");

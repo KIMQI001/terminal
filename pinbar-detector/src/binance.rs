@@ -333,6 +333,91 @@ pub async fn place_take_profit_order(
     anyhow::bail!("止盈单失败: {}", msg)
 }
 
+/// 获取 Algo 条件单（止损/止盈/追踪止盈）
+pub async fn get_algo_orders(config: &BinanceConfig, symbol: &str) -> anyhow::Result<Vec<OpenOrderInfo>> {
+    let timestamp = chrono::Utc::now().timestamp_millis();
+    let query = format!("symbol={}&timestamp={}", symbol, timestamp);
+    let signature = generate_signature(&query, &config.api_secret);
+    let url = format!("{}/fapi/v1/openAlgoOrders?{}&signature={}", config.base_url(), query, signature);
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("X-MBX-APIKEY", &config.api_key)
+        .send()
+        .await?;
+
+    // Algo API 可能返回空数组或错误，不抛出异常
+    let data: Vec<serde_json::Value> = match resp.json().await {
+        Ok(v) => v,
+        Err(_) => return Ok(vec![]),
+    };
+
+    let orders = data
+        .iter()
+        .map(|order| {
+            let trigger_price = order.get("triggerPrice")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            let price = order.get("price")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            let algo_id = order.get("algoId")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let client_algo_id = order.get("clientAlgoId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let side = order.get("side")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let position_side = order.get("positionSide")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let quantity = order.get("quantity")
+                .and_then(|v| v.as_str())
+                .unwrap_or("0")
+                .to_string();
+            let order_type = order.get("orderType")
+                .and_then(|v| v.as_str())
+                .unwrap_or("STOP_MARKET")
+                .to_string();
+
+            // 用于显示的 price 字段用 triggerPrice
+            OpenOrderInfo {
+                order_id: algo_id,
+                symbol: symbol.to_string(),
+                client_order_id: client_algo_id,
+                side,
+                position_side,
+                orig_qty: quantity,
+                price: if trigger_price > 0.0 { trigger_price.to_string() } else { price.to_string() },
+                order_type,
+                status: order.get("algoStatus").and_then(|v| v.as_str()).unwrap_or("new").to_string(),
+            }
+        })
+        .collect();
+
+    Ok(orders)
+}
+
+/// 获取当前挂单（普通订单 + Algo 条件单）
+pub async fn get_all_open_orders(config: &BinanceConfig, symbol: &str) -> anyhow::Result<Vec<OpenOrderInfo>> {
+    let (normal, algo) = tokio::join!(
+        get_open_orders(config, symbol),
+        get_algo_orders(config, symbol)
+    );
+
+    let mut orders = normal?;
+    orders.extend(algo?);
+    Ok(orders)
+}
+
 /// 获取当前挂单
 pub async fn get_open_orders(config: &BinanceConfig, symbol: &str) -> anyhow::Result<Vec<OpenOrderInfo>> {
     let timestamp = chrono::Utc::now().timestamp_millis();
