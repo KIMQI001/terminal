@@ -62,8 +62,9 @@ struct WsMessage {
 /// 倍量报警检测
 /// 检测条件：
 /// 1. 当前成交量 >= 前一根的 2 倍
-/// 2. 倍量K线往后两根K线的实体都小于 100 美元
-fn check_volume_alert(candles: &[Candle]) -> Option<(usize, f64, f64, bool)> {
+/// 2. 倍量K线往后两根K线有一根实体小于 100 美元
+/// 返回：(倍量位置, 成交量倍数, 满足条件的小K线位置)
+fn check_volume_alert(candles: &[Candle]) -> Option<(usize, f64, usize)> {
     if candles.len() < 4 {
         return None;
     }
@@ -78,18 +79,25 @@ fn check_volume_alert(candles: &[Candle]) -> Option<(usize, f64, f64, bool)> {
         if prev.volume > 0.0 && current.volume >= prev.volume * 2.0 {
             let ratio = current.volume / prev.volume;
 
-            // 检查后续两根 K 线实体是否都小于 100
+            // 检查后续两根 K 线实体是否有一根小于 100
             let next1_body = (candles[i + 1].close - candles[i + 1].open).abs();
             let next2_body = (candles[i + 2].close - candles[i + 2].open).abs();
 
-            let valid_retracement = next1_body < 100.0 && next2_body < 100.0;
-
-            println!(
-                "[VolumeAlert] 检测到倍量: 位置={}, 比例={:.1}x, 后续两根实体={:.2}/{:.2}, 验证={}",
-                i, ratio, next1_body, next2_body, valid_retracement
-            );
-
-            return Some((i, ratio, prev.volume, valid_retracement));
+            // 返回满足条件的小K线位置
+            if next1_body < 100.0 {
+                println!(
+                    "[VolumeAlert] 检测到倍量反转: 位置={}, 比例={:.1}x, 小K线位置={}, 实体={:.2}",
+                    i, ratio, i + 1, next1_body
+                );
+                return Some((i, ratio, i + 1));
+            }
+            if next2_body < 100.0 {
+                println!(
+                    "[VolumeAlert] 检测到倍量反转: 位置={}, 比例={:.1}x, 小K线位置={}, 实体={:.2}",
+                    i, ratio, i + 2, next2_body
+                );
+                return Some((i, ratio, i + 2));
+            }
         }
     }
 
@@ -98,46 +106,71 @@ fn check_volume_alert(candles: &[Candle]) -> Option<(usize, f64, f64, bool)> {
 
 /// 格式化倍量报警消息并发送钉钉
 async fn send_volume_alert(
-    symbol: &str,
+    _symbol: &str,
     candles: &[Candle],
-    index: usize,
+    vol_index: usize,      // 倍量K线位置
     ratio: f64,
-    _prev_volume: f64,
-    valid_retracement: bool,
+    small_index: usize,    // 小实体K线位置
 ) {
-    let candle = &candles[index];
-    let direction = if candle.close >= candle.open { "阳线" } else { "阴线" };
-    let emoji = if candle.close >= candle.open { "🟢" } else { "🔴" };
+    let vol_candle = &candles[vol_index];
+    let small_candle = &candles[small_index];
+
+    let vol_direction = if vol_candle.close >= vol_candle.open { "阳线" } else { "阴线" };
+    let vol_emoji = if vol_candle.close >= vol_candle.open { "🟢" } else { "🔴" };
+
+    let small_direction = if small_candle.close >= small_candle.open { "阳线" } else { "阴线" };
+    let small_emoji = if small_candle.close >= small_candle.open { "🟢" } else { "🔴" };
 
     // UTC+8 时间
-    let dt = chrono::DateTime::from_timestamp(candle.time, 0)
+    let vol_dt = chrono::DateTime::from_timestamp(vol_candle.time, 0)
         .map(|dt| {
             let offset = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
             dt.with_timezone(&offset)
         })
         .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
-        .unwrap_or_else(|| candle.time.to_string());
+        .unwrap_or_else(|| vol_candle.time.to_string());
 
-    let retracement_status = if valid_retracement { "✅ 通过" } else { "❌ 未通过" };
+    let small_dt = chrono::DateTime::from_timestamp(small_candle.time, 0)
+        .map(|dt| {
+            let offset = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+            dt.with_timezone(&offset)
+        })
+        .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| small_candle.time.to_string());
+
+    let small_body = (small_candle.close - small_candle.open).abs();
 
     let message = format!(
-        "### 📊 15m 倍量报警
+        "### 📊 15m 倍量反转信号
 
-- **交易对**: {}
+**倍量K线:**
 - **时间**: {} UTC+8
 - **价格**: ${:.2}
 - **方向**: {} {}
 - **成交量倍数**: {:.1}x
-- **延伸验证**: {}
+
+**小实体K线 (实体={:.2}):**
+- **时间**: {} UTC+8
+- **O**: {:.2}
+- **H**: {:.2}
+- **L**: {:.2}
+- **C**: {:.2}
+- **方向**: {} {}
 
 ---",
-        symbol,
-        dt,
-        candle.close,
-        emoji,
-        direction,
+        vol_dt,
+        vol_candle.close,
+        vol_emoji,
+        vol_direction,
         ratio,
-        retracement_status
+        small_body,
+        small_dt,
+        small_candle.open,
+        small_candle.high,
+        small_candle.low,
+        small_candle.close,
+        small_emoji,
+        small_direction
     );
 
     println!("[VolumeAlert] 发送钉钉通知...");
@@ -324,52 +357,9 @@ async fn main() -> anyhow::Result<()> {
         if let Some(cache) = caches.get(&key) {
             if cache.candles.len() >= 4 {
                 // 检测倍量反转形态
-                if let Some((index, ratio, prev_vol, valid_retracement)) = check_volume_alert(&cache.candles) {
-                    let candle = &cache.candles[index];
-                    let direction = if candle.close >= candle.open { "阳线" } else { "阴线" };
-                    let emoji = if candle.close >= candle.open { "🟢" } else { "🔴" };
-
-                    // UTC+8 时间
-                    let dt = chrono::DateTime::from_timestamp(candle.time, 0)
-                        .map(|dt| {
-                            let offset = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
-                            dt.with_timezone(&offset)
-                        })
-                        .map(|d| d.format("%m-%d %H:%M").to_string())
-                        .unwrap_or_else(|| candle.time.to_string());
-
-                    // 后续两根实体
-                    let next1_body = (cache.candles[index + 1].close - cache.candles[index + 1].open).abs();
-                    let next2_body = (cache.candles[index + 2].close - cache.candles[index + 2].open).abs();
-
-                    let retracement_status = if valid_retracement { "✅ 通过" } else { "❌ 未通过" };
-
-                    let signal_msg = format!(
-                        "### 📊 最近倍量反转信号\n\n\
-                        - **交易对**: {}\n\
-                        - **周期**: {}\n\
-                        - **时间**: {} UTC+8\n\
-                        - **价格**: ${:.2}\n\
-                        - **方向**: {} {}\n\
-                        - **成交量倍数**: {:.1}x\n\
-                        - **后续两根实体**: {:.2} / {:.2}\n\
-                        - **延伸验证**: {}\n\n\
-                        _服务已启动，实时监控中..._",
-                        symbol,
-                        tf,
-                        dt,
-                        candle.close,
-                        emoji,
-                        direction,
-                        ratio,
-                        next1_body,
-                        next2_body,
-                        retracement_status
-                    );
-
-                    if let Err(e) = notification::send_dingtalk_markdown("倍量反转信号", &signal_msg).await {
-                        eprintln!("[启动] 发送倍量信号失败: {}", e);
-                    }
+                if let Some((index, ratio, small_index)) = check_volume_alert(&cache.candles) {
+                    let candles = cache.candles.clone();
+                    send_volume_alert(symbol, &candles, index, ratio, small_index).await;
                 }
             }
         }
@@ -423,7 +413,7 @@ async fn main() -> anyhow::Result<()> {
                                 // 倍量报警检测（每次 K 线更新都检测）
                                 // 只有当 K 线数量增加（新的完整 K 线）时才检测
                                 if cache.candles.len() > prev_len && cache.candles.len() >= 4 {
-                                    if let Some((index, ratio, prev_vol, valid_retracement)) =
+                                    if let Some((index, ratio, small_index)) =
                                         check_volume_alert(&cache.candles)
                                     {
                                         let parts: Vec<&str> = key.split('@').collect();
@@ -435,8 +425,7 @@ async fn main() -> anyhow::Result<()> {
                                                 &candles,
                                                 index,
                                                 ratio,
-                                                prev_vol,
-                                                valid_retracement,
+                                                small_index,
                                             )
                                             .await;
                                         }
