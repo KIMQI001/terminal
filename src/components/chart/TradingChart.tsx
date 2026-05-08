@@ -52,6 +52,7 @@ export function TradingChart() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const highLineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const lowLineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -328,6 +329,25 @@ export function TradingChart() {
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
 
+    // 成交量柱状图
+    const volumeSeries = chart.addHistogramSeries({
+      color: '#26a69a',
+      priceFormat: {
+        type: 'volume',
+      },
+      priceScaleId: 'volume',
+    });
+
+    // 设置成交量刻度
+    chart.priceScale('volume').applyOptions({
+      scaleMargins: {
+        top: 0.8,
+        bottom: 0,
+      },
+    });
+
+    volumeSeriesRef.current = volumeSeries;
+
     // 订阅十字光标移动事件以更新 OHLCV 显示
     chart.subscribeCrosshairMove((param) => {
       if (!param.time) {
@@ -487,6 +507,16 @@ export function TradingChart() {
             };
           });
           candleSeriesRef.current.setData(chartData);
+
+          // 设置成交量数据
+          if (volumeSeriesRef.current) {
+            const volumeData = data.map(c => ({
+              time: c.time as Time,
+              value: c.volume ?? 0,
+              color: c.close >= c.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 68, 68, 0.5)',
+            }));
+            volumeSeriesRef.current.setData(volumeData);
+          }
 
           // 设置折线图数据
           if (highLineSeriesRef.current && lowLineSeriesRef.current) {
