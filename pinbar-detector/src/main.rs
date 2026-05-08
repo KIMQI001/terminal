@@ -402,10 +402,10 @@ impl KlineCache {
         self.update_count += 1;
     }
 
-    /// 检测并打印 PINBAR 信号（仅在完整的旧K线后调用）
-    fn detect_and_notify(&mut self, symbol: &str) {
+    /// 检测并打印 PINBAR 信号，发送钉钉通知
+    fn detect_and_notify(&mut self, symbol: &str) -> Option<Signal> {
         if self.candles.len() < 50 {
-            return;
+            return None;
         }
 
         let signals = detect_recent_pinbars(
@@ -415,110 +415,158 @@ impl KlineCache {
             RECENT_SIGNALS_LIMIT,
         );
 
-        if !signals.is_empty() {
-            let sig = signals.first().unwrap();
-
-            // 去重：如果信号的 K 线时间等于上次发送的时间，则跳过
-            if self.last_pinbar_time == Some(sig.time) {
-                println!("[PINBAR] 去重跳过: {}", sig.time);
-                return;
-            }
-            self.last_pinbar_time = Some(sig.time);
-
-            let ts = chrono::Local::now().format("%H:%M:%S");
-            println!();
-            println!("┌─────────────────────────────────────────────────────────────────────────────┐");
-            println!("│ [{}] {} {} PINBAR 信号检测                                      │", ts, symbol, self.timeframe);
-            println!("├─────┬────────┬───────────┬────────┬────────┬────────┬────────┬────────────┤");
-            println!("│ #   │ 类型    │ 时间(UTC+8)│ 价格   │ 强度   │ 实体   │ 上影   │ 下影   │ 位置    │ 评估       │");
-            println!("├─────┼────────┼───────────┼────────┼────────┼────────┼────────┼────────┼────────────┤");
-
-            for (i, sig) in signals.iter().enumerate() {
-                let direction = if sig.signal_type == "bullish" { "🐂做多" } else { "🐻做空" };
-                let near = match sig.near_swing.as_str() {
-                    "low" => "Swing Low",
-                    "high" => "Swing High",
-                    _ => "远离结构",
-                };
-
-                // UTC+8 时间
-                let dt = chrono::DateTime::from_timestamp(sig.time, 0)
-                    .map(|dt| {
-                        let offset = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
-                        dt.with_timezone(&offset)
-                    })
-                    .map(|d| d.format("%m-%d %H:%M").to_string())
-                    .unwrap_or_else(|| sig.time.to_string());
-
-                let quality = if sig.strength > 0.7 && sig.near_swing != "none" {
-                    "⭐⭐⭐优质"
-                } else if sig.strength > 0.5 {
-                    "⭐⭐良好"
-                } else {
-                    "⭐一般"
-                };
-
-                println!(
-                    "│ {:3} │ {:6} │ {} │ {:7.2} │ {:5.0}% │ {:6.2} │ {:6.2} │ {:6.2} │ {:10} │ {} │",
-                    i + 1,
-                    direction,
-                    dt,
-                    sig.price,
-                    sig.strength * 100.0,
-                    sig.body_size,
-                    sig.top_wick_size,
-                    sig.bottom_wick_size,
-                    near,
-                    quality
-                );
-
-                // 发送钉钉通知（最新信号）
-                if i == 0 {
-                    let candle = self.candles.iter().find(|c| c.time == sig.time);
-                    let ohlc_msg = if let Some(c) = candle {
-                        format!(
-                            "\n**OHLC:**\n- **O**: {:.2}\n- **H**: {:.2}\n- **L**: {:.2}\n- **C**: {:.2}",
-                            c.open, c.high, c.low, c.close
-                        )
-                    } else {
-                        String::new()
-                    };
-
-                    let signal_msg = format!(
-                        "### 📊 PINBAR 信号\n\n\
-                        - **交易对**: {}\n\
-                        - **周期**: {}\n\
-                        - **类型**: {}\n\
-                        - **时间**: {} UTC+8\n\
-                        - **价格**: ${:.2}\n\
-                        - **强度**: {:.0}%\n\
-                        - **实体**: {:.2}\n\
-                        - **上影**: {:.2}\n\
-                        - **下影**: {:.2}\n\
-                        - **位置**: {}\n\
-                        - **评估**: {}{}",
-                        symbol,
-                        self.timeframe,
-                        direction,
-                        dt,
-                        sig.price,
-                        sig.strength * 100.0,
-                        sig.body_size,
-                        sig.top_wick_size,
-                        sig.bottom_wick_size,
-                        near,
-                        quality,
-                        ohlc_msg
-                    );
-
-                    let _ = notification::send_dingtalk_markdown("PINBAR 信号", &signal_msg);
-                }
-            }
-
-            println!("└─────────────────────────────────────────────────────────────────────────────┘");
-            println!();
+        if signals.is_empty() {
+            return None;
         }
+
+        let sig = signals.first().unwrap();
+
+        // 去重：如果信号的 K 线时间等于上次发送的时间，则跳过
+        if self.last_pinbar_time == Some(sig.time) {
+            println!("[PINBAR] 去重跳过: {}", sig.time);
+            return None;
+        }
+
+        // 记录发送时间
+        self.last_pinbar_time = Some(sig.time);
+
+        // 获取信号方向和评估
+        let direction = if sig.signal_type == "bullish" { "🐂做多" } else { "🐻做空" };
+        let near = match sig.near_swing.as_str() {
+            "low" => "Swing Low",
+            "high" => "Swing High",
+            _ => "远离结构",
+        };
+
+        // UTC+8 时间
+        let dt = chrono::DateTime::from_timestamp(sig.time, 0)
+            .map(|dt| {
+                let offset = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+                dt.with_timezone(&offset)
+            })
+            .map(|d| d.format("%m-%d %H:%M").to_string())
+            .unwrap_or_else(|| sig.time.to_string());
+
+        let quality = if sig.strength > 0.7 && sig.near_swing != "none" {
+            "⭐⭐⭐优质"
+        } else if sig.strength > 0.5 {
+            "⭐⭐良好"
+        } else {
+            "⭐一般"
+        };
+
+        // 获取 OHLC 信息
+        let candle = self.candles.iter().find(|c| c.time == sig.time);
+        let ohlc_msg = if let Some(c) = candle {
+            format!(
+                "\n**OHLC:**\n- **O**: {:.2}\n- **H**: {:.2}\n- **L**: {:.2}\n- **C**: {:.2}",
+                c.open, c.high, c.low, c.close
+            )
+        } else {
+            String::new()
+        };
+
+        // 构建并发送钉钉消息
+        let signal_msg = format!(
+            "### 📊 PINBAR 信号\n\n\
+            - **交易对**: {}\n\
+            - **周期**: {}\n\
+            - **类型**: {}\n\
+            - **时间**: {} UTC+8\n\
+            - **价格**: ${:.2}\n\
+            - **强度**: {:.0}%\n\
+            - **实体**: {:.2}\n\
+            - **上影**: {:.2}\n\
+            - **下影**: {:.2}\n\
+            - **位置**: {}\n\
+            - **评估**: {}{}",
+            symbol,
+            self.timeframe,
+            direction,
+            dt,
+            sig.price,
+            sig.strength * 100.0,
+            sig.body_size,
+            sig.top_wick_size,
+            sig.bottom_wick_size,
+            near,
+            quality,
+            ohlc_msg
+        );
+
+        // 打印到终端
+        let ts = chrono::Local::now().format("%H:%M:%S");
+        println!();
+        println!("┌─────────────────────────────────────────────────────────────────────────────┐");
+        println!("│ [{}] {} {} PINBAR 信号检测                                      │", ts, symbol, self.timeframe);
+        println!("├─────┬────────┬───────────┬────────┬────────┬────────┬────────┬────────────┤");
+        println!("│ #   │ 类型    │ 时间(UTC+8)│ 价格   │ 强度   │ 实体   │ 上影   │ 下影   │ 位置    │ 评估       │");
+        println!("├─────┼────────┼───────────┼────────┼────────┼────────┼────────┼────────┼────────────┤");
+
+        for (i, sig) in signals.iter().enumerate() {
+            let direction = if sig.signal_type == "bullish" { "🐂做多" } else { "🐻做空" };
+            let near = match sig.near_swing.as_str() {
+                "low" => "Swing Low",
+                "high" => "Swing High",
+                _ => "远离结构",
+            };
+
+            // UTC+8 时间
+            let dt = chrono::DateTime::from_timestamp(sig.time, 0)
+                .map(|dt| {
+                    let offset = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+                    dt.with_timezone(&offset)
+                })
+                .map(|d| d.format("%m-%d %H:%M").to_string())
+                .unwrap_or_else(|| sig.time.to_string());
+
+            let quality = if sig.strength > 0.7 && sig.near_swing != "none" {
+                "⭐⭐⭐优质"
+            } else if sig.strength > 0.5 {
+                "⭐⭐良好"
+            } else {
+                "⭐一般"
+            };
+
+            println!(
+                "│ {:3} │ {:6} │ {} │ {:7.2} │ {:5.0}% │ {:6.2} │ {:6.2} │ {:6.2} │ {:10} │ {} │",
+                i + 1,
+                direction,
+                dt,
+                sig.price,
+                sig.strength * 100.0,
+                sig.body_size,
+                sig.top_wick_size,
+                sig.bottom_wick_size,
+                near,
+                quality
+            );
+        }
+
+        println!("└─────────────────────────────────────────────────────────────────────────────┘");
+        println!();
+
+        // 发送钉钉通知
+        let _ = notification::send_dingtalk_markdown("PINBAR 信号", &signal_msg);
+
+        // 返回最新的信号
+        Some(Signal {
+            time: sig.time,
+            signal_type: sig.signal_type.clone(),
+            price: sig.price,
+            direction: direction.to_string(),
+            quality: quality.to_string(),
+        })
     }
+}
+
+/// PINBAR 信号结构
+struct Signal {
+    time: i64,
+    signal_type: String,
+    price: f64,
+    direction: String,
+    quality: String,
 }
 
 #[tokio::main]
@@ -719,7 +767,7 @@ async fn main() -> anyhow::Result<()> {
                                         key,
                                         cache.candles.len());
 
-                                    // PINBAR 检测（新的完整K线）
+                                    // PINBAR 检测（新的完整K线）- detect_and_notify 内部会发送钉钉通知
                                     let parts: Vec<&str> = key.split('@').collect();
                                     if parts.len() == 2 {
                                         cache.detect_and_notify(parts[0]);
