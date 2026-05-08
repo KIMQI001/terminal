@@ -21,7 +21,7 @@ struct DingtalkResponse {
     errmsg: String,
 }
 
-/// 生成钉钉签名 (HMAC-SHA256)
+/// 生成钉钉签名 (HMAC-SHA256 + Base64)
 fn generate_sign(timestamp: i64, secret: &str) -> String {
     let string_to_sign = format!("{}\n{}", timestamp, secret);
     let key = secret.as_bytes();
@@ -34,15 +34,40 @@ fn generate_sign(timestamp: i64, secret: &str) -> String {
     mac.update(string_to_sign.as_bytes());
     let result = mac.finalize();
 
-    // 转换为 hex 字符串
-    let sign: String = result
-        .into_bytes()
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect();
+    // Base64 编码
+    let sign = base64_encode(&result.into_bytes());
 
     // URL encode
     urlencoding::encode(&sign).to_string()
+}
+
+/// Base64 编码
+fn base64_encode(data: &[u8]) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::new();
+
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as i32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as i32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as i32;
+
+        result.push(ALPHABET[((b0 >> 2) & 0x3F) as usize] as char);
+        result.push(ALPHABET[(((b0 << 4) | (b1 >> 4)) & 0x3F) as usize] as char);
+
+        if chunk.len() > 1 {
+            result.push(ALPHABET[(((b1 << 2) | (b2 >> 6)) & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+
+        if chunk.len() > 2 {
+            result.push(ALPHABET[(b2 & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+
+    result
 }
 
 /// 发送 Markdown 消息到钉钉
