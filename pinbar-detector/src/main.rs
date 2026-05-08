@@ -215,12 +215,13 @@ impl KlineCache {
         // 检查是否是新股或者更新最后一根
         if let Some(last) = self.candles.last() {
             if last.time == candle.time {
-                // 更新最后一根
+                // 更新最后一根（K线还在更新中，不算新的完整K线）
                 self.candles.pop();
                 self.candles.push(candle);
                 return;
             }
         }
+        // 新K线（完整的K线）
         self.candles.push(candle);
         // 限制缓存大小
         if self.candles.len() > 5000 {
@@ -229,7 +230,8 @@ impl KlineCache {
         self.update_count += 1;
     }
 
-    fn detect_and_print(&self, symbol: &str) {
+    /// 检测并打印 PINBAR 信号（仅在完整的旧K线后调用）
+    fn detect_and_notify(&self, symbol: &str) {
         if self.candles.len() < 50 {
             return;
         }
@@ -290,9 +292,7 @@ impl KlineCache {
 
                 // 发送钉钉通知（最新信号）
                 if i == 0 {
-                    // 找到对应的 K 线获取 OHLC
                     let candle = self.candles.iter().find(|c| c.time == sig.time);
-
                     let ohlc_msg = if let Some(c) = candle {
                         format!(
                             "\n**OHLC:**\n- **O**: {:.2}\n- **H**: {:.2}\n- **L**: {:.2}\n- **C**: {:.2}",
@@ -383,7 +383,7 @@ async fn main() -> anyhow::Result<()> {
                     if let Some(cache) = caches.get_mut(&key) {
                         cache.load_from_api(data.klines);
                         // 加载后立即检测一次
-                        cache.detect_and_print(symbol);
+                        cache.detect_and_notify(symbol);
                     }
                 }
             }
@@ -509,37 +509,37 @@ async fn main() -> anyhow::Result<()> {
                                 volume: data.volume,
                             };
 
-                            // 更新所有匹配的缓存（简化处理：更新所有）
+                            // 更新所有缓存（简化处理：更新所有）
                             for (key, cache) in caches.iter_mut() {
                                 let prev_len = cache.candles.len();
                                 cache.push(candle.clone());
 
-                                // 每 10 根 K 线检测一次 Pinbar
-                                if cache.update_count > 0 && cache.update_count % 10 == 0 {
+                                // 只有在新K线添加时（非更新最后一根）才检测
+                                if cache.candles.len() > prev_len {
+                                    // PINBAR 检测（新的完整K线）
                                     let parts: Vec<&str> = key.split('@').collect();
                                     if parts.len() == 2 {
-                                        cache.detect_and_print(parts[0]);
+                                        cache.detect_and_notify(parts[0]);
                                     }
-                                }
 
-                                // 倍量报警检测（每次 K 线更新都检测）
-                                // 只有当 K 线数量增加（新的完整 K 线）时才检测
-                                if cache.candles.len() > prev_len && cache.candles.len() >= 4 {
-                                    if let Some((index, ratio, small_index)) =
-                                        check_volume_alert(&cache.candles)
-                                    {
-                                        let parts: Vec<&str> = key.split('@').collect();
-                                        if parts.len() == 2 {
-                                            let symbol = parts[0];
-                                            let candles = cache.candles.clone();
-                                            send_volume_alert(
-                                                symbol,
-                                                &candles,
-                                                index,
-                                                ratio,
-                                                small_index,
-                                            )
-                                            .await;
+                                    // 倍量报警检测
+                                    if cache.candles.len() >= 4 {
+                                        if let Some((index, ratio, small_index)) =
+                                            check_volume_alert(&cache.candles)
+                                        {
+                                            let parts: Vec<&str> = key.split('@').collect();
+                                            if parts.len() == 2 {
+                                                let symbol = parts[0];
+                                                let candles = cache.candles.clone();
+                                                send_volume_alert(
+                                                    symbol,
+                                                    &candles,
+                                                    index,
+                                                    ratio,
+                                                    small_index,
+                                                )
+                                                .await;
+                                            }
                                         }
                                     }
                                 }
