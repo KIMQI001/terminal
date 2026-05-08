@@ -292,6 +292,47 @@ pub async fn place_stop_loss_order(
     anyhow::bail!("止损单失败: {}", msg)
 }
 
+/// 下止盈单 (TAKE_PROFIT_MARKET)
+pub async fn place_take_profit_order(
+    config: &BinanceConfig,
+    symbol: &str,
+    side: &str,           // 平仓方向 BUY(空头平) or SELL(多头平)
+    position_side: &str,  // LONG or SHORT
+    quantity: f64,
+    take_profit_price: f64,
+    client_order_id: &str,
+) -> anyhow::Result<String> {
+    let timestamp = chrono::Utc::now().timestamp_millis();
+    let (qty_precision, price_precision) = get_precision(symbol);
+    let query = format!(
+        "symbol={}&side={}&positionSide={}&type=TAKE_PROFIT_MARKET&quantity={}&triggerPrice={}&timestamp={}&newClientOrderId={}&algoType=CONDITIONAL",
+        symbol, side, position_side,
+        format_quantity(quantity, qty_precision),
+        format_price(take_profit_price, price_precision),
+        timestamp,
+        client_order_id
+    );
+    let signature = generate_signature(&query, &config.api_secret);
+    let url = format!("{}/fapi/v1/orderAlgo?{}&signature={}", config.base_url(), query, signature);
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .header("X-MBX-APIKEY", &config.api_key)
+        .send()
+        .await?;
+
+    let data: serde_json::Value = resp.json().await?;
+
+    if let Some(algo_id) = data.get("algoId").and_then(|v| v.as_str()) {
+        println!("[Binance] 止盈单成功: {} {} {} {}@{}", position_side, side, quantity, symbol, take_profit_price);
+        return Ok(algo_id.to_string());
+    }
+
+    let msg = data.get("msg").and_then(|v| v.as_str()).unwrap_or("未知错误");
+    anyhow::bail!("止盈单失败: {}", msg)
+}
+
 /// 获取当前挂单
 pub async fn get_open_orders(config: &BinanceConfig, symbol: &str) -> anyhow::Result<Vec<OpenOrderInfo>> {
     let timestamp = chrono::Utc::now().timestamp_millis();

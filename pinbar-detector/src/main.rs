@@ -210,6 +210,30 @@ async fn send_volume_alert(
                                 warn!("止损单失败: {}", e);
                             }
                         }
+
+                        // 下止盈单（300点止盈）
+                        let take_profit_price = if order_side == "BUY" {
+                            entry_price + 300.0
+                        } else {
+                            entry_price - 300.0
+                        };
+                        let tp_client_id = format!("{}@tp", client_order_id_prefix);
+                        match crate::binance::place_take_profit_order(
+                            config,
+                            symbol,
+                            stop_side,
+                            position_side,
+                            quantity,
+                            take_profit_price,
+                            &tp_client_id,
+                        ).await {
+                            Ok(algo_id) => {
+                                info!("止盈单成功: algoId={}", algo_id);
+                            }
+                            Err(e) => {
+                                warn!("止盈单失败: {}", e);
+                            }
+                        }
                     }
                 }
                 Err(e) => {
