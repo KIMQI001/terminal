@@ -318,6 +318,79 @@ async fn main() -> anyhow::Result<()> {
 
     println!("\n历史数据加载完成，开始监听实时 K 线...\n");
 
+    // 发送最近信号的钉钉通知
+    for (symbol, tf) in &subscriptions {
+        let key = format!("{}@{}", symbol, tf);
+        if let Some(cache) = caches.get(&key) {
+            if cache.candles.len() >= 50 {
+                let signals = detect_recent_pinbars(
+                    &cache.candles,
+                    SWING_LENGTH,
+                    SWING_RANGE,
+                    1, // 只发最新的一个
+                );
+
+                if !signals.is_empty() {
+                    let sig = &signals[0];
+                    let direction = if sig.signal_type == "bullish" { "🐂做多" } else { "🐻做空" };
+                    let near = match sig.near_swing.as_str() {
+                        "low" => "Swing Low",
+                        "high" => "Swing High",
+                        _ => "远离结构",
+                    };
+
+                    // UTC+8 时间
+                    let dt = chrono::DateTime::from_timestamp(sig.time, 0)
+                        .map(|dt| {
+                            let offset = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+                            dt.with_timezone(&offset)
+                        })
+                        .map(|d| d.format("%m-%d %H:%M").to_string())
+                        .unwrap_or_else(|| sig.time.to_string());
+
+                    let quality = if sig.strength > 0.7 && sig.near_swing != "none" {
+                        "⭐⭐⭐优质"
+                    } else if sig.strength > 0.5 {
+                        "⭐⭐良好"
+                    } else {
+                        "⭐一般"
+                    };
+
+                    let signal_msg = format!(
+                        "### 📊 最近检测到的 PINBAR 信号\n\n\
+                        - **交易对**: {}\n\
+                        - **周期**: {}\n\
+                        - **类型**: {}\n\
+                        - **时间**: {} UTC+8\n\
+                        - **价格**: ${:.2}\n\
+                        - **强度**: {:.0}%\n\
+                        - **实体**: {:.2}\n\
+                        - **上影**: {:.2}\n\
+                        - **下影**: {:.2}\n\
+                        - **位置**: {}\n\
+                        - **评估**: {}\n\n\
+                        _服务已启动，实时监控中..._",
+                        symbol,
+                        tf,
+                        direction,
+                        dt,
+                        sig.price,
+                        sig.strength * 100.0,
+                        sig.body_size,
+                        sig.top_wick_size,
+                        sig.bottom_wick_size,
+                        near,
+                        quality
+                    );
+
+                    if let Err(e) = notification::send_dingtalk_markdown("最近 PINBAR 信号", &signal_msg).await {
+                        eprintln!("[启动] 发送最近信号失败: {}", e);
+                    }
+                }
+            }
+        }
+    }
+
     // 2. 连接到 WebSocket 实时更新
     info!("Connecting to WebSocket for real-time updates...");
     let (ws_stream, _) = connect_async(KLINE_SERVER_URL).await?;
