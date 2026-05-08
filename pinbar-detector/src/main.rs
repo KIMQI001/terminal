@@ -489,9 +489,12 @@ async fn main() -> anyhow::Result<()> {
     info!("Subscribed to all timeframes");
 
     // 3. 处理实时 K 线
+    println!("等待 WebSocket 消息...");
     while let Some(msg) = read.next().await {
+        println!("[{}] 收到 WebSocket 消息: {:?}", chrono::Local::now().format("%H:%M:%S"), msg);
         match msg? {
             Message::Text(text) => {
+                println!("[{}] 消息内容: {}", chrono::Local::now().format("%H:%M:%S"), text);
                 if let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&text) {
                     if ws_msg.msg_type == "KlineUpdate" {
                         if let Some(data) = ws_msg.data {
