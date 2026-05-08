@@ -4,7 +4,9 @@
 //! 2. WebSocket 实时更新 K 线
 //! 3. 实时检测 Pinbar 信号并输出到终端
 //! 4. 检测 15m 倍量报警并发送钉钉通知
+//! 5. 自动下单（限价单 + 止损）
 
+mod binance;
 mod notification;
 
 use futures_util::{SinkExt, StreamExt};
@@ -113,13 +115,14 @@ fn check_volume_alert(candles: &[Candle]) -> Option<(usize, f64, usize)> {
     None
 }
 
-/// 格式化倍量报警消息并发送钉钉
+/// 格式化倍量报警消息并发送钉钉，同时自动下单
 async fn send_volume_alert(
-    _symbol: &str,
+    symbol: &str,
     candles: &[Candle],
     vol_index: usize,      // 倍量K线位置
     ratio: f64,
     small_index: usize,    // 小实体K线位置
+    binance_config: Option<&crate::binance::BinanceConfig>,
 ) {
     let vol_candle = &candles[vol_index];
     let small_candle = &candles[small_index];
@@ -132,17 +135,85 @@ async fn send_volume_alert(
     let small_emoji = if small_candle.close >= small_candle.open { "🟢" } else { "🔴" };
 
     // 交易方向：倍量阴线→下跌到高潮→应该做多；倍量阳线→上涨到高潮→应该做空
-    let (direction, direction_emoji) = if vol_is_bearish {
-        ("做多", "🐂")
+    let (direction, direction_emoji, order_side, position_side) = if vol_is_bearish {
+        ("做多", "🐂", "BUY", "LONG")
     } else {
-        ("做空", "🐻")
+        ("做空", "🐻", "SELL", "SHORT")
     };
 
     // 入场价格：小实体K线的开盘价
     let entry_price = small_candle.open;
 
-    // 止损价格：倍量K线和小实体K线的最低价中的较低者
-    let stop_loss = vol_candle.low.min(small_candle.low);
+    // 止损价格：倍量K线和小实体K线的最低价中的较低者（做多）
+    // 做空则用两者的最高价
+    let stop_loss = if vol_is_bearish {
+        vol_candle.low.min(small_candle.low)
+    } else {
+        vol_candle.high.max(small_candle.high)
+    };
+
+    // 自动下单
+    if let Some(config) = binance_config {
+        // 获取可用余额（USDC）
+        match crate::binance::get_balance(config, "USDC").await {
+            Ok(balance) => {
+                let use_amount = balance / 2.0; // 可用金额的一半
+                let leverage = 20;
+                let quantity = (use_amount * leverage as f64) / entry_price;
+                let client_order_id_prefix = format!("vol_{}", chrono::Utc::now().timestamp_millis());
+
+                // 取消所有挂单
+                if let Err(e) = crate::binance::cancel_all_orders(config, symbol).await {
+                    warn!("取消挂单失败: {}", e);
+                }
+
+                // 下限价单（入场）
+                let order_id = match crate::binance::place_limit_order(
+                    config,
+                    symbol,
+                    order_side,
+                    position_side,
+                    entry_price,
+                    quantity,
+                    &format!("{}@entry", client_order_id_prefix),
+                ).await {
+                    Ok(id) => {
+                        info!("入场单成功: orderId={}", id);
+                        Some(id)
+                    }
+                    Err(e) => {
+                        warn!("入场单失败: {}", e);
+                        None
+                    }
+                };
+
+                // 下止损单
+                if order_id.is_some() {
+                    let stop_side = if order_side == "BUY" { "SELL" } else { "BUY" };
+                    let stop_client_id = format!("{}@stop", client_order_id_prefix);
+                    match crate::binance::place_stop_loss_order(
+                        config,
+                        symbol,
+                        stop_side,
+                        position_side,
+                        quantity,
+                        stop_loss,
+                        &stop_client_id,
+                    ).await {
+                        Ok(algo_id) => {
+                            info!("止损单成功: algoId={}", algo_id);
+                        }
+                        Err(e) => {
+                            warn!("止损单失败: {}", e);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("获取余额失败: {}", e);
+            }
+        }
+    }
 
     // UTC+8 时间
     let vol_dt = chrono::DateTime::from_timestamp(vol_candle.time, 0)
@@ -407,6 +478,14 @@ async fn main() -> anyhow::Result<()> {
         ("BTCUSDC", "15m"),
     ];
 
+    // 初始化 Binance 配置（从环境变量读取）
+    let binance_config = crate::binance::BinanceConfig::from_env();
+    if binance_config.is_some() {
+        println!("✅ Binance 配置已加载");
+    } else {
+        println!("⚠️  未配置 Binance API（不下单）");
+    }
+
     // 初始化缓存
     let mut caches: HashMap<String, KlineCache> = subscriptions
         .iter()
@@ -522,7 +601,7 @@ async fn main() -> anyhow::Result<()> {
                     // 设置 last_volume_time 避免启动后再发一次
                     cache.last_volume_time = Some(cache.candles[index].time);
                     let candles = cache.candles.clone();
-                    send_volume_alert(symbol, &candles, index, ratio, small_index).await;
+                    send_volume_alert(symbol, &candles, index, ratio, small_index, binance_config.as_ref()).await;
                 }
             }
         }
@@ -600,6 +679,7 @@ async fn main() -> anyhow::Result<()> {
                                                         vol_index,
                                                         ratio,
                                                         small_index,
+                                                        binance_config.as_ref(),
                                                     )
                                                     .await;
                                                 }
