@@ -535,34 +535,35 @@ pub async fn get_positions(config: &BinanceConfig, symbol: &str) -> anyhow::Resu
     Ok(positions)
 }
 
-/// 下追踪止盈单 (TRAILING_STOP_MARKET)
+/// 下追踪止盈单 (使用 /fapi/v1/order 的 STOP_LOSS/TAKE_PROFIT + trailingDelta)
 /// activationPrice: 激活价格（盈利至此价格后开始追踪）
-/// callbackRate: 回撤比例 0.1-10 (代表 0.1%-10%)
-/// 盈利300点后回调100点，即 callbackRate = 100/价格 ≈ 0.125% 约等于 0.13
+/// trailingDelta: 回调点数（从激活价回撤多少点后触发）
+/// 盈利300点激活，回调100点触发
 pub async fn place_trailing_stop_order(
     config: &BinanceConfig,
     symbol: &str,
     side: &str,           // 平仓方向 BUY(空头平) or SELL(多头平)
     position_side: &str,  // LONG or SHORT
     quantity: f64,
-    callback_rate: f64,   // 回撤比例 0.1-10
-    activation_price: f64,
+    activation_price: f64,  // 激活价格（触发价格）
+    trailing_delta: f64,   // 回调点数
     client_order_id: &str,
 ) -> anyhow::Result<String> {
     let timestamp = chrono::Utc::now().timestamp_millis();
     let (qty_precision, price_precision) = get_precision(symbol);
-    // 追踪止盈用 activatePrice 而非 triggerPrice，clientOrderId 改为 clientAlgoId
+    // 使用 STOP_LOSS 或 TAKE_PROFIT + trailingDelta 实现追踪止盈
+    let order_type = if side == "SELL" { "STOP_LOSS" } else { "TAKE_PROFIT" };
     let query = format!(
-        "symbol={}&side={}&positionSide={}&type=TRAILING_STOP_MARKET&quantity={}&callbackRate={}&activatePrice={}&timestamp={}&clientAlgoId={}&algoType=CONDITIONAL",
-        symbol, side, position_side,
+        "symbol={}&side={}&positionSide={}&type={}&quantity={}&stopPrice={}&trailingDelta={}&timestamp={}&newClientOrderId={}",
+        symbol, side, position_side, order_type,
         format_quantity(quantity, qty_precision),
-        callback_rate,
         format_price(activation_price, price_precision),
+        trailing_delta as i64,  // trailingDelta 必须是整数
         timestamp,
         client_order_id
     );
     let signature = generate_signature(&query, &config.api_secret);
-    let url = format!("{}/fapi/v1/algoOrder?{}&signature={}", config.base_url(), query, signature);
+    let url = format!("{}/fapi/v1/order?{}&signature={}", config.base_url(), query, signature);
 
     let client = reqwest::Client::new();
     let resp = client
@@ -574,10 +575,8 @@ pub async fn place_trailing_stop_order(
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
 
-    // 打印响应状态和内容用于调试
     println!("[Binance] 追踪止盈响应: status={}, body={}", status, body);
 
-    // 尝试解析 JSON
     let data: serde_json::Value = match serde_json::from_str(&body) {
         Ok(v) => v,
         Err(e) => {
@@ -586,10 +585,10 @@ pub async fn place_trailing_stop_order(
         }
     };
 
-    if let Some(algo_id) = data.get("algoId").and_then(|v| v.as_str()) {
-        println!("[Binance] 追踪止盈成功: {} {} {} 激活=${:.2} 回撤={}%",
-            position_side, side, quantity, activation_price, callback_rate);
-        return Ok(algo_id.to_string());
+    if let Some(order_id) = data.get("orderId").and_then(|v| v.as_u64()) {
+        println!("[Binance] 追踪止盈成功: {} {} {} 激活=${:.2} 回调={}点 orderId={}",
+            position_side, side, quantity, activation_price, trailing_delta as i64, order_id);
+        return Ok(order_id.to_string());
     }
 
     let msg = data.get("msg").and_then(|v| v.as_str()).unwrap_or("未知错误");
