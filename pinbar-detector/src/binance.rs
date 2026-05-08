@@ -484,3 +484,100 @@ pub async fn get_open_orders(config: &BinanceConfig, symbol: &str) -> anyhow::Re
 
     Ok(orders)
 }
+
+/// 仓位信息
+#[derive(Debug)]
+pub struct PositionInfo {
+    pub symbol: String,
+    pub position_side: String,
+    pub position_amt: f64,
+    pub entry_price: f64,
+    pub mark_price: f64,
+    pub un_realized_profit: f64,
+}
+
+/// 获取当前持仓
+pub async fn get_positions(config: &BinanceConfig, symbol: &str) -> anyhow::Result<Vec<PositionInfo>> {
+    let timestamp = chrono::Utc::now().timestamp_millis();
+    let query = format!("symbol={}&timestamp={}", symbol, timestamp);
+    let signature = generate_signature(&query, &config.api_secret);
+    let url = format!("{}/fapi/v2/positionRisk?{}&signature={}", config.base_url(), query, signature);
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("X-MBX-APIKEY", &config.api_key)
+        .send()
+        .await?;
+
+    let data: Vec<serde_json::Value> = resp.json().await?;
+
+    let positions = data
+        .into_iter()
+        .filter(|p| {
+            let amt = p.get("positionAmt").and_then(|v| v.as_str()).unwrap_or("0");
+            amt.parse::<f64>().unwrap_or(0.0).abs() > 0.001
+        })
+        .map(|p| PositionInfo {
+            symbol: p.get("symbol").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            position_side: p.get("positionSide").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            position_amt: p.get("positionAmt").and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0),
+            entry_price: p.get("entryPrice").and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0),
+            mark_price: p.get("markPrice").and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0),
+            un_realized_profit: p.get("unRealizedProfit").and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0),
+        })
+        .collect();
+
+    Ok(positions)
+}
+
+/// 下追踪止盈单 (TRAILING_STOP_MARKET)
+/// activationPrice: 激活价格（盈利至此价格后开始追踪）
+/// callbackRate: 回撤比例 0.1-10 (代表 0.1%-10%)
+/// 盈利300点后回调100点，即 callbackRate = 100/价格 ≈ 0.125% 约等于 0.13
+pub async fn place_trailing_stop_order(
+    config: &BinanceConfig,
+    symbol: &str,
+    side: &str,           // 平仓方向 BUY(空头平) or SELL(多头平)
+    position_side: &str,  // LONG or SHORT
+    quantity: f64,
+    callback_rate: f64,   // 回撤比例 0.1-10
+    activation_price: f64,
+    client_order_id: &str,
+) -> anyhow::Result<String> {
+    let timestamp = chrono::Utc::now().timestamp_millis();
+    let (qty_precision, price_precision) = get_precision(symbol);
+    let query = format!(
+        "symbol={}&side={}&positionSide={}&type=TRAILING_STOP_MARKET&quantity={}&callbackRate={}&triggerPrice={}&timestamp={}&newClientOrderId={}&algoType=CONDITIONAL",
+        symbol, side, position_side,
+        format_quantity(quantity, qty_precision),
+        callback_rate,
+        format_price(activation_price, price_precision),
+        timestamp,
+        client_order_id
+    );
+    let signature = generate_signature(&query, &config.api_secret);
+    let url = format!("{}/fapi/v1/orderAlgo?{}&signature={}", config.base_url(), query, signature);
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .header("X-MBX-APIKEY", &config.api_key)
+        .send()
+        .await?;
+
+    let data: serde_json::Value = resp.json().await?;
+
+    if let Some(algo_id) = data.get("algoId").and_then(|v| v.as_str()) {
+        println!("[Binance] 追踪止盈成功: {} {} {} 激活=${:.2} 回撤={}%",
+            position_side, side, quantity, activation_price, callback_rate);
+        return Ok(algo_id.to_string());
+    }
+
+    let msg = data.get("msg").and_then(|v| v.as_str()).unwrap_or("未知错误");
+    anyhow::bail!("追踪止盈失败: {}", msg)
+}

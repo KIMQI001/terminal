@@ -211,7 +211,7 @@ async fn send_volume_alert(
                             }
                         }
 
-                        // 下止盈单（300点止盈）- clientOrderId 只允许 [.A-Z:/a-z0-9_-]
+                        // 下固定止盈单（300点保底）
                         let take_profit_price = if order_side == "BUY" {
                             entry_price + 300.0
                         } else {
@@ -232,6 +232,33 @@ async fn send_volume_alert(
                             }
                             Err(e) => {
                                 warn!("止盈单失败: {}", e);
+                            }
+                        }
+
+                        // 下追踪止盈单（盈利300点激活，回调100点触发）
+                        let activation_price = if order_side == "BUY" {
+                            entry_price + 300.0
+                        } else {
+                            entry_price - 300.0
+                        };
+                        // callbackRate = 100点 / 激活价 ≈ 0.13% (Binance 用百分比，0.13 表示 0.13%)
+                        let callback_rate = 0.13;
+                        let trail_client_id = format!("{}_tr", client_order_id_prefix);
+                        match crate::binance::place_trailing_stop_order(
+                            config,
+                            symbol,
+                            stop_side,
+                            position_side,
+                            quantity,
+                            callback_rate,
+                            activation_price,
+                            &trail_client_id,
+                        ).await {
+                            Ok(algo_id) => {
+                                info!("追踪止盈成功: algoId={}, 激活价={}, 回撤={}%", algo_id, activation_price, callback_rate);
+                            }
+                            Err(e) => {
+                                warn!("追踪止盈失败: {}", e);
                             }
                         }
                     }
@@ -345,6 +372,106 @@ async fn send_volume_alert(
 
     if let Err(e) = notification::send_dingtalk_markdown("15m 倍量报警", &message).await {
         warn!("钉钉通知发送失败: {}", e);
+    }
+}
+
+/// 监控现有仓位，为没有追踪止盈的仓位添加追踪止盈
+/// 盈利300点后激活，回调100点触发平仓
+async fn monitor_positions(config: &crate::binance::BinanceConfig, symbol: &str) {
+    let activation_profit = 300.0;  // 盈利300点激活
+    let callback_profit = 100.0;    // 回调100点触发
+
+    loop {
+        // 每5分钟检查一次
+        tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
+
+        info!("[仓位监控] 检查 {} 持仓...", symbol);
+
+        // 获取当前持仓
+        match crate::binance::get_positions(config, symbol).await {
+            Ok(positions) => {
+                if positions.is_empty() {
+                    info!("[仓位监控] 无持仓");
+                    continue;
+                }
+
+                for pos in positions.iter() {
+                    let entry_price = pos.entry_price;
+                    let quantity = pos.position_amt.abs();
+                    let position_side = &pos.position_side;
+
+                    info!("[仓位监控] 发现持仓: {} {} @ ${:.2}", position_side, quantity, entry_price);
+
+                    // 计算激活价格和回撤比例
+                    let (activation_price, callback_rate) = if position_side == "LONG" {
+                        // 多单：价格上涨 activation_profit 点后激活，回调 callback_profit 点触发
+                        (entry_price + activation_profit, callback_profit / (entry_price + activation_profit) * 100.0)
+                    } else {
+                        // 空单：价格下跌 activation_profit 点后激活，回调 callback_profit 点触发
+                        (entry_price - activation_profit, callback_profit / (entry_price - activation_profit) * 100.0)
+                    };
+
+                    // 检查是否已有追踪止盈单
+                    match crate::binance::get_algo_orders(config, symbol).await {
+                        Ok(existing_orders) => {
+                            // 查找是否已有追踪止盈单（属于当前持仓）
+                            let has_trailing = existing_orders.iter().any(|o| {
+                                o.order_type == "TRAILING_STOP_MARKET" &&
+                                o.position_side == *position_side
+                            });
+
+                            if has_trailing {
+                                info!("[仓位监控] {} 已有追踪止盈，跳过", position_side);
+                                continue;
+                            }
+
+                            // 没有追踪止盈，下一个
+                            let close_side = if position_side == "LONG" { "SELL" } else { "BUY" };
+                            let client_id = format!("mon_tr_{}_{}", position_side.to_lowercase(), chrono::Utc::now().timestamp_millis());
+
+                            info!("[仓位监控] 添加追踪止盈: {} {} 激活价=${:.2} 回撤={:.2}%",
+                                position_side, quantity, activation_price, callback_rate);
+
+                            match crate::binance::place_trailing_stop_order(
+                                config,
+                                symbol,
+                                close_side,
+                                position_side,
+                                quantity,
+                                callback_rate,
+                                activation_price,
+                                &client_id,
+                            ).await {
+                                Ok(algo_id) => {
+                                    info!("[仓位监控] 追踪止盈成功: algoId={}", algo_id);
+                                    // 发送钉钉通知
+                                    let direction = if position_side == "LONG" { "多单" } else { "空单" };
+                                    let msg = format!(
+                                        "### 📊 仓位监控 - 添加追踪止盈\n\n\
+                                        - **持仓**: {} {} @ ${:.2}\n\
+                                        - **方向**: {}\n\
+                                        - **激活价**: ${:.2} (盈利300点)\n\
+                                        - **回撤**: {:.2}% (回调100点)\n\
+                                        - **数量**: {:.4}",
+                                        symbol, direction, entry_price, direction, activation_price, callback_rate, quantity
+                                    );
+                                    let _ = notification::send_dingtalk_markdown("仓位监控 - 追踪止盈", &msg);
+                                }
+                                Err(e) => {
+                                    warn!("[仓位监控] 追踪止盈失败: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            warn!("[仓位监控] 获取挂单失败: {}", e);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("[仓位监控] 获取持仓失败: {}", e);
+            }
+        }
     }
 }
 
@@ -738,7 +865,16 @@ async fn main() -> anyhow::Result<()> {
     }
     info!("Subscribed to all timeframes");
 
-    // 3. 处理实时 K 线
+    // 3. 启动仓位监控（定期检查现有仓位，添加追踪止盈）
+    let binance_config_clone = binance_config.clone();
+    let monitor_symbol = subscriptions.first().unwrap().0.clone();
+    tokio::spawn(async move {
+        if let Some(config) = binance_config_clone {
+            monitor_positions(&config, &monitor_symbol).await;
+        }
+    });
+
+    // 4. 处理实时 K 线
     while let Some(msg) = read.next().await {
         match msg? {
             Message::Text(text) => {
