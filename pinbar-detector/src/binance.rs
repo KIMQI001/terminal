@@ -122,21 +122,21 @@ struct BalanceResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct OpenOrderInfo {
+pub struct OpenOrderInfo {
     #[serde(rename = "orderId")]
-    order_id: u64,
-    symbol: String,
+    pub order_id: u64,
+    pub symbol: String,
     #[serde(rename = "clientOrderId")]
-    client_order_id: String,
-    side: String,
+    pub client_order_id: String,
+    pub side: String,
     #[serde(rename = "positionSide")]
-    position_side: String,
+    pub position_side: String,
     #[serde(rename = "origQty")]
-    orig_qty: String,
-    price: String,
+    pub orig_qty: String,
+    pub price: String,
     #[serde(rename = "type")]
-    order_type: String,
-    status: String,
+    pub order_type: String,
+    pub status: String,
 }
 
 // 交易对精度配置
@@ -289,4 +289,38 @@ pub async fn place_stop_loss_order(
 
     let msg = data.get("msg").and_then(|v| v.as_str()).unwrap_or("未知错误");
     anyhow::bail!("止损单失败: {}", msg)
+}
+
+/// 获取当前挂单
+pub async fn get_open_orders(config: &BinanceConfig, symbol: &str) -> anyhow::Result<Vec<OpenOrderInfo>> {
+    let timestamp = chrono::Utc::now().timestamp_millis();
+    let query = format!("symbol={}&timestamp={}", symbol, timestamp);
+    let signature = generate_signature(&query, &config.api_secret);
+    let url = format!("{}/fapi/v1/openOrders?{}&signature={}", config.base_url(), query, signature);
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("X-MBX-APIKEY", &config.api_key)
+        .send()
+        .await?;
+
+    let data: Vec<serde_json::Value> = resp.json().await?;
+
+    let orders = data
+        .iter()
+        .map(|order| OpenOrderInfo {
+            order_id: order.get("orderId").and_then(|v| v.as_u64()).unwrap_or(0),
+            symbol: order.get("symbol").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            client_order_id: order.get("clientOrderId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            side: order.get("side").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            position_side: order.get("positionSide").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            orig_qty: order.get("origQty").and_then(|v| v.as_str()).unwrap_or("0").to_string(),
+            price: order.get("price").and_then(|v| v.as_str()).unwrap_or("0").to_string(),
+            order_type: order.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            status: order.get("status").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        })
+        .collect();
+
+    Ok(orders)
 }

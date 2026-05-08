@@ -115,7 +115,7 @@ fn check_volume_alert(candles: &[Candle]) -> Option<(usize, f64, usize)> {
     None
 }
 
-/// 格式化倍量报警消息并发送钉钉，同时自动下单
+/// 格式化倍量报警消息并发送钉钉，同时可选自动下单
 async fn send_volume_alert(
     symbol: &str,
     candles: &[Candle],
@@ -123,6 +123,7 @@ async fn send_volume_alert(
     ratio: f64,
     small_index: usize,    // 小实体K线位置
     binance_config: Option<&crate::binance::BinanceConfig>,
+    should_trade: bool,    // 是否实际下单，false=仅报警（启动时）
 ) {
     let vol_candle = &candles[vol_index];
     let small_candle = &candles[small_index];
@@ -152,65 +153,68 @@ async fn send_volume_alert(
         vol_candle.high.max(small_candle.high)
     };
 
-    // 自动下单
-    if let Some(config) = binance_config {
-        // 获取可用余额（USDC）
-        match crate::binance::get_balance(config, "USDC").await {
-            Ok(balance) => {
-                let use_amount = balance / 2.0; // 可用金额的一半
-                let leverage = 20;
-                let quantity = (use_amount * leverage as f64) / entry_price;
-                let client_order_id_prefix = format!("vol_{}", chrono::Utc::now().timestamp_millis());
+    // 仅在 should_trade=true 时下单（运行时），启动时不下单
+    let mut quantity = 0.0;
+    if should_trade {
+        if let Some(config) = binance_config {
+            // 获取可用余额（USDC）
+            match crate::binance::get_balance(config, "USDC").await {
+                Ok(balance) => {
+                    let use_amount = balance / 2.0; // 可用金额的一半
+                    let leverage = 20;
+                    quantity = (use_amount * leverage as f64) / entry_price;
+                    let client_order_id_prefix = format!("vol_{}", chrono::Utc::now().timestamp_millis());
 
-                // 取消所有挂单
-                if let Err(e) = crate::binance::cancel_all_orders(config, symbol).await {
-                    warn!("取消挂单失败: {}", e);
-                }
-
-                // 下限价单（入场）
-                let order_id = match crate::binance::place_limit_order(
-                    config,
-                    symbol,
-                    order_side,
-                    position_side,
-                    entry_price,
-                    quantity,
-                    &format!("{}@entry", client_order_id_prefix),
-                ).await {
-                    Ok(id) => {
-                        info!("入场单成功: orderId={}", id);
-                        Some(id)
+                    // 取消所有挂单
+                    if let Err(e) = crate::binance::cancel_all_orders(config, symbol).await {
+                        warn!("取消挂单失败: {}", e);
                     }
-                    Err(e) => {
-                        warn!("入场单失败: {}", e);
-                        None
-                    }
-                };
 
-                // 下止损单
-                if order_id.is_some() {
-                    let stop_side = if order_side == "BUY" { "SELL" } else { "BUY" };
-                    let stop_client_id = format!("{}@stop", client_order_id_prefix);
-                    match crate::binance::place_stop_loss_order(
+                    // 下限价单（入场）
+                    let order_id = match crate::binance::place_limit_order(
                         config,
                         symbol,
-                        stop_side,
+                        order_side,
                         position_side,
+                        entry_price,
                         quantity,
-                        stop_loss,
-                        &stop_client_id,
+                        &format!("{}@entry", client_order_id_prefix),
                     ).await {
-                        Ok(algo_id) => {
-                            info!("止损单成功: algoId={}", algo_id);
+                        Ok(id) => {
+                            info!("入场单成功: orderId={}", id);
+                            Some(id)
                         }
                         Err(e) => {
-                            warn!("止损单失败: {}", e);
+                            warn!("入场单失败: {}", e);
+                            None
+                        }
+                    };
+
+                    // 下止损单
+                    if order_id.is_some() {
+                        let stop_side = if order_side == "BUY" { "SELL" } else { "BUY" };
+                        let stop_client_id = format!("{}@stop", client_order_id_prefix);
+                        match crate::binance::place_stop_loss_order(
+                            config,
+                            symbol,
+                            stop_side,
+                            position_side,
+                            quantity,
+                            stop_loss,
+                            &stop_client_id,
+                        ).await {
+                            Ok(algo_id) => {
+                                info!("止损单成功: algoId={}", algo_id);
+                            }
+                            Err(e) => {
+                                warn!("止损单失败: {}", e);
+                            }
                         }
                     }
                 }
-            }
-            Err(e) => {
-                warn!("获取余额失败: {}", e);
+                Err(e) => {
+                    warn!("获取余额失败: {}", e);
+                }
             }
         }
     }
@@ -234,13 +238,48 @@ async fn send_volume_alert(
 
     let small_body = (small_candle.close - small_candle.open).abs();
 
+    // 如果不下单（启动时），获取余额和挂单信息
+    let mut account_info = String::new();
+    if !should_trade {
+        if let Some(config) = binance_config {
+            // 获取余额
+            if let Ok(balance) = crate::binance::get_balance(config, "USDC").await {
+                account_info.push_str(&format!("\n**账户余额**: ${:.2} USDC\n", balance));
+            }
+            // 获取挂单
+            match crate::binance::get_open_orders(config, symbol).await {
+                Ok(orders) => {
+                    if orders.is_empty() {
+                        account_info.push_str("**当前挂单**: 无\n");
+                    } else {
+                        account_info.push_str("**当前挂单**:\n");
+                        for order in orders.iter().take(5) {
+                            account_info.push_str(&format!(
+                                "- {} {} {} @ ${} (ID: {})\n",
+                                order.side, order.position_side, order.orig_qty, order.price, order.order_id
+                            ));
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("获取挂单失败: {}", e);
+                }
+            }
+        }
+    }
+
+    let trade_info = if should_trade {
+        format!("\n**订单数量**: {:.4}\n", quantity)
+    } else {
+        String::new()
+    };
+
     let message = format!(
         "### 📊 15m 倍量反转信号
 
 **交易方向**: {} {}
-
 **入场价格**: ${:.2}
-**止损价格**: ${:.2}
+**止损价格**: ${:.2}{}{}
 
 **倍量K线:**
 - **时间**: {} UTC+8
@@ -261,6 +300,8 @@ async fn send_volume_alert(
         direction_emoji,
         entry_price,
         stop_loss,
+        trade_info,
+        account_info,
         vol_dt,
         vol_candle.close,
         vol_emoji,
@@ -602,7 +643,8 @@ async fn main() -> anyhow::Result<()> {
                     // 设置 last_volume_time 避免启动后再发一次
                     cache.last_volume_time = Some(cache.candles[index].time);
                     let candles = cache.candles.clone();
-                    send_volume_alert(symbol, &candles, index, ratio, small_index, binance_config.as_ref()).await;
+                    // 启动时 should_trade=false，仅报警不下单
+                    send_volume_alert(symbol, &candles, index, ratio, small_index, binance_config.as_ref(), false).await;
                 }
             }
         }
@@ -674,6 +716,7 @@ async fn main() -> anyhow::Result<()> {
                                                 if parts.len() == 2 {
                                                     let symbol = parts[0];
                                                     let candles = cache.candles.clone();
+                                                    // 运行时 should_trade=true，实际下单
                                                     send_volume_alert(
                                                         symbol,
                                                         &candles,
@@ -681,6 +724,7 @@ async fn main() -> anyhow::Result<()> {
                                                         ratio,
                                                         small_index,
                                                         binance_config.as_ref(),
+                                                        true,
                                                     )
                                                     .await;
                                                 }
