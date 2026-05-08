@@ -1,6 +1,7 @@
 //! 钉钉通知模块
 
 use serde::{Deserialize, Serialize};
+use std::env;
 
 /// 钉钉消息
 #[derive(Debug, Serialize)]
@@ -72,13 +73,15 @@ fn base64_encode(data: &[u8]) -> String {
 
 /// 发送 Markdown 消息到钉钉
 pub async fn send_dingtalk_markdown(title: &str, text: &str) -> anyhow::Result<()> {
-    // 钉钉 Webhook 配置
-    let webhook = "https://oapi.dingtalk.com/robot/send?access_token=55406d8790e82483e866e9388c2877befe9c69fb188e63b090e1b5563479fb1f";
-    let secret = "SECc84a436bc1f37629247c2a4dd9179554862537943b904075b2bf207fc3db0219";
+    // 从环境变量读取钉钉配置
+    let webhook = env::var("DINGTALK_WEBHOOK")
+        .unwrap_or_else(|_| "https://oapi.dingtalk.com/robot/send?access_token=xxx".to_string());
+    let secret = env::var("DINGTALK_SECRET")
+        .unwrap_or_else(|_| "xxx".to_string());
 
     // 生成签名
     let timestamp = chrono::Utc::now().timestamp_millis();
-    let sign = generate_sign(timestamp, secret);
+    let sign = generate_sign(timestamp, &secret);
     let url = format!("{}&timestamp={}&sign={}", webhook, timestamp, sign);
 
     let message = DingtalkMessage {
