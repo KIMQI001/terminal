@@ -90,11 +90,21 @@ fn check_volume_alert(candles: &[Candle]) -> Option<(usize, f64, usize)> {
 
             // 返回满足条件的小K线位置
             if next1_body < 100.0 {
-                info!("倍量反转: 位置={}, 比例={:.1}x, 小K线位置={}, 实体={:.2}", i, ratio, i + 1, next1_body);
+                let vol_is_bearish = current.close < current.open;
+                let direction = if vol_is_bearish { "做多 🐂" } else { "做空 🐻" };
+                let entry = candles[i + 1].open;
+                let stop = current.low.min(candles[i + 1].low);
+                info!("倍量反转: 位置={}, 比例={:.1}x, 小K线位置={}, 实体={:.2}, 方向={}, 入场=${:.2}, 止损=${:.2}",
+                    i, ratio, i + 1, next1_body, direction, entry, stop);
                 return Some((i, ratio, i + 1));
             }
             if next2_body < 100.0 {
-                info!("倍量反转: 位置={}, 比例={:.1}x, 小K线位置={}, 实体={:.2}", i, ratio, i + 2, next2_body);
+                let vol_is_bearish = current.close < current.open;
+                let direction = if vol_is_bearish { "做多 🐂" } else { "做空 🐻" };
+                let entry = candles[i + 2].open;
+                let stop = current.low.min(candles[i + 2].low);
+                info!("倍量反转: 位置={}, 比例={:.1}x, 小K线位置={}, 实体={:.2}, 方向={}, 入场=${:.2}, 止损=${:.2}",
+                    i, ratio, i + 2, next2_body, direction, entry, stop);
                 return Some((i, ratio, i + 2));
             }
         }
@@ -114,11 +124,25 @@ async fn send_volume_alert(
     let vol_candle = &candles[vol_index];
     let small_candle = &candles[small_index];
 
-    let vol_direction = if vol_candle.close >= vol_candle.open { "阳线" } else { "阴线" };
-    let vol_emoji = if vol_candle.close >= vol_candle.open { "🟢" } else { "🔴" };
+    let vol_is_bearish = vol_candle.close < vol_candle.open;
+    let vol_direction = if vol_is_bearish { "阴线" } else { "阳线" };
+    let vol_emoji = if vol_is_bearish { "🔴" } else { "🟢" };
 
     let small_direction = if small_candle.close >= small_candle.open { "阳线" } else { "阴线" };
     let small_emoji = if small_candle.close >= small_candle.open { "🟢" } else { "🔴" };
+
+    // 交易方向：倍量阴线→下跌到高潮→应该做多；倍量阳线→上涨到高潮→应该做空
+    let (direction, direction_emoji) = if vol_is_bearish {
+        ("做多", "🐂")
+    } else {
+        ("做空", "🐻")
+    };
+
+    // 入场价格：小实体K线的开盘价
+    let entry_price = small_candle.open;
+
+    // 止损价格：倍量K线和小实体K线的最低价中的较低者
+    let stop_loss = vol_candle.low.min(small_candle.low);
 
     // UTC+8 时间
     let vol_dt = chrono::DateTime::from_timestamp(vol_candle.time, 0)
@@ -142,6 +166,11 @@ async fn send_volume_alert(
     let message = format!(
         "### 📊 15m 倍量反转信号
 
+**交易方向**: {} {}
+
+**入场价格**: ${:.2}
+**止损价格**: ${:.2}
+
 **倍量K线:**
 - **时间**: {} UTC+8
 - **价格**: ${:.2}
@@ -157,6 +186,10 @@ async fn send_volume_alert(
 - **方向**: {} {}
 
 ---",
+        direction,
+        direction_emoji,
+        entry_price,
+        stop_loss,
         vol_dt,
         vol_candle.close,
         vol_emoji,
