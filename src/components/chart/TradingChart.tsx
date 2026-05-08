@@ -1193,24 +1193,30 @@ export function TradingChart() {
   return (
     <div className="w-full h-full relative">
       {ohlcvData && (
-        <div className="absolute top-0 left-0 right-0 z-20 bg-[#ffffff]/95 backdrop-blur-sm border-b border-gray-200 px-3 py-1.5 flex items-center gap-4 text-xs font-mono pointer-events-none">
-          <span className="text-gray-500">
+        <div className="absolute top-0 left-0 right-0 z-20 bg-[#ffffff]/95 backdrop-blur-sm border-b border-gray-200 px-3 py-1.5 flex items-center gap-3 text-xs font-mono pointer-events-none">
+          <span className="text-gray-400">
             {new Date(ohlcvData.time * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
           </span>
           <span className={ohlcvData.close >= ohlcvData.open ? 'text-green-600' : 'text-red-600'}>
             O <span className="font-semibold">{ohlcvData.open.toFixed(2)}</span>
           </span>
-          <span className="text-gray-700">
+          <span className="text-gray-600">
             H <span className="font-semibold">{ohlcvData.high.toFixed(2)}</span>
           </span>
-          <span className="text-gray-700">
+          <span className="text-gray-600">
             L <span className="font-semibold">{ohlcvData.low.toFixed(2)}</span>
           </span>
           <span className={ohlcvData.close >= ohlcvData.open ? 'text-green-600' : 'text-red-600'}>
             C <span className="font-semibold">{ohlcvData.close.toFixed(2)}</span>
           </span>
-          <span className="text-gray-500">
-            V <span className="font-semibold">{ohlcvData.volume.toFixed(2)}</span>
+          <span className="text-blue-600">
+            V <span className="font-semibold">
+              {ohlcvData.volume >= 1e6
+                ? (ohlcvData.volume / 1e6).toFixed(2) + 'M'
+                : ohlcvData.volume >= 1e3
+                  ? (ohlcvData.volume / 1e3).toFixed(2) + 'K'
+                  : ohlcvData.volume.toFixed(2)}
+            </span>
           </span>
         </div>
       )}
