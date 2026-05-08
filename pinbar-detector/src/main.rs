@@ -13,6 +13,7 @@ use futures_util::{SinkExt, StreamExt};
 use pinbar_detector::{detect_recent_pinbars, Candle};
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::env;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -28,6 +29,22 @@ const RECENT_SIGNALS_LIMIT: usize = 5;
 
 /// Swing Point 检测长度
 const SWING_LENGTH: usize = 50;
+
+/// 固定止盈点数（从环境变量读取，默认300点）
+fn get_fixed_profit_points() -> f64 {
+    env::var("FIXED_PROFIT_POINTS")
+        .unwrap_or_else(|_| "300".to_string())
+        .parse::<f64>()
+        .unwrap_or(300.0)
+}
+
+/// 回调点数（从环境变量读取，默认100点）
+fn get_callback_profit_points() -> f64 {
+    env::var("CALLBACK_PROFIT_POINTS")
+        .unwrap_or_else(|_| "100".to_string())
+        .parse::<f64>()
+        .unwrap_or(100.0)
+}
 
 /// Swing Point 附近范围
 const SWING_RANGE: usize = 5;
@@ -211,11 +228,12 @@ async fn send_volume_alert(
                             }
                         }
 
-                        // 下固定止盈单（300点保底）
+                        // 下固定止盈单（固定点数保底）
+                        let fixed_profit_points = get_fixed_profit_points();
                         let take_profit_price = if order_side == "BUY" {
-                            entry_price + 300.0
+                            entry_price + fixed_profit_points
                         } else {
-                            entry_price - 300.0
+                            entry_price - fixed_profit_points
                         };
                         let tp_client_id = format!("{}_tp", client_order_id_prefix);
                         match crate::binance::place_take_profit_order(
@@ -235,12 +253,11 @@ async fn send_volume_alert(
                             }
                         }
 
-                        // 下追踪止盈单（盈利300点激活，回调约0.13%触发）
-                        // callbackRate = 100点/80000 ≈ 0.125%，Binance 用百分比表示
+                        // 下追踪止盈单（盈利固定点数激活）
                         let activation_price = if order_side == "BUY" {
-                            entry_price + 300.0
+                            entry_price + fixed_profit_points
                         } else {
-                            entry_price - 300.0
+                            entry_price - fixed_profit_points
                         };
                         let callback_rate = 13.0;  // 13基点 = 0.13%
                         let trail_client_id = format!("{}_tr", client_order_id_prefix);
@@ -376,10 +393,9 @@ async fn send_volume_alert(
 }
 
 /// 监控现有仓位，为没有追踪止盈的仓位添加追踪止盈
-/// 盈利300点后激活，回调100点触发平仓
 async fn monitor_positions(config: &crate::binance::BinanceConfig, symbol: &str) {
-    let activation_profit = 300.0;  // 盈利300点激活
-    let callback_profit = 100.0;    // 回调100点触发
+    let activation_profit = get_fixed_profit_points();  // 从环境变量读取
+    let callback_profit = get_callback_profit_points();  // 从环境变量读取
 
     // 第一次执行不等待，直接检查
     let check_and_add_trailing = || async {
