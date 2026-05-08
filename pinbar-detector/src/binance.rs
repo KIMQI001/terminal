@@ -190,14 +190,16 @@ pub async fn get_balance(config: &BinanceConfig, asset: &str) -> anyhow::Result<
     Ok(0.0)
 }
 
-/// 取消所有挂单
+/// 取消所有挂单（普通订单 + Algo 条件单）
 pub async fn cancel_all_orders(config: &BinanceConfig, symbol: &str) -> anyhow::Result<()> {
     let timestamp = chrono::Utc::now().timestamp_millis();
     let query = format!("symbol={}&timestamp={}", symbol, timestamp);
     let signature = generate_signature(&query, &config.api_secret);
-    let url = format!("{}/fapi/v1/allOpenOrders?{}&signature={}", config.base_url(), query, signature);
 
     let client = reqwest::Client::new();
+
+    // 1. 取消所有普通挂单
+    let url = format!("{}/fapi/v1/allOpenOrders?{}&signature={}", config.base_url(), query, signature);
     let resp = client
         .delete(&url)
         .header("X-MBX-APIKEY", &config.api_key)
@@ -205,8 +207,39 @@ pub async fn cancel_all_orders(config: &BinanceConfig, symbol: &str) -> anyhow::
         .await?;
 
     let _data: serde_json::Value = resp.json().await?;
+    println!("[Binance] 已取消 {} 所有普通挂单", symbol);
 
-    println!("[Binance] 已取消 {} 所有挂单", symbol);
+    // 2. 取消所有 Algo 条件单（需要逐个取消）
+    let algo_query = format!("symbol={}&timestamp={}", symbol, timestamp);
+    let algo_signature = generate_signature(&algo_query, &config.api_secret);
+    let algo_url = format!("{}/fapi/v1/openAlgoOrders?{}&signature={}", config.base_url(), algo_query, algo_signature);
+
+    let algo_resp = client
+        .get(&algo_url)
+        .header("X-MBX-APIKEY", &config.api_key)
+        .send()
+        .await?;
+
+    if let Ok(algo_data) = algo_resp.json::<Vec<serde_json::Value>>().await {
+        for algo_order in algo_data.iter() {
+            if let Some(algo_id) = algo_order.get("algoId").and_then(|v| v.as_u64()) {
+                let cancel_query = format!("symbol={}&algoId={}&timestamp={}", symbol, algo_id, chrono::Utc::now().timestamp_millis());
+                let cancel_sig = generate_signature(&cancel_query, &config.api_secret);
+                let cancel_url = format!("{}/fapi/v1/algoOrder?{}&signature={}", config.base_url(), cancel_query, cancel_sig);
+
+                let cancel_resp = client
+                    .delete(&cancel_url)
+                    .header("X-MBX-APIKEY", &config.api_key)
+                    .send()
+                    .await;
+
+                if cancel_resp.is_ok() {
+                    println!("[Binance] 已取消 Algo 单: algoId={}", algo_id);
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
