@@ -535,6 +535,46 @@ pub async fn get_positions(config: &BinanceConfig, symbol: &str) -> anyhow::Resu
     Ok(positions)
 }
 
+/// 市价平仓（反向开单关闭现有仓位）
+pub async fn close_position_market(
+    config: &BinanceConfig,
+    symbol: &str,
+    position_side: &str,  // LONG or SHORT
+    quantity: f64,
+) -> anyhow::Result<u64> {
+    let timestamp = chrono::Utc::now().timestamp_millis();
+    let (qty_precision, _) = get_precision(symbol);
+
+    // 平仓方向：LONG -> SELL 平多，SHORT -> BUY 平空
+    let side = if position_side == "LONG" { "SELL" } else { "BUY" };
+
+    let query = format!(
+        "symbol={}&side={}&positionSide={}&type=MARKET&quantity={}&timestamp={}",
+        symbol, side, position_side,
+        format_quantity(quantity, qty_precision),
+        timestamp
+    );
+    let signature = generate_signature(&query, &config.api_secret);
+    let url = format!("{}/fapi/v1/order?{}&signature={}", config.base_url(), query, signature);
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .header("X-MBX-APIKEY", &config.api_key)
+        .send()
+        .await?;
+
+    let data: serde_json::Value = resp.json().await?;
+
+    if let Some(order_id) = data.get("orderId").and_then(|v| v.as_u64()) {
+        println!("[Binance] 市价平仓成功: {} {} {} orderId={}", position_side, side, quantity, order_id);
+        return Ok(order_id);
+    }
+
+    let msg = data.get("msg").and_then(|v| v.as_str()).unwrap_or("未知错误");
+    anyhow::bail!("市价平仓失败: {}", msg)
+}
+
 /// 下追踪止盈单 (使用 /fapi/v1/algoOrder + TRAILING_STOP_MARKET)
 /// activation_price: 激活价格（盈利至此价格后开始追踪）
 /// callback_rate: 回撤比例（0.1-10，代表 0.1%-10%）

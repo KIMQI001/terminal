@@ -195,6 +195,41 @@ async fn send_volume_alert(
                         warn!("取消挂单失败: {}", e);
                     }
 
+                    // 检查现有仓位，如果有反向仓位先平仓
+                    match crate::binance::get_positions(config, symbol).await {
+                        Ok(positions) => {
+                            for pos in positions.iter() {
+                                let pos_amt = pos.position_amt.abs();
+                                if pos_amt < 0.001 {
+                                    continue;
+                                }
+                                // 如果现有仓位与信号方向相反，平仓
+                                let needs_close = if position_side == "LONG" && pos.position_side == "SHORT" {
+                                    true
+                                } else if position_side == "SHORT" && pos.position_side == "LONG" {
+                                    true
+                                } else {
+                                    false
+                                };
+
+                                if needs_close {
+                                    info!("[反向平仓] {} -> {}", pos.position_side, position_side);
+                                    match crate::binance::close_position_market(config, symbol, &pos.position_side, pos_amt).await {
+                                        Ok(order_id) => {
+                                            info!("反向平仓成功: orderId={}", order_id);
+                                        }
+                                        Err(e) => {
+                                            warn!("反向平仓失败: {}", e);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            warn!("获取持仓失败: {}", e);
+                        }
+                    }
+
                     // 下限价单（入场）- clientOrderId 只允许 [.A-Z:/a-z0-9_-]
                     let order_id = match crate::binance::place_limit_order(
                         config,
