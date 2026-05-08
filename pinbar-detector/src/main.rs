@@ -405,8 +405,10 @@ async fn monitor_positions(config: &crate::binance::BinanceConfig, symbol: &str)
                     } else {
                         entry_price - activation_profit
                     };
-                    // callbackRate 是百分比（0.1-10），100点/80000 ≈ 0.125%
-                    let callback_rate = callback_profit / activation_price * 100.0;
+                    // callbackRate 最小值是 0.1（代表 0.1%），100点/80000 ≈ 0.125% 接近最小值
+                    // 为了确保有效，使用固定值 0.2（0.2%）或者按比例但最低 0.1
+                    let raw_callback = callback_profit / activation_price * 100.0;
+                    let callback_rate = raw_callback.max(0.1).min(10.0);  // 确保在有效范围 0.1-10
 
                     // 检查是否已有追踪止盈单
                     match crate::binance::get_algo_orders(config, symbol).await {
