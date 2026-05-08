@@ -184,11 +184,7 @@ async fn main() -> anyhow::Result<()> {
     println!("==========================================\n");
 
     let subscriptions = vec![
-        ("BTCUSDC", "5m"),
         ("BTCUSDC", "15m"),
-        ("BTCUSDC", "1h"),
-        ("BTCUSDC", "4h"),
-        ("BTCUSDC", "1d"),
     ];
 
     // 初始化缓存
