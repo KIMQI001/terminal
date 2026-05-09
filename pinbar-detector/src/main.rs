@@ -94,7 +94,8 @@ struct WsDataEnvelope {
 /// 倍量报警检测
 /// 检测条件：
 /// 1. 当前成交量 >= 前一根的 2 倍
-/// 2. 倍量K线往后两根K线有一根实体小于 100 美元
+/// 2. 倍量K线往前两根K线与当前K线同色
+/// 3. 倍量K线往后两根K线有一根实体小于 100 美元
 /// 返回：(倍量位置, 成交量倍数, 满足条件的小K线位置)
 fn check_volume_alert(candles: &[Candle]) -> Option<(usize, f64, usize)> {
     if candles.len() < 4 {
@@ -103,13 +104,23 @@ fn check_volume_alert(candles: &[Candle]) -> Option<(usize, f64, usize)> {
 
     // 从倒数第 2 根开始检查（倒数第 1 根可能还在更新）
     let len = candles.len();
-    for i in (1..len - 2).rev() {
+    for i in (2..len - 2).rev() {
         let prev = &candles[i - 1];
         let current = &candles[i];
 
         // 倍量检测：当前成交量 >= 前一根的 2 倍
         if prev.volume > 0.0 && current.volume >= prev.volume * 2.0 {
             let ratio = current.volume / prev.volume;
+
+            // 检查前两根K线是否与当前K线同色
+            let current_is_bullish = current.close >= current.open;
+            let prev1_is_bullish = candles[i - 1].close >= candles[i - 1].open;
+            let prev2_is_bullish = candles[i - 2].close >= candles[i - 2].open;
+            let same_color_before = current_is_bullish == prev1_is_bullish && current_is_bullish == prev2_is_bullish;
+
+            if !same_color_before {
+                continue;
+            }
 
             // 检查后续两根 K 线实体是否有一根小于 100
             let next1_body = (candles[i + 1].close - candles[i + 1].open).abs();
