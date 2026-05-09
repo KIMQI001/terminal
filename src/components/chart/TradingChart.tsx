@@ -514,10 +514,15 @@ export function TradingChart() {
               const prevVolume = i > 0 ? (data[i - 1].volume ?? 0) : 0;
               const isHighVolume = prevVolume > 0 && (c.volume ?? 0) >= prevVolume * 2;
 
+              // 检查后两根K线实体是否有一根小于100点（用于判断是否变色）
+              const next1Body = i + 1 < data.length ? Math.abs((data[i + 1].close ?? 0) - (data[i + 1].open ?? 0)) : 0;
+              const next2Body = i + 2 < data.length ? Math.abs((data[i + 2].close ?? 0) - (data[i + 2].open ?? 0)) : 0;
+              const hasSmallBody = next1Body < 100 || next2Body < 100;
+
               // 普通：阳k白色透明，阴k黑色透明
-              // 倍量：阳k绿色，阴k红色
+              // 倍量 + 后两根有一根实体<100：阳k绿色，阴k红色
               let color: string;
-              if (isHighVolume) {
+              if (isHighVolume && hasSmallBody) {
                 color = c.close >= c.open ? 'rgba(34, 197, 94, 0.7)' : 'rgba(239, 68, 68, 0.7)';
               } else {
                 color = c.close >= c.open ? 'rgba(0, 0, 0, 0.2)' : 'rgba(0, 0, 0, 0.4)';
