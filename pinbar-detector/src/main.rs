@@ -212,12 +212,9 @@ async fn send_volume_alert(
                     quantity = (use_amount * leverage as f64) / entry_price;
                     let client_order_id_prefix = format!("vol_{}", chrono::Utc::now().timestamp_millis());
 
-                    // 取消所有挂单
-                    if let Err(e) = crate::binance::cancel_all_orders(config, symbol).await {
-                        warn!("取消挂单失败: {}", e);
-                    }
-
-                    // 检查现有仓位，如果有反向仓位先平仓
+                    // 先检查现有仓位
+                    let mut has_opposite_position = false;
+                    let mut has_same_position = false;
                     match crate::binance::get_positions(config, symbol).await {
                         Ok(positions) => {
                             for pos in positions.iter() {
@@ -225,8 +222,8 @@ async fn send_volume_alert(
                                 if pos_amt < 0.001 {
                                     continue;
                                 }
-                                // 如果现有仓位与信号方向相反，平仓
-                                let needs_close = if position_side == "LONG" && pos.position_side == "SHORT" {
+                                // 如果现有仓位与信号方向相反，标记需要平仓
+                                let is_opposite = if position_side == "LONG" && pos.position_side == "SHORT" {
                                     true
                                 } else if position_side == "SHORT" && pos.position_side == "LONG" {
                                     true
@@ -234,7 +231,8 @@ async fn send_volume_alert(
                                     false
                                 };
 
-                                if needs_close {
+                                if is_opposite {
+                                    has_opposite_position = true;
                                     info!("[反向平仓] {} -> {}", pos.position_side, position_side);
                                     match crate::binance::close_position_market(config, symbol, &pos.position_side, pos_amt).await {
                                         Ok(order_id) => {
@@ -244,6 +242,10 @@ async fn send_volume_alert(
                                             warn!("反向平仓失败: {}", e);
                                         }
                                     }
+                                } else {
+                                    // 同向仓位
+                                    has_same_position = true;
+                                    info!("[同向仓位] {} 已有持仓，跳过开仓", pos.position_side);
                                 }
                             }
                         }
@@ -252,96 +254,104 @@ async fn send_volume_alert(
                         }
                     }
 
-                    // 下限价单（入场）- clientOrderId 只允许 [.A-Z:/a-z0-9_-]
-                    let order_id = match crate::binance::place_limit_order(
-                        config,
-                        symbol,
-                        order_side,
-                        position_side,
-                        entry_price,
-                        quantity,
-                        &format!("{}_entry", client_order_id_prefix),
-                    ).await {
-                        Ok(id) => {
-                            info!("入场单成功: orderId={}", id);
-                            Some(id)
+                    // 只有在没有同向仓位时才取消挂单和下单
+                    if !has_same_position {
+                        // 取消所有挂单
+                        if let Err(e) = crate::binance::cancel_all_orders(config, symbol).await {
+                            warn!("取消挂单失败: {}", e);
                         }
-                        Err(e) => {
-                            warn!("入场单失败: {}", e);
-                            None
-                        }
-                    };
 
-                    // 下止损单 - clientOrderId 只允许 [.A-Z:/a-z0-9_-]
-                    if order_id.is_some() {
-                        let stop_side = if order_side == "BUY" { "SELL" } else { "BUY" };
-                        let stop_client_id = format!("{}_stop", client_order_id_prefix);
-                        match crate::binance::place_stop_loss_order(
+                        // 下限价单（入场）- clientOrderId 只允许 [.A-Z:/a-z0-9_-]
+                        let order_id = match crate::binance::place_limit_order(
                             config,
                             symbol,
-                            stop_side,
+                            order_side,
                             position_side,
+                            entry_price,
                             quantity,
-                            stop_loss,
-                            &stop_client_id,
+                            &format!("{}_entry", client_order_id_prefix),
                         ).await {
-                            Ok(algo_id) => {
-                                info!("止损单成功: algoId={}", algo_id);
+                            Ok(id) => {
+                                info!("入场单成功: orderId={}", id);
+                                Some(id)
                             }
                             Err(e) => {
-                                warn!("止损单失败: {}", e);
+                                warn!("入场单失败: {}", e);
+                                None
                             }
-                        }
-
-                        // 下固定止盈单（固定点数保底）
-                        let fixed_profit_points = get_fixed_profit_points();
-                        let take_profit_price = if order_side == "BUY" {
-                            entry_price + fixed_profit_points
-                        } else {
-                            entry_price - fixed_profit_points
                         };
-                        let tp_client_id = format!("{}_tp", client_order_id_prefix);
-                        match crate::binance::place_take_profit_order(
-                            config,
-                            symbol,
-                            stop_side,
-                            position_side,
-                            quantity,
-                            take_profit_price,
-                            &tp_client_id,
-                        ).await {
-                            Ok(algo_id) => {
-                                info!("止盈单成功: algoId={}", algo_id);
-                            }
-                            Err(e) => {
-                                warn!("止盈单失败: {}", e);
-                            }
-                        }
 
-                        // 下追踪止盈单（盈利追踪激活点数后激活）
-                        let trailing_activation_points = get_trailing_activation_points();
-                        let activation_price = if order_side == "BUY" {
-                            entry_price + trailing_activation_points
-                        } else {
-                            entry_price - trailing_activation_points
-                        };
-                        let callback_rate = 13.0;  // 13基点 = 0.13%
-                        let trail_client_id = format!("{}_tr", client_order_id_prefix);
-                        match crate::binance::place_trailing_stop_order(
-                            config,
-                            symbol,
-                            stop_side,
-                            position_side,
-                            quantity,
-                            activation_price,
-                            callback_rate,
-                            &trail_client_id,
-                        ).await {
-                            Ok(algo_id) => {
-                                info!("追踪止盈成功: algoId={}, 激活价={}, 回撤={}%", algo_id, activation_price, callback_rate);
+                        // 下止损单 - clientOrderId 只允许 [.A-Z:/a-z0-9_-]
+                        if order_id.is_some() {
+                            let stop_side = if order_side == "BUY" { "SELL" } else { "BUY" };
+                            let stop_client_id = format!("{}_stop", client_order_id_prefix);
+                            match crate::binance::place_stop_loss_order(
+                                config,
+                                symbol,
+                                stop_side,
+                                position_side,
+                                quantity,
+                                stop_loss,
+                                &stop_client_id,
+                            ).await {
+                                Ok(algo_id) => {
+                                    info!("止损单成功: algoId={}", algo_id);
+                                }
+                                Err(e) => {
+                                    warn!("止损单失败: {}", e);
+                                }
                             }
-                            Err(e) => {
-                                warn!("追踪止盈失败: {}", e);
+
+                            // 下固定止盈单（固定点数保底）
+                            let fixed_profit_points = get_fixed_profit_points();
+                            let take_profit_price = if order_side == "BUY" {
+                                entry_price + fixed_profit_points
+                            } else {
+                                entry_price - fixed_profit_points
+                            };
+                            let tp_client_id = format!("{}_tp", client_order_id_prefix);
+                            match crate::binance::place_take_profit_order(
+                                config,
+                                symbol,
+                                stop_side,
+                                position_side,
+                                quantity,
+                                take_profit_price,
+                                &tp_client_id,
+                            ).await {
+                                Ok(algo_id) => {
+                                    info!("止盈单成功: algoId={}", algo_id);
+                                }
+                                Err(e) => {
+                                    warn!("止盈单失败: {}", e);
+                                }
+                            }
+
+                            // 下追踪止盈单（盈利追踪激活点数后激活）
+                            let trailing_activation_points = get_trailing_activation_points();
+                            let activation_price = if order_side == "BUY" {
+                                entry_price + trailing_activation_points
+                            } else {
+                                entry_price - trailing_activation_points
+                            };
+                            let callback_rate = 13.0;  // 13基点 = 0.13%
+                            let trail_client_id = format!("{}_tr", client_order_id_prefix);
+                            match crate::binance::place_trailing_stop_order(
+                                config,
+                                symbol,
+                                stop_side,
+                                position_side,
+                                quantity,
+                                activation_price,
+                                callback_rate,
+                                &trail_client_id,
+                            ).await {
+                                Ok(algo_id) => {
+                                    info!("追踪止盈成功: algoId={}, 激活价={}, 回撤={}%", algo_id, activation_price, callback_rate);
+                                }
+                                Err(e) => {
+                                    warn!("追踪止盈失败: {}", e);
+                                }
                             }
                         }
                     }
