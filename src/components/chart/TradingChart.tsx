@@ -519,10 +519,16 @@ export function TradingChart() {
               const next2Body = i + 2 < data.length ? Math.abs((data[i + 2].close ?? 0) - (data[i + 2].open ?? 0)) : 0;
               const hasSmallBody = next1Body < 100 || next2Body < 100;
 
+              // 检查前两根K线是否和当前K线颜色相同
+              const isCurrentBullish = c.close >= c.open;
+              const prev1SameColor = i >= 1 ? (data[i - 1].close >= data[i - 1].open) === isCurrentBullish : false;
+              const prev2SameColor = i >= 2 ? (data[i - 2].close >= data[i - 2].open) === isCurrentBullish : false;
+              const hasSameColorBefore = prev1SameColor && prev2SameColor;
+
               // 普通：阳k白色透明，阴k黑色透明
-              // 倍量 + 后两根有一根实体<100：阳k绿色，阴k红色
+              // 倍量 + 后两根有一根实体<100 + 前两根同色：阳k绿色，阴k红色
               let color: string;
-              if (isHighVolume && hasSmallBody) {
+              if (isHighVolume && hasSmallBody && hasSameColorBefore) {
                 color = c.close >= c.open ? 'rgba(34, 197, 94, 0.7)' : 'rgba(239, 68, 68, 0.7)';
               } else {
                 color = c.close >= c.open ? 'rgba(0, 0, 0, 0.2)' : 'rgba(0, 0, 0, 0.4)';
