@@ -297,22 +297,23 @@ pub async fn place_stop_loss_order(
     let timestamp = chrono::Utc::now().timestamp_millis();
     let (qty_precision, price_precision) = get_precision(symbol);
 
-    // 构建 form data 格式参数
-    let params = serde_json::json!({
-        "algoType": "CONDITIONAL",
-        "symbol": symbol,
-        "side": side,
-        "positionSide": position_side,
-        "type": "STOP_MARKET",
-        "quantity": format_quantity(quantity, qty_precision),
-        "triggerPrice": format_price(stop_price, price_precision),
-        "timestamp": timestamp,
-        "clientAlgoId": client_order_id
-    });
+    // 手动构建 form data（不用 serde_json，避免值带引号）
+    let quantity_str = format!("{:.prec$}", quantity, prec = qty_precision as usize);
+    let trigger_price_str = format!("{:.prec$}", stop_price, prec = price_precision as usize);
+
+    let params = vec![
+        ("algoType".to_string(), "CONDITIONAL".to_string()),
+        ("symbol".to_string(), symbol.to_string()),
+        ("side".to_string(), side.to_string()),
+        ("positionSide".to_string(), position_side.to_string()),
+        ("type".to_string(), "STOP_MARKET".to_string()),
+        ("quantity".to_string(), quantity_str),
+        ("triggerPrice".to_string(), trigger_price_str),
+        ("timestamp".to_string(), timestamp.to_string()),
+        ("clientAlgoId".to_string(), client_order_id.to_string()),
+    ];
 
     let query_string = params
-        .as_object()
-        .unwrap()
         .iter()
         .map(|(k, v)| format!("{}={}", k, v))
         .collect::<Vec<_>>()
@@ -334,14 +335,14 @@ pub async fn place_stop_loss_order(
         .await?;
 
     let status = resp.status();
-    let body = resp.text().await?;
+    let response_body = resp.text().await?;
 
     if !status.is_success() {
-        println!("[Binance] 止损单失败: status={} body={}", status, body);
-        anyhow::bail!("止损单失败: status={}, body={}", status, body);
+        println!("[Binance] 止损单失败: status={} body={}", status, response_body);
+        anyhow::bail!("止损单失败: status={}, body={}", status, response_body);
     }
 
-    let data: serde_json::Value = serde_json::from_str(&body)?;
+    let data: serde_json::Value = serde_json::from_str(&response_body)?;
 
     if let Some(algo_id) = data.get("algoId").and_then(|v| v.as_str()) {
         println!("[Binance] 止损单成功: {} {} {} {}@{}", position_side, side, quantity, symbol, stop_price);
