@@ -993,7 +993,9 @@ async fn main() -> anyhow::Result<()> {
     while let Some(msg) = read.next().await {
         match msg? {
             Message::Text(text) => {
+                println!("[WS RAW] 收到消息: {}", &text[..text.len().min(200)]);
                 if let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&text) {
+                    println!("[WS] 解析成功, msg_type={}", ws_msg.msg_type);
                     if ws_msg.msg_type == "KlineUpdate" {
                         if let Some(envelope) = ws_msg.data {
                             let kline = envelope.data;
