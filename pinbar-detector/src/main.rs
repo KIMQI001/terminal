@@ -15,7 +15,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /// K线服务器地址
@@ -651,7 +651,7 @@ impl KlineCache {
 
         // 去重：如果信号的 K 线时间等于上次发送的时间，则跳过
         if self.last_pinbar_time == Some(sig.time) {
-            println!("[PINBAR] 去重跳过: {}", sig.time);
+            debug!("[PINBAR] 去重跳过: {}", sig.time);
             return None;
         }
 
@@ -989,13 +989,13 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // 5. 处理实时 K 线
-    println!("[DEBUG] 准备进入WebSocket循环");
+    debug!("[DEBUG] 准备进入WebSocket循环");
     while let Some(msg) = read.next().await {
         match msg? {
             Message::Text(text) => {
-                println!("[WS RAW] 收到消息: {}", &text[..text.len().min(200)]);
+                debug!("[WS] 收到消息: {}", &text[..text.len().min(200)]);
                 if let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&text) {
-                    println!("[WS] 解析成功, msg_type={}", ws_msg.msg_type);
+                    debug!("[WS] 解析成功, msg_type={}", ws_msg.msg_type);
                     if ws_msg.msg_type == "KlineUpdate" {
                         if let Some(envelope) = ws_msg.data {
                             let kline = envelope.data;
@@ -1015,7 +1015,7 @@ async fn main() -> anyhow::Result<()> {
 
                                 // 只有在新K线添加时（非更新最后一根）才检测
                                 if cache.candles.len() > prev_len {
-                                    println!("[{}] [Kline] 新K线到达: {} len={}",
+                                    debug!("[{}] [Kline] 新K线到达: {} len={}",
                                         chrono::Local::now().format("%H:%M:%S"),
                                         key,
                                         cache.candles.len());
@@ -1034,7 +1034,7 @@ async fn main() -> anyhow::Result<()> {
                                             // 去重：如果倍量K线时间等于上次发送的时间，则跳过
                                             let vol_time = cache.candles[vol_index].time;
                                             if cache.last_volume_time == Some(vol_time) {
-                                                println!("[Volume] 去重跳过: {}", vol_time);
+                                                debug!("[Volume] 去重跳过: {}", vol_time);
                                             } else {
                                                 cache.last_volume_time = Some(vol_time);
                                                 let parts: Vec<&str> = key.split('@').collect();
