@@ -337,18 +337,28 @@ pub async fn place_stop_loss_order(
     let status = resp.status();
     let response_body = resp.text().await?;
 
+    println!("[DEBUG] 止损单响应: status={} body={}", status, response_body);
+
     if !status.is_success() {
         println!("[Binance] 止损单失败: status={} body={}", status, response_body);
         anyhow::bail!("止损单失败: status={}, body={}", status, response_body);
     }
 
-    let data: serde_json::Value = serde_json::from_str(&response_body)?;
+    let data: serde_json::Value = match serde_json::from_str(&response_body) {
+        Ok(v) => v,
+        Err(e) => {
+            println!("[Binance] JSON解析失败: {} body={}", e, response_body);
+            anyhow::bail!("止损单响应解析失败: {}", e);
+        }
+    };
 
     if let Some(algo_id) = data.get("algoId").and_then(|v| v.as_str()) {
         println!("[Binance] 止损单成功: {} {} {} {}@{}", position_side, side, quantity, symbol, stop_price);
         return Ok(algo_id.to_string());
     }
 
+    // 没有algoId，打印完整响应看看 Binance 返回了什么
+    println!("[Binance] 止损单响应无algoId: {}", response_body);
     let msg = data.get("msg").and_then(|v| v.as_str()).unwrap_or("未知错误");
     anyhow::bail!("止损单失败: {}", msg)
 }
