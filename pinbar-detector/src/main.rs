@@ -966,13 +966,16 @@ async fn main() -> anyhow::Result<()> {
     }
     info!("Subscribed to all timeframes");
 
-    // 3. 启动时先执行一次仓位监控
-    println!("[DEBUG] 开始执行 monitor_positions...");
-    if let Some(ref config) = binance_config {
-        info!("[启动] 执行仓位监控...");
-        monitor_positions(config, &subscriptions.first().unwrap().0).await;
-    }
-    println!("[DEBUG] monitor_positions 执行完成");
+    // 3. 启动时先执行一次仓位监控（后台执行，不阻塞）
+    let binance_config_clone2 = binance_config.clone();
+    let monitor_symbol2 = subscriptions.first().unwrap().0.clone();
+    tokio::spawn(async move {
+        if let Some(config) = binance_config_clone2 {
+            info!("[启动] 执行仓位监控...");
+            monitor_positions(&config, &monitor_symbol2).await;
+            info!("[启动] 仓位监控完成");
+        }
+    });
 
     // 4. 启动仓位监控（定期检查现有仓位，添加追踪止盈）
     let binance_config_clone = binance_config.clone();
