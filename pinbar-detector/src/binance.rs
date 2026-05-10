@@ -284,7 +284,7 @@ pub async fn place_limit_order(
     anyhow::bail!("下限价单失败: {}", msg)
 }
 
-/// 下止损单 (STOP_MARKET)
+/// 下止损单 (STOP_MARKET) - 使用 Algo API
 pub async fn place_stop_loss_order(
     config: &BinanceConfig,
     symbol: &str,
@@ -296,25 +296,49 @@ pub async fn place_stop_loss_order(
 ) -> anyhow::Result<String> {
     let timestamp = chrono::Utc::now().timestamp_millis();
     let (qty_precision, price_precision) = get_precision(symbol);
-    let query = format!(
-        "symbol={}&side={}&positionSide={}&type=STOP_MARKET&quantity={}&triggerPrice={}&timestamp={}&newClientOrderId={}&algoType=CONDITIONAL",
-        symbol, side, position_side,
-        format_quantity(quantity, qty_precision),
-        format_price(stop_price, price_precision),
-        timestamp,
-        client_order_id
-    );
-    let signature = generate_signature(&query, &config.api_secret);
-    let url = format!("{}/fapi/v1/orderAlgo?{}&signature={}", config.base_url(), query, signature);
+
+    // 构建 form data 格式参数
+    let params = serde_json::json!({
+        "algoType": "CONDITIONAL",
+        "symbol": symbol,
+        "side": side,
+        "positionSide": position_side,
+        "type": "STOP_MARKET",
+        "quantity": format_quantity(quantity, qty_precision),
+        "triggerPrice": format_price(stop_price, price_precision),
+        "timestamp": timestamp,
+        "clientAlgoId": client_order_id
+    });
+
+    let query_string = params
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(k, v)| format!("{}={}", k, v))
+        .collect::<Vec<_>>()
+        .join("&");
+
+    let signature = generate_signature(&query_string, &config.api_secret);
+    let url = format!("{}/fapi/v1/algoOrder", config.base_url());
 
     let client = reqwest::Client::new();
     let resp = client
         .post(&url)
         .header("X-MBX-APIKEY", &config.api_key)
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(format!("{}&signature={}", query_string, signature))
         .send()
         .await?;
 
-    let data: serde_json::Value = resp.json().await?;
+    let status = resp.status();
+    let body = resp.text().await?;
+
+    if !status.is_success() {
+        println!("[Binance] 止损单失败: status={} body={}", status, body);
+        anyhow::bail!("止损单失败: status={}, body={}", status, body);
+    }
+
+    let data: serde_json::Value = serde_json::from_str(&body)?;
 
     if let Some(algo_id) = data.get("algoId").and_then(|v| v.as_str()) {
         println!("[Binance] 止损单成功: {} {} {} {}@{}", position_side, side, quantity, symbol, stop_price);
