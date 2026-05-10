@@ -322,11 +322,14 @@ pub async fn place_stop_loss_order(
     let url = format!("{}/fapi/v1/algoOrder", config.base_url());
 
     let client = reqwest::Client::new();
+    let body = format!("{}&signature={}", query_string, signature);
+    println!("[DEBUG] 止损单请求: url={} body={}", url, body);
+
     let resp = client
         .post(&url)
         .header("X-MBX-APIKEY", &config.api_key)
         .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(format!("{}&signature={}", query_string, signature))
+        .body(body)
         .send()
         .await?;
 
