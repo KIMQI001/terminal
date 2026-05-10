@@ -352,12 +352,20 @@ pub async fn place_stop_loss_order(
         }
     };
 
-    if let Some(algo_id) = data.get("algoId").and_then(|v| v.as_str()) {
+    if let Some(algo_id) = data.get("algoId") {
+        // algoId 可能是数字或字符串
+        let algo_id_str = match algo_id {
+            serde_json::Value::Number(n) => n.to_string(),
+            serde_json::Value::String(s) => s.clone(),
+            _ => {
+                println!("[Binance] 止损单响应无algoId: {}", response_body);
+                anyhow::bail!("止损单失败: algoId格式错误");
+            }
+        };
         println!("[Binance] 止损单成功: {} {} {} {}@{}", position_side, side, quantity, symbol, stop_price);
-        return Ok(algo_id.to_string());
+        return Ok(algo_id_str);
     }
 
-    // 没有algoId，打印完整响应看看 Binance 返回了什么
     println!("[Binance] 止损单响应无algoId: {}", response_body);
     let msg = data.get("msg").and_then(|v| v.as_str()).unwrap_or("未知错误");
     anyhow::bail!("止损单失败: {}", msg)
