@@ -338,7 +338,7 @@ async fn send_volume_alert(
                             } else {
                                 entry_price - trailing_activation_points
                             };
-                            let callback_rate = 13.0;  // 13基点 = 0.13%
+                            let callback_rate = (get_callback_profit_points() / entry_price * 10000.0).max(10.0).min(1000.0);  // 转为基点（BP），100点/81000 ≈ 12.3BP
                             let trail_client_id = format!("{}_tr", client_order_id_prefix);
                             match crate::binance::place_trailing_stop_order(
                                 config,
