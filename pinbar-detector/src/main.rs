@@ -967,10 +967,12 @@ async fn main() -> anyhow::Result<()> {
     info!("Subscribed to all timeframes");
 
     // 3. 启动时先执行一次仓位监控
+    println!("[DEBUG] 开始执行 monitor_positions...");
     if let Some(ref config) = binance_config {
         info!("[启动] 执行仓位监控...");
         monitor_positions(config, &subscriptions.first().unwrap().0).await;
     }
+    println!("[DEBUG] monitor_positions 执行完成");
 
     // 4. 启动仓位监控（定期检查现有仓位，添加追踪止盈）
     let binance_config_clone = binance_config.clone();
