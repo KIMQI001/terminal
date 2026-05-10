@@ -984,6 +984,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // 5. 处理实时 K 线
+    println!("[DEBUG] 准备进入WebSocket循环");
     while let Some(msg) = read.next().await {
         match msg? {
             Message::Text(text) => {
