@@ -178,11 +178,11 @@ async fn send_volume_alert(
         ("做空", "🐻", "SELL", "SHORT")
     };
 
-    // 入场价格：小实体K线的开盘价，偏离5个点避免现价吃单
+    // 入场价格：小实体K线的收盘价，偏离5个点避免现价吃单
     let entry_price = if vol_is_bearish {
-        small_candle.open - 5.0  // 做多减5点
+        small_candle.close - 5.0  // 做多减5点
     } else {
-        small_candle.open + 5.0  // 做空加5点
+        small_candle.close + 5.0  // 做空加5点
     };
 
     // 止损价格：倍量K线和小实体K线的最低价中的较低者（做多）
