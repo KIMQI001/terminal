@@ -505,7 +505,7 @@ async fn monitor_positions(config: &crate::binance::BinanceConfig, symbol: &str)
                     };
                     let callback_bps = ((callback_profit / activation_price * 10000.0) as i64).max(10).min(1000);  // 最小10基点（0.1%），最大1000（10%）
 
-                    // 检查是否已有追踪止盈单
+                    // 检查是否已有追踪止盈单和止损单
                     match crate::binance::get_algo_orders(config, symbol).await {
                         Ok(existing_orders) => {
                             // 追踪止盈单是 TRAILING_STOP_MARKET 类型
@@ -514,43 +514,93 @@ async fn monitor_positions(config: &crate::binance::BinanceConfig, symbol: &str)
                                 o.position_side == *position_side
                             });
 
+                            // 止损单是 STOP_MARKET 类型
+                            let has_stop_loss = existing_orders.iter().any(|o| {
+                                o.order_type == "STOP_MARKET" &&
+                                o.position_side == *position_side
+                            });
+
                             if has_trailing {
                                 info!("[仓位监控] {} 已有追踪止盈，跳过", position_side);
-                                continue;
                             }
 
-                            let close_side = if position_side == "LONG" { "SELL" } else { "BUY" };
-                            let client_id = format!("mon_tr_{}_{}", position_side.to_lowercase(), chrono::Utc::now().timestamp_millis());
+                            // 如果没有止损单，添加200点止损
+                            if !has_stop_loss {
+                                let stop_loss_price = if position_side == "LONG" {
+                                    entry_price - 200.0  // 多头止损：入场价 - 200点
+                                } else {
+                                    entry_price + 200.0  // 空头止损：入场价 + 200点
+                                };
+                                let close_side = if position_side == "LONG" { "SELL" } else { "BUY" };
+                                let stop_client_id = format!("mon_sl_{}_{}", position_side.to_lowercase(), chrono::Utc::now().timestamp_millis());
 
-                            info!("[仓位监控] 添加追踪止盈: {} {} 激活价=${:.2} 回调={}基点({:.1})",
-                                position_side, quantity, activation_price, callback_bps, callback_bps as f64 / 100.0);
+                                info!("[仓位监控] 添加止损单: {} {} 止损价=${:.2}", position_side, quantity, stop_loss_price);
 
-                            match crate::binance::place_trailing_stop_order(
-                                config,
-                                symbol,
-                                close_side,
-                                position_side,
-                                quantity,
-                                activation_price,
-                                callback_bps as f64,
-                                &client_id,
-                            ).await {
-                                Ok(algo_id) => {
-                                    info!("[仓位监控] 追踪止盈成功: algoId={}", algo_id);
-                                    let direction = if position_side == "LONG" { "多单" } else { "空单" };
-                                    let msg = format!(
-                                        "### 📊 仓位监控 - 添加追踪止盈\n\n\
-                                        - **持仓**: {} {} @ ${:.2}\n\
-                                        - **方向**: {}\n\
-                                        - **激活价**: ${:.2} (盈利300点)\n\
-                                        - **回调**: {}基点({:.2}%)\n\
-                                        - **数量**: {:.4}",
-                                        symbol, direction, entry_price, direction, activation_price, callback_bps, callback_bps as f64 / 100.0, quantity
-                                    );
-                                    let _ = notification::send_dingtalk_markdown("仓位监控 - 追踪止盈", &msg);
+                                match crate::binance::place_stop_loss_order(
+                                    config,
+                                    symbol,
+                                    close_side,
+                                    position_side,
+                                    quantity,
+                                    stop_loss_price,
+                                    &stop_client_id,
+                                ).await {
+                                    Ok(algo_id) => {
+                                        info!("[仓位监控] 止损单成功: algoId={}", algo_id);
+                                        let direction = if position_side == "LONG" { "多单" } else { "空单" };
+                                        let msg = format!(
+                                            "### 📊 仓位监控 - 添加止损单\n\n\
+                                            - **持仓**: {} {} @ ${:.2}\n\
+                                            - **方向**: {}\n\
+                                            - **止损价**: ${:.2} (200点)\n\
+                                            - **数量**: {:.4}",
+                                            symbol, direction, entry_price, direction, stop_loss_price, quantity
+                                        );
+                                        let _ = notification::send_dingtalk_markdown("仓位监控 - 止损单", &msg);
+                                    }
+                                    Err(e) => {
+                                        warn!("[仓位监控] 止损单失败: {}", e);
+                                    }
                                 }
-                                Err(e) => {
-                                    warn!("[仓位监控] 追踪止盈失败: {}", e);
+                            } else {
+                                info!("[仓位监控] {} 已有止损单，跳过", position_side);
+                            }
+
+                            // 如果没有追踪止盈，添加追踪止盈
+                            if !has_trailing {
+                                let close_side = if position_side == "LONG" { "SELL" } else { "BUY" };
+                                let client_id = format!("mon_tr_{}_{}", position_side.to_lowercase(), chrono::Utc::now().timestamp_millis());
+
+                                info!("[仓位监控] 添加追踪止盈: {} {} 激活价=${:.2} 回调={}基点({:.1})",
+                                    position_side, quantity, activation_price, callback_bps, callback_bps as f64 / 100.0);
+
+                                match crate::binance::place_trailing_stop_order(
+                                    config,
+                                    symbol,
+                                    close_side,
+                                    position_side,
+                                    quantity,
+                                    activation_price,
+                                    callback_bps as f64,
+                                    &client_id,
+                                ).await {
+                                    Ok(algo_id) => {
+                                        info!("[仓位监控] 追踪止盈成功: algoId={}", algo_id);
+                                        let direction = if position_side == "LONG" { "多单" } else { "空单" };
+                                        let msg = format!(
+                                            "### 📊 仓位监控 - 添加追踪止盈\n\n\
+                                            - **持仓**: {} {} @ ${:.2}\n\
+                                            - **方向**: {}\n\
+                                            - **激活价**: ${:.2} (盈利300点)\n\
+                                            - **回调**: {}基点({:.2}%)\n\
+                                            - **数量**: {:.4}",
+                                            symbol, direction, entry_price, direction, activation_price, callback_bps, callback_bps as f64 / 100.0, quantity
+                                        );
+                                        let _ = notification::send_dingtalk_markdown("仓位监控 - 追踪止盈", &msg);
+                                    }
+                                    Err(e) => {
+                                        warn!("[仓位监控] 追踪止盈失败: {}", e);
+                                    }
                                 }
                             }
                         }
