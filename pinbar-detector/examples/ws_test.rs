@@ -55,6 +55,6 @@ fn main() {
     }
 
     println!("\n=== USDC 合约测试 ===");
-    println!("USDC 合约 WebSocket: wss://dapi.binance.com/ws/btcusdc@kline_15m");
-    println!("USDC 合约 REST API: https://dapi.binance.com");
+    println!("USDC 合约 WebSocket: wss://fstream.binance.com/ws/btcusdc@kline_15m");
+    println!("USDC 合约 REST API: https://fapi.binance.com");
 }
