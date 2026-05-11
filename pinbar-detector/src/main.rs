@@ -520,11 +520,24 @@ async fn monitor_positions(config: &crate::binance::BinanceConfig, symbol: &str)
                                 o.position_side == *position_side
                             });
 
+                            // 止损单是 STOP_MARKET 类型
+                            let has_stop_loss = existing_orders.iter().any(|o| {
+                                o.order_type == "STOP_MARKET" &&
+                                o.position_side == *position_side
+                            });
+
+                            // 止盈单是 TAKE_PROFIT_MARKET 类型
+                            let has_take_profit = existing_orders.iter().any(|o| {
+                                o.order_type == "TAKE_PROFIT_MARKET" &&
+                                o.position_side == *position_side
+                            });
+
                             if has_trailing {
                                 info!("[仓位监控] {} 已有追踪止盈，跳过", position_side);
                             }
 
-                            // 如果没有止损单，添加200点止损
+                            // 固定止盈点数
+                            let fixed_profit_points = get_fixed_profit_points();
                             if !has_stop_loss {
                                 let stop_loss_price = if position_side == "LONG" {
                                     entry_price - 200.0  // 多头止损：入场价 - 200点
@@ -564,6 +577,48 @@ async fn monitor_positions(config: &crate::binance::BinanceConfig, symbol: &str)
                                 }
                             } else {
                                 info!("[仓位监控] {} 已有止损单，跳过", position_side);
+                            }
+
+                            // 如果没有固定止盈单，添加固定止盈单
+                            if !has_take_profit {
+                                let take_profit_price = if position_side == "LONG" {
+                                    entry_price + fixed_profit_points  // 多头止盈：入场价 + 固定点数
+                                } else {
+                                    entry_price - fixed_profit_points  // 空头止盈：入场价 - 固定点数
+                                };
+                                let close_side = if position_side == "LONG" { "SELL" } else { "BUY" };
+                                let tp_client_id = format!("mon_tp_{}_{}", position_side.to_lowercase(), chrono::Utc::now().timestamp_millis());
+
+                                info!("[仓位监控] 添加固定止盈单: {} {} 止盈价=${:.2}", position_side, quantity, take_profit_price);
+
+                                match crate::binance::place_take_profit_order(
+                                    config,
+                                    symbol,
+                                    close_side,
+                                    position_side,
+                                    quantity,
+                                    take_profit_price,
+                                    &tp_client_id,
+                                ).await {
+                                    Ok(algo_id) => {
+                                        info!("[仓位监控] 固定止盈单成功: algoId={}", algo_id);
+                                        let direction = if position_side == "LONG" { "多单" } else { "空单" };
+                                        let msg = format!(
+                                            "### 📊 仓位监控 - 添加固定止盈\n\n\
+                                            - **持仓**: {} {} @ ${:.2}\n\
+                                            - **方向**: {}\n\
+                                            - **止盈价**: ${:.2} ({}点)\n\
+                                            - **数量**: {:.4}",
+                                            symbol, direction, entry_price, direction, take_profit_price, fixed_profit_points as i64, quantity
+                                        );
+                                        let _ = notification::send_dingtalk_markdown("仓位监控 - 固定止盈", &msg);
+                                    }
+                                    Err(e) => {
+                                        warn!("[仓位监控] 固定止盈单失败: {}", e);
+                                    }
+                                }
+                            } else {
+                                info!("[仓位监控] {} 已有固定止盈单，跳过", position_side);
                             }
 
                             // 如果没有追踪止盈，添加追踪止盈
