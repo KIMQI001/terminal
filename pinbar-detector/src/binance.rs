@@ -653,8 +653,8 @@ pub async fn close_position_market(
 
 /// 下追踪止盈单 (使用 /fapi/v1/algoOrder + TRAILING_STOP_MARKET)
 /// activation_price: 激活价格（盈利至此价格后开始追踪）
-/// callback_rate: 回撤比例（0.1-10，代表 0.1%-10%）
-/// 盈利300点激活，回调约0.125%（100点/80000）
+/// callback_rate: 回撤比例（百分比形式，例如 0.12 = 0.12%）
+/// 盈利300点激活，回调约0.12%（100点/81000）
 pub async fn place_trailing_stop_order(
     config: &BinanceConfig,
     symbol: &str,
@@ -662,7 +662,7 @@ pub async fn place_trailing_stop_order(
     position_side: &str,  // LONG or SHORT
     quantity: f64,
     activation_price: f64,  // 激活价格
-    callback_rate: f64,     // 回撤比例 0.1-10
+    callback_rate: f64,     // 回撤比例（百分比，如 0.12 = 0.12%）
     client_order_id: &str,
 ) -> anyhow::Result<String> {
     let timestamp = chrono::Utc::now().timestamp_millis();
