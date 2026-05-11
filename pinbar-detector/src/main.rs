@@ -193,9 +193,9 @@ async fn send_volume_alert(
         vol_candle.high.max(small_candle.high)
     };
 
-    // 止损点数 = |入场价 - 原始止损价|，然后 +20，但不超过200
+    // 止损点数 = |入场价 - 原始止损价|，然后 +100，但不超过200
     let stop_loss_distance = (entry_price - raw_stop_loss).abs();
-    let adjusted_stop_loss_distance = stop_loss_distance.min(200.0 - 50.0) + 50.0;
+    let adjusted_stop_loss_distance = stop_loss_distance.min(200.0 - 100.0) + 100.0;
 
     // 最终止损价
     let stop_loss = if vol_is_bearish {
