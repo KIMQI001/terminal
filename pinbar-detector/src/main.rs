@@ -19,7 +19,7 @@ use tracing::{debug, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Binance WebSocket K线地址
-const BINANCE_WS_URL: &str = "wss://fstream.binance.com/ws/btcusdt@kline_15m";
+const BINANCE_WS_URL: &str = "wss://fstream.binance.com/market/ws?streams=btcusdt@kline_15m";
 
 /// Binance REST API 地址
 const BINANCE_REST_URL: &str = "https://fapi.binance.com";
@@ -107,14 +107,21 @@ struct WsDataEnvelope {
     data: KlineData,
 }
 
-/// Binance WebSocket K线消息（直接格式）
+/// Binance 组合流消息格式
+#[derive(Debug, Deserialize)]
+struct BinanceStreamMessage {
+    stream: String,
+    data: BinanceKlineEvent,
+}
+
+/// Binance K线事件
 #[derive(Debug, Deserialize)]
 #[allow(non_snake_case)]
-struct BinanceKlineMsg {
-    e: String,        // Event type
-    E: i64,           // Event time
-    s: String,        // Symbol
-    k: Option<BinanceKline>,  // Kline data (可能是 null)
+struct BinanceKlineEvent {
+    e: String,        // 事件类型 "kline"
+    E: i64,           // 事件时间
+    s: String,        // 交易对
+    k: Option<BinanceKline>,
 }
 
 /// Binance K线数据
@@ -130,9 +137,9 @@ struct BinanceKline {
     h: String,    // High price
     l: String,    // Low price
     v: String,    // Base asset volume
-    x: bool,       // Is this kline closed? (关键!)
-    q: String,     // Quote asset volume
-    n: i64,        // Number of trades
+    x: bool,      // Is this kline closed? (关键!)
+    q: String,    // Quote asset volume
+    n: i64,       // Number of trades
 }
 
 /// Binance REST API K线响应格式 (数组)
@@ -1223,10 +1230,10 @@ async fn main() -> anyhow::Result<()> {
         match msg? {
             Message::Text(text) => {
                 debug!("[WS] 收到原始消息: {}", &text[..text.len().min(200)]);
-                if let Ok(binance_msg) = serde_json::from_str::<BinanceKlineMsg>(&text) {
-                    // 只处理 kline 事件
-                    if binance_msg.e == "kline" {
-                        if let Some(kline) = binance_msg.k {
+                // 尝试解析组合流格式: {"stream":"...","data":{...}}
+                if let Ok(stream_msg) = serde_json::from_str::<BinanceStreamMessage>(&text) {
+                    if stream_msg.data.e == "kline" {
+                        if let Some(kline) = stream_msg.data.k {
                             debug!("[BINANCE WS] t={} x={} o={} c={}", kline.t, kline.x, kline.o, kline.c);
                             // 只处理已闭合的 K 线 (x=true)
                             if kline.x {
