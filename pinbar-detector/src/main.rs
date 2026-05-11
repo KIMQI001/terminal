@@ -107,15 +107,19 @@ struct WsDataEnvelope {
     data: KlineData,
 }
 
-/// Binance WebSocket K线消息
+/// Binance WebSocket K线消息（直接格式）
 #[derive(Debug, Deserialize)]
+#[allow(non_snake_case)]
 struct BinanceKlineMsg {
     e: String,        // Event type
-    k: BinanceKline,
+    E: i64,           // Event time
+    s: String,        // Symbol
+    k: Option<BinanceKline>,  // Kline data (可能是 null)
 }
 
 /// Binance K线数据
 #[derive(Debug, Deserialize)]
+#[allow(non_snake_case)]
 struct BinanceKline {
     t: i64,       // Kline start time (ms)
     T: i64,       // Kline close time (ms)
@@ -127,6 +131,8 @@ struct BinanceKline {
     l: String,    // Low price
     v: String,    // Base asset volume
     x: bool,       // Is this kline closed? (关键!)
+    q: String,     // Quote asset volume
+    n: i64,        // Number of trades
 }
 
 /// Binance REST API K线响应格式 (数组)
@@ -1216,67 +1222,67 @@ async fn main() -> anyhow::Result<()> {
     while let Some(msg) = read.next().await {
         match msg? {
             Message::Text(text) => {
-                println!("[WS] 收到原始消息: {}", &text[..text.len().min(200)]);
+                debug!("[WS] 收到原始消息: {}", &text[..text.len().min(200)]);
                 if let Ok(binance_msg) = serde_json::from_str::<BinanceKlineMsg>(&text) {
                     // 只处理 kline 事件
                     if binance_msg.e == "kline" {
-                        let kline = binance_msg.k;
-                        // 打印收到的 K 线（无论是否闭合）
-                        println!("[BINANCE WS] t={} x={} o={} c={}", kline.t, kline.x, kline.o, kline.c);
-                        // 只处理已闭合的 K 线 (x=true)
-                        if kline.x {
-                            debug!("[WS] Binance K线已闭合: 时间={}", kline.t);
-                            let candle = Candle {
-                                time: kline.t / 1000,  // 转为秒
-                                open: kline.o.parse().unwrap_or(0.0),
-                                high: kline.h.parse().unwrap_or(0.0),
-                                low: kline.l.parse().unwrap_or(0.0),
-                                close: kline.c.parse().unwrap_or(0.0),
-                                volume: kline.v.parse().unwrap_or(0.0),
-                            };
+                        if let Some(kline) = binance_msg.k {
+                            debug!("[BINANCE WS] t={} x={} o={} c={}", kline.t, kline.x, kline.o, kline.c);
+                            // 只处理已闭合的 K 线 (x=true)
+                            if kline.x {
+                                debug!("[WS] Binance K线已闭合: 时间={}", kline.t);
+                                let candle = Candle {
+                                    time: kline.t / 1000,  // 转为秒
+                                    open: kline.o.parse().unwrap_or(0.0),
+                                    high: kline.h.parse().unwrap_or(0.0),
+                                    low: kline.l.parse().unwrap_or(0.0),
+                                    close: kline.c.parse().unwrap_or(0.0),
+                                    volume: kline.v.parse().unwrap_or(0.0),
+                                };
 
-                            // 更新所有缓存
-                            for (key, cache) in caches.iter_mut() {
-                                let prev_len = cache.candles.len();
-                                cache.push(candle.clone());
+                                // 更新所有缓存
+                                for (key, cache) in caches.iter_mut() {
+                                    let prev_len = cache.candles.len();
+                                    cache.push(candle.clone());
 
-                                // 只有在新K线添加时（非更新最后一根）才检测
-                                if cache.candles.len() > prev_len {
-                                    debug!("[{}] [Kline] 新K线到达: {} len={}",
-                                        chrono::Local::now().format("%H:%M:%S"),
-                                        key,
-                                        cache.candles.len());
+                                    // 只有在新K线添加时（非更新最后一根）才检测
+                                    if cache.candles.len() > prev_len {
+                                        debug!("[{}] [Kline] 新K线到达: {} len={}",
+                                            chrono::Local::now().format("%H:%M:%S"),
+                                            key,
+                                            cache.candles.len());
 
-                                    // PINBAR 检测
-                                    let parts: Vec<&str> = key.split('@').collect();
-                                    if parts.len() == 2 {
-                                        cache.detect_and_notify(parts[0]);
-                                    }
+                                        // PINBAR 检测
+                                        let parts: Vec<&str> = key.split('@').collect();
+                                        if parts.len() == 2 {
+                                            cache.detect_and_notify(parts[0]);
+                                        }
 
-                                    // 倍量报警检测
-                                    if cache.candles.len() >= 4 {
-                                        if let Some((vol_index, ratio, small_index)) =
-                                            check_volume_alert(&cache.candles)
-                                        {
-                                            let vol_time = cache.candles[vol_index].time;
-                                            if cache.last_volume_time == Some(vol_time) {
-                                                debug!("[Volume] 去重跳过: {}", vol_time);
-                                            } else {
-                                                cache.last_volume_time = Some(vol_time);
-                                                let parts: Vec<&str> = key.split('@').collect();
-                                                if parts.len() == 2 {
-                                                    let symbol = parts[0];
-                                                    let candles = cache.candles.clone();
-                                                    send_volume_alert(
-                                                        symbol,
-                                                        &candles,
-                                                        vol_index,
-                                                        ratio,
-                                                        small_index,
-                                                        binance_config.as_ref(),
-                                                        true,
-                                                    )
-                                                    .await;
+                                        // 倍量报警检测
+                                        if cache.candles.len() >= 4 {
+                                            if let Some((vol_index, ratio, small_index)) =
+                                                check_volume_alert(&cache.candles)
+                                            {
+                                                let vol_time = cache.candles[vol_index].time;
+                                                if cache.last_volume_time == Some(vol_time) {
+                                                    debug!("[Volume] 去重跳过: {}", vol_time);
+                                                } else {
+                                                    cache.last_volume_time = Some(vol_time);
+                                                    let parts: Vec<&str> = key.split('@').collect();
+                                                    if parts.len() == 2 {
+                                                        let symbol = parts[0];
+                                                        let candles = cache.candles.clone();
+                                                        send_volume_alert(
+                                                            symbol,
+                                                            &candles,
+                                                            vol_index,
+                                                            ratio,
+                                                            small_index,
+                                                            binance_config.as_ref(),
+                                                            true,
+                                                        )
+                                                        .await;
+                                                    }
                                                 }
                                             }
                                         }
