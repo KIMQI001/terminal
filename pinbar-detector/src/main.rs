@@ -1221,6 +1221,8 @@ async fn main() -> anyhow::Result<()> {
                     // 只处理 kline 事件
                     if binance_msg.e == "kline" {
                         let kline = binance_msg.k;
+                        // 打印收到的 K 线（无论是否闭合）
+                        info!("[WS] K线: t={} x={} o={} c={}", kline.t, kline.x, kline.o, kline.c);
                         // 只处理已闭合的 K 线 (x=true)
                         if kline.x {
                             debug!("[WS] Binance K线已闭合: 时间={}", kline.t);
