@@ -18,8 +18,8 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{debug, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-/// Binance WebSocket K线地址
-const BINANCE_WS_URL: &str = "wss://fstream.binance.com/market/ws?streams=btcusdt@kline_15m";
+/// Binance WebSocket K线地址（直接格式）
+const BINANCE_WS_URL: &str = "wss://fstream.binance.com/ws/btcusdt@kline_15m";
 
 /// Binance REST API 地址
 const BINANCE_REST_URL: &str = "https://fapi.binance.com";
@@ -118,6 +118,16 @@ struct BinanceStreamMessage {
 #[derive(Debug, Deserialize)]
 #[allow(non_snake_case)]
 struct BinanceKlineEvent {
+    e: String,        // 事件类型 "kline"
+    E: i64,           // 事件时间
+    s: String,        // 交易对
+    k: Option<BinanceKline>,
+}
+
+/// 直接 K线消息格式（无 stream 包装）
+#[derive(Debug, Deserialize)]
+#[allow(non_snake_case)]
+struct DirectKlineMessage {
     e: String,        // 事件类型 "kline"
     E: i64,           // 事件时间
     s: String,        // 交易对
@@ -1230,12 +1240,11 @@ async fn main() -> anyhow::Result<()> {
         match msg? {
             Message::Text(text) => {
                 debug!("[WS] 收到原始消息: {}", &text[..text.len().min(200)]);
-                // 尝试解析组合流格式: {"stream":"...","data":{...}}
-                if let Ok(stream_msg) = serde_json::from_str::<BinanceStreamMessage>(&text) {
-                    if stream_msg.data.e == "kline" {
-                        if let Some(kline) = stream_msg.data.k {
+                // 尝试解析直接格式: {"e":"kline",...}
+                if let Ok(direct_msg) = serde_json::from_str::<DirectKlineMessage>(&text) {
+                    if direct_msg.e == "kline" {
+                        if let Some(kline) = direct_msg.k {
                             debug!("[BINANCE WS] t={} x={} o={} c={}", kline.t, kline.x, kline.o, kline.c);
-                            // 只处理已闭合的 K 线 (x=true)
                             if kline.x {
                                 debug!("[WS] Binance K线已闭合: 时间={}", kline.t);
                                 let candle = Candle {
