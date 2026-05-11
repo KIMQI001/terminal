@@ -19,10 +19,10 @@ use tracing::{debug, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Binance WebSocket K线地址（USDC 合约）
-const BINANCE_WS_URL: &str = "wss://dapi.binance.com/ws/btcusdc@kline_15m";
+const BINANCE_WS_URL: &str = "wss://fstream.binance.com/ws/btcusdc@kline_15m";
 
 /// Binance REST API 地址（USDC 合约）
-const BINANCE_REST_URL: &str = "https://dapi.binance.com";
+const BINANCE_REST_URL: &str = "https://fapi.binance.com";
 
 /// 每个周期返回的最近信号数量
 const RECENT_SIGNALS_LIMIT: usize = 5;
