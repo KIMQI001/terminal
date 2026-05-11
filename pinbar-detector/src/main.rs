@@ -1241,63 +1241,66 @@ async fn main() -> anyhow::Result<()> {
             Message::Text(text) => {
                 debug!("[WS] 收到原始消息: {}", &text[..text.len().min(200)]);
                 // 尝试解析直接格式: {"e":"kline",...}
-                if let Ok(direct_msg) = serde_json::from_str::<DirectKlineMessage>(&text) {
-                    if direct_msg.e == "kline" {
-                        if let Some(kline) = direct_msg.k {
-                            debug!("[BINANCE WS] t={} x={} o={} c={}", kline.t, kline.x, kline.o, kline.c);
-                            if kline.x {
-                                debug!("[WS] Binance K线已闭合: 时间={}", kline.t);
-                                let candle = Candle {
-                                    time: kline.t / 1000,  // 转为秒
-                                    open: kline.o.parse().unwrap_or(0.0),
-                                    high: kline.h.parse().unwrap_or(0.0),
-                                    low: kline.l.parse().unwrap_or(0.0),
-                                    close: kline.c.parse().unwrap_or(0.0),
-                                    volume: kline.v.parse().unwrap_or(0.0),
-                                };
+                match serde_json::from_str::<DirectKlineMessage>(&text) {
+                    Ok(direct_msg) => {
+                        debug!("[WS] DirectKlineMessage 解析成功 e={}", direct_msg.e);
+                        if direct_msg.e == "kline" {
+                            if let Some(kline) = direct_msg.k {
+                                debug!("[BINANCE WS] t={} x={} o={} c={}", kline.t, kline.x, kline.o, kline.c);
+                                if kline.x {
+                                    debug!("[WS] Binance K线已闭合: 时间={}", kline.t);
+                                    let candle = Candle {
+                                        time: kline.t / 1000,  // 转为秒
+                                        open: kline.o.parse().unwrap_or(0.0),
+                                        high: kline.h.parse().unwrap_or(0.0),
+                                        low: kline.l.parse().unwrap_or(0.0),
+                                        close: kline.c.parse().unwrap_or(0.0),
+                                        volume: kline.v.parse().unwrap_or(0.0),
+                                    };
 
-                                // 更新所有缓存
-                                for (key, cache) in caches.iter_mut() {
-                                    let prev_len = cache.candles.len();
-                                    cache.push(candle.clone());
+                                    // 更新所有缓存
+                                    for (key, cache) in caches.iter_mut() {
+                                        let prev_len = cache.candles.len();
+                                        cache.push(candle.clone());
 
-                                    // 只有在新K线添加时（非更新最后一根）才检测
-                                    if cache.candles.len() > prev_len {
-                                        debug!("[{}] [Kline] 新K线到达: {} len={}",
-                                            chrono::Local::now().format("%H:%M:%S"),
-                                            key,
-                                            cache.candles.len());
+                                        // 只有在新K线添加时（非更新最后一根）才检测
+                                        if cache.candles.len() > prev_len {
+                                            debug!("[{}] [Kline] 新K线到达: {} len={}",
+                                                chrono::Local::now().format("%H:%M:%S"),
+                                                key,
+                                                cache.candles.len());
 
-                                        // PINBAR 检测
-                                        let parts: Vec<&str> = key.split('@').collect();
-                                        if parts.len() == 2 {
-                                            cache.detect_and_notify(parts[0]);
-                                        }
+                                            // PINBAR 检测
+                                            let parts: Vec<&str> = key.split('@').collect();
+                                            if parts.len() == 2 {
+                                                cache.detect_and_notify(parts[0]);
+                                            }
 
-                                        // 倍量报警检测
-                                        if cache.candles.len() >= 4 {
-                                            if let Some((vol_index, ratio, small_index)) =
-                                                check_volume_alert(&cache.candles)
-                                            {
-                                                let vol_time = cache.candles[vol_index].time;
-                                                if cache.last_volume_time == Some(vol_time) {
-                                                    debug!("[Volume] 去重跳过: {}", vol_time);
-                                                } else {
-                                                    cache.last_volume_time = Some(vol_time);
-                                                    let parts: Vec<&str> = key.split('@').collect();
-                                                    if parts.len() == 2 {
-                                                        let symbol = parts[0];
-                                                        let candles = cache.candles.clone();
-                                                        send_volume_alert(
-                                                            symbol,
-                                                            &candles,
-                                                            vol_index,
-                                                            ratio,
-                                                            small_index,
-                                                            binance_config.as_ref(),
-                                                            true,
-                                                        )
-                                                        .await;
+                                            // 倍量报警检测
+                                            if cache.candles.len() >= 4 {
+                                                if let Some((vol_index, ratio, small_index)) =
+                                                    check_volume_alert(&cache.candles)
+                                                {
+                                                    let vol_time = cache.candles[vol_index].time;
+                                                    if cache.last_volume_time == Some(vol_time) {
+                                                        debug!("[Volume] 去重跳过: {}", vol_time);
+                                                    } else {
+                                                        cache.last_volume_time = Some(vol_time);
+                                                        let parts: Vec<&str> = key.split('@').collect();
+                                                        if parts.len() == 2 {
+                                                            let symbol = parts[0];
+                                                            let candles = cache.candles.clone();
+                                                            send_volume_alert(
+                                                                symbol,
+                                                                &candles,
+                                                                vol_index,
+                                                                ratio,
+                                                                small_index,
+                                                                binance_config.as_ref(),
+                                                                true,
+                                                            )
+                                                            .await;
+                                                        }
                                                     }
                                                 }
                                             }
@@ -1306,6 +1309,9 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             }
                         }
+                    }
+                    Err(e) => {
+                        debug!("[WS] 解析失败: {}", e);
                     }
                 }
             }
