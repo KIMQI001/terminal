@@ -34,8 +34,8 @@ struct BinanceKline {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // USDC 合约 WebSocket 地址
-    let url = "wss://fstream.binance.com/ws/btcusdc@kline_15m";
+    // USDC 合约 WebSocket 地址（与 kline-server 一致）
+    let url = "wss://fstream.binance.com/market/ws/btcusdc@kline_15m";
 
     println!("Connecting to {}...", url);
     let (ws_stream, _) = connect_async(url).await?;
