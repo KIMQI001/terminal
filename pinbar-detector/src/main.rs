@@ -54,6 +54,22 @@ fn get_callback_profit_points() -> f64 {
         .unwrap_or(100.0)
 }
 
+/// 保护性止损激活点数（从环境变量读取，默认300点）
+fn get_protective_activation_points() -> f64 {
+    env::var("PROTECTIVE_ACTIVATION_POINTS")
+        .unwrap_or_else(|_| "300".to_string())
+        .parse::<f64>()
+        .unwrap_or(300.0)
+}
+
+/// 保护性止损点数（从环境变量读取，默认100点）
+fn get_protective_stop_points() -> f64 {
+    env::var("PROTECTIVE_STOP_POINTS")
+        .unwrap_or_else(|_| "100".to_string())
+        .parse::<f64>()
+        .unwrap_or(100.0)
+}
+
 /// Swing Point 附近范围
 const SWING_RANGE: usize = 5;
 
@@ -479,6 +495,8 @@ async fn send_volume_alert(
 async fn monitor_positions(config: &crate::binance::BinanceConfig, symbol: &str) {
     let activation_profit = get_trailing_activation_points();  // 从环境变量读取
     let callback_profit = get_callback_profit_points();  // 从环境变量读取
+    let protective_activation = get_protective_activation_points();  // 保护性止损激活点数
+    let protective_stop_points = get_protective_stop_points();  // 保护性止损锁定点数
 
     // 第一次执行不等待，直接检查
     let check_and_add_trailing = || async {
@@ -524,24 +542,89 @@ async fn monitor_positions(config: &crate::binance::BinanceConfig, symbol: &str)
                                 o.position_side == *position_side
                             });
 
-                            // 止损单是 STOP_MARKET 类型
-                            let has_stop_loss = existing_orders.iter().any(|o| {
-                                o.order_type == "STOP_MARKET" &&
-                                o.position_side == *position_side
-                            });
-
                             // 止盈单是 TAKE_PROFIT_MARKET 类型
                             let has_take_profit = existing_orders.iter().any(|o| {
                                 o.order_type == "TAKE_PROFIT_MARKET" &&
                                 o.position_side == *position_side
                             });
 
+                            // 获取当前市值价计算盈利
+                            let current_price = pos.mark_price;
+                            let current_profit = if position_side == "LONG" {
+                                current_price - entry_price
+                            } else {
+                                entry_price - current_price
+                            };
+
+                            // 检查是否已有追踪止盈单
                             if has_trailing {
                                 info!("[仓位监控] {} 已有追踪止盈，跳过", position_side);
                             }
 
                             // 固定止盈点数
                             let fixed_profit_points = get_fixed_profit_points();
+
+                            // 保护性止损：如果盈利超过激活点数，将止损提高到锁定盈利点位置
+                            // 例如：70000开多，70350当前价，盈利350点 >= 激活300点
+                            // 保护性止损 = 70000 + 100 = 70100（锁定100点利润）
+                            if current_profit >= protective_activation {
+                                let protective_stop_price = if position_side == "LONG" {
+                                    entry_price + protective_stop_points
+                                } else {
+                                    entry_price - protective_stop_points
+                                };
+
+                                // 获取现有的止损单价格
+                                let existing_stop_price = existing_orders.iter()
+                                    .filter(|o| o.order_type == "STOP_MARKET" && o.position_side == *position_side)
+                                    .filter_map(|o| o.price.parse::<f64>().ok())
+                                    .next();
+
+                                // 只有当新的保护性止损比现有止损更有利时才更新
+                                let should_update = if position_side == "LONG" {
+                                    existing_stop_price.map_or(true, |existing| protective_stop_price > existing)
+                                } else {
+                                    existing_stop_price.map_or(true, |existing| protective_stop_price < existing)
+                                };
+
+                                if should_update {
+                                    let close_side = if position_side == "LONG" { "SELL" } else { "BUY" };
+                                    let stop_client_id = format!("mon_protect_{}_{}", position_side.to_lowercase(), chrono::Utc::now().timestamp_millis());
+
+                                    info!("[仓位监控] 添加/更新保护性止损: {} 保护价=${:.2} (盈利{}点，锁定{}点)",
+                                        position_side, protective_stop_price, current_profit as i64, protective_stop_points as i64);
+
+                                    match crate::binance::place_stop_loss_order(
+                                        config,
+                                        symbol,
+                                        close_side,
+                                        position_side,
+                                        quantity,
+                                        protective_stop_price,
+                                        &stop_client_id,
+                                    ).await {
+                                        Ok(algo_id) => {
+                                            info!("[仓位监控] 保护性止损成功: algoId={}", algo_id);
+                                            let direction = if position_side == "LONG" { "多单" } else { "空单" };
+                                            let msg = format!(
+                                                "### 📊 仓位监控 - 保护性止损\n\n\
+                                                - **持仓**: {} {} @ ${:.2}\n\
+                                                - **方向**: {}\n\
+                                                - **当前价**: ${:.2} (盈利{}点)\n\
+                                                - **保护性止损价**: ${:.2} (锁定{}点)\n\
+                                                - **数量**: {:.4}",
+                                                symbol, direction, entry_price, direction, current_price, current_profit as i64, protective_stop_price, protective_stop_points as i64, quantity
+                                            );
+                                            let _ = notification::send_dingtalk_markdown("仓位监控 - 保护性止损", &msg);
+                                        }
+                                        Err(e) => {
+                                            warn!("[仓位监控] 保护性止损失败: {}", e);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 原有的止损单逻辑（只在没有止损单时添加初始止损）
                             if !has_stop_loss {
                                 let stop_loss_price = if position_side == "LONG" {
                                     entry_price - 200.0  // 多头止损：入场价 - 200点
