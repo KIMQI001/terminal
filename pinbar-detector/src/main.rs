@@ -338,9 +338,10 @@ async fn send_volume_alert(
                             } else {
                                 entry_price - trailing_activation_points
                             };
-                            // callbackRate 是百分比形式（不是基点），例如 0.12 = 0.12%
-                            // 100点/81000 ≈ 0.123%
-                            let callback_rate = (get_callback_profit_points() / entry_price * 100.0).max(0.001).min(10.0);
+                            // callbackRate 是百分比形式（不是基点），例如 0.1 = 0.1%
+                            // Binance 要求最多一位小数，100点/81000 ≈ 0.123% → 0.1
+                            let callback_rate = ((get_callback_profit_points() / entry_price * 100.0) * 10.0).round() / 10.0;
+                            let callback_rate = callback_rate.max(0.1).min(10.0);
                             let trail_client_id = format!("{}_tr", client_order_id_prefix);
                             match crate::binance::place_trailing_stop_order(
                                 config,
@@ -497,17 +498,16 @@ async fn monitor_positions(config: &crate::binance::BinanceConfig, symbol: &str)
 
                     info!("[仓位监控] 发现持仓: {} {} @ ${:.2}", position_side, quantity, entry_price);
 
-                    // 计算激活价格（盈利300点）和回调基点
-                    // callbackRate 单位是基点（0.01%），例如 500 = 5%
-                    // 100点/80000 ≈ 0.125% = 12.5基点，Binance要求整数
+                    // 计算激活价格（盈利300点）和回调比例
                     let activation_price = if position_side == "LONG" {
                         entry_price + activation_profit
                     } else {
                         entry_price - activation_profit
                     };
-                    // callbackRate 是百分比形式（不是基点），例如 0.12 = 0.12%
-                    // 100点/81000 ≈ 0.123%
-                    let callback_rate = (callback_profit / activation_price * 100.0).max(0.001).min(10.0);
+                    // callbackRate 是百分比形式，Binance 要求最多一位小数
+                    // 100点/81000 ≈ 0.123% → 0.1
+                    let callback_rate = ((callback_profit / activation_price * 100.0) * 10.0).round() / 10.0;
+                    let callback_rate = callback_rate.max(0.1).min(10.0);
 
                     // 检查是否已有追踪止盈单和止损单
                     match crate::binance::get_algo_orders(config, symbol).await {
