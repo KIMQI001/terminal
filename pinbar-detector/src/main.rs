@@ -18,11 +18,11 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{debug, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-/// K线服务器地址
-const KLINE_SERVER_URL: &str = "ws://localhost:3001/ws";
+/// Binance WebSocket K线地址
+const BINANCE_WS_URL: &str = "wss://fstream.binance.com/ws/btcusdt@kline_15m";
 
-/// REST API 地址
-const REST_API_URL: &str = "http://localhost:3001/api/klines";
+/// Binance REST API 地址
+const BINANCE_REST_URL: &str = "https://fapi.binance.com";
 
 /// 每个周期返回的最近信号数量
 const RECENT_SIGNALS_LIMIT: usize = 5;
@@ -106,6 +106,31 @@ struct WsMessage {
 struct WsDataEnvelope {
     data: KlineData,
 }
+
+/// Binance WebSocket K线消息
+#[derive(Debug, Deserialize)]
+struct BinanceKlineMsg {
+    e: String,        // Event type
+    k: BinanceKline,
+}
+
+/// Binance K线数据
+#[derive(Debug, Deserialize)]
+struct BinanceKline {
+    t: i64,       // Kline start time (ms)
+    T: i64,       // Kline close time (ms)
+    s: String,    // Symbol
+    i: String,    // Interval
+    o: String,    // Open price
+    c: String,    // Close price
+    h: String,    // High price
+    l: String,    // Low price
+    v: String,    // Base asset volume
+    x: bool,       // Is this kline closed? (关键!)
+}
+
+/// Binance REST API K线响应格式 (数组)
+type BinanceRestKline = Vec<serde_json::Value>;
 
 /// 倍量报警检测
 /// 检测条件：
@@ -1029,25 +1054,40 @@ async fn main() -> anyhow::Result<()> {
         })
         .collect();
 
-    // 1. 先通过 REST API 获取历史 K 线数据
-    info!("Fetching historical klines via REST API...");
+    // 1. 先通过 Binance REST API 获取历史 K 线数据
+    info!("Fetching historical klines from Binance API...");
 
     for (symbol, tf) in &subscriptions {
         let key = format!("{}@{}", symbol, tf);
-        let url = format!("{}/{}/{}?limit=1000", REST_API_URL, symbol, tf);
+        // Binance REST API: /fapi/v1/klines 返回数组格式
+        let url = format!("{}/fapi/v1/klines?symbol={}&interval=15m&limit=1000", BINANCE_REST_URL, symbol);
 
         match reqwest::get(&url).await {
             Ok(resp) => {
-                if let Ok(data) = resp.json::<KlineResponse>().await {
+                if let Ok(data) = resp.json::<BinanceRestKline>().await {
+                    // 解析 Binance 数组格式: [[t, o, c, h, l, v, ...], ...]
+                    let klines: Vec<KlineData> = data.iter().filter_map(|arr| {
+                        if let Some(arr) = arr.as_array() {
+                            if arr.len() >= 6 {
+                                let time = arr[0].as_i64().unwrap_or(0) / 1000;
+                                let open = arr[1].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                                let high = arr[2].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                                let low = arr[3].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                                let close = arr[4].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                                let volume = arr[5].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                                return Some(KlineData { time, open, high, low, close, volume });
+                            }
+                        }
+                        None
+                    }).collect();
                     if let Some(cache) = caches.get_mut(&key) {
-                        cache.load_from_api(data.klines);
-                        // 加载后立即检测一次
+                        cache.load_from_api(klines);
                         cache.detect_and_notify(symbol);
                     }
                 }
             }
             Err(e) => {
-                warn!("Failed to fetch {}: {}", key, e);
+                warn!("Failed to fetch {} from Binance: {}", key, e);
             }
         }
     }
@@ -1142,21 +1182,12 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // 2. 连接到 WebSocket 实时更新
-    info!("Connecting to WebSocket for real-time updates...");
-    let (ws_stream, _) = connect_async(KLINE_SERVER_URL).await?;
+    // 2. 连接到 Binance WebSocket 实时更新
+    info!("Connecting to Binance WebSocket for real-time klines...");
+    let (ws_stream, _) = connect_async(BINANCE_WS_URL).await?;
     let (mut write, mut read) = ws_stream.split();
-    info!("Connected to K-line server");
-
-    // 订阅实时 K 线
-    for (symbol, tf) in &subscriptions {
-        let msg = serde_json::json!({
-            "type": "Subscribe",
-            "data": { "symbol": symbol, "timeframe": tf }
-        });
-        write.send(Message::Text(msg.to_string())).await?;
-    }
-    info!("Subscribed to all timeframes");
+    info!("Connected to Binance WebSocket");
+    // Binance WS 会自动推送数据，无需订阅
 
     // 3. 启动时先执行一次仓位监控（后台执行，不阻塞）
     let binance_config_clone2 = binance_config.clone();
@@ -1180,27 +1211,29 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // 5. 处理实时 K 线
-    debug!("[DEBUG] 准备进入WebSocket循环");
+    // 5. 处理实时 K 线 (Binance WebSocket)
+    debug!("[DEBUG] 准备进入Binance WebSocket循环");
     while let Some(msg) = read.next().await {
         match msg? {
             Message::Text(text) => {
                 debug!("[WS] 收到消息: {}", &text[..text.len().min(200)]);
-                if let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&text) {
-                    debug!("[WS] 解析成功, msg_type={}", ws_msg.msg_type);
-                    if ws_msg.msg_type == "KlineUpdate" {
-                        if let Some(envelope) = ws_msg.data {
-                            let kline = envelope.data;
+                if let Ok(binance_msg) = serde_json::from_str::<BinanceKlineMsg>(&text) {
+                    // 只处理 kline 事件
+                    if binance_msg.e == "kline" {
+                        let kline = binance_msg.k;
+                        // 只处理已闭合的 K 线 (x=true)
+                        if kline.x {
+                            debug!("[WS] Binance K线已闭合: 时间={}", kline.t);
                             let candle = Candle {
-                                time: kline.time,
-                                open: kline.open,
-                                high: kline.high,
-                                low: kline.low,
-                                close: kline.close,
-                                volume: kline.volume,
+                                time: kline.t / 1000,  // 转为秒
+                                open: kline.o.parse().unwrap_or(0.0),
+                                high: kline.h.parse().unwrap_or(0.0),
+                                low: kline.l.parse().unwrap_or(0.0),
+                                close: kline.c.parse().unwrap_or(0.0),
+                                volume: kline.v.parse().unwrap_or(0.0),
                             };
 
-                            // 更新所有缓存（简化处理：更新所有）
+                            // 更新所有缓存
                             for (key, cache) in caches.iter_mut() {
                                 let prev_len = cache.candles.len();
                                 cache.push(candle.clone());
@@ -1212,7 +1245,7 @@ async fn main() -> anyhow::Result<()> {
                                         key,
                                         cache.candles.len());
 
-                                    // PINBAR 检测（新的完整K线）- detect_and_notify 内部会发送钉钉通知
+                                    // PINBAR 检测
                                     let parts: Vec<&str> = key.split('@').collect();
                                     if parts.len() == 2 {
                                         cache.detect_and_notify(parts[0]);
@@ -1223,7 +1256,6 @@ async fn main() -> anyhow::Result<()> {
                                         if let Some((vol_index, ratio, small_index)) =
                                             check_volume_alert(&cache.candles)
                                         {
-                                            // 去重：如果倍量K线时间等于上次发送的时间，则跳过
                                             let vol_time = cache.candles[vol_index].time;
                                             if cache.last_volume_time == Some(vol_time) {
                                                 debug!("[Volume] 去重跳过: {}", vol_time);
@@ -1233,7 +1265,6 @@ async fn main() -> anyhow::Result<()> {
                                                 if parts.len() == 2 {
                                                     let symbol = parts[0];
                                                     let candles = cache.candles.clone();
-                                                    // 运行时 should_trade=true，实际下单
                                                     send_volume_alert(
                                                         symbol,
                                                         &candles,
@@ -1255,7 +1286,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             Message::Close(_) => {
-                warn!("K-line server closed connection");
+                warn!("Binance WebSocket closed connection");
                 break;
             }
             _ => {}
