@@ -1226,7 +1226,7 @@ async fn main() -> anyhow::Result<()> {
                 if let Ok(binance_msg) = serde_json::from_str::<BinanceKlineMsg>(&text) {
                     if binance_msg.e == "kline" {
                         if let Some(kline) = binance_msg.k {
-                            debug!("[WS] Binance K线: t={} x={} o={} c={}", kline.t, kline.x, kline.o, kline.c);
+                            debug!("[WS] Binance K线: t={} x={} o={} c={} v={}", kline.t, kline.x, kline.o, kline.c, kline.v);
                             // 只处理已闭合的 K 线 (x=true)
                             if kline.x {
                                 let candle = Candle {
