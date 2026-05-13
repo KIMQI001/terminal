@@ -1268,6 +1268,7 @@ async fn main() -> anyhow::Result<()> {
                                                     debug!("[Volume] 去重跳过: {}", vol_time);
                                                 } else {
                                                     cache.last_volume_time = Some(vol_time);
+                                                    info!("[Volume] 检测到倍量反转，准备发送报警: {}", vol_time);
                                                     let parts: Vec<&str> = key.split('@').collect();
                                                     if parts.len() == 2 {
                                                         let symbol = parts[0];
