@@ -1229,7 +1229,7 @@ async fn main() -> anyhow::Result<()> {
                             debug!("[WS] Binance K线: t={} x={} o={} c={} v={}", kline.t, kline.x, kline.o, kline.c, kline.v);
                             // 只处理已闭合的 K 线 (x=true)
                             if kline.x {
-                                info!("[WS] Binance K线已闭合: t={} o={} c={} v={}", kline.t, kline.o, kline.c, kline.v);
+                                info!("[WS] Binance K线已闭合: t={} o={} c={} v={} chg={}", kline.t, kline.o, kline.c, kline.v, (kline.c.parse::<f64>().unwrap_or(0.0) - kline.o.parse::<f64>().unwrap_or(0.0)).abs());
                                 let candle = Candle {
                                     time: kline.t / 1000,  // 转为秒
                                     open: kline.o.parse().unwrap_or(0.0),
