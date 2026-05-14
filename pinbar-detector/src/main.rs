@@ -138,9 +138,17 @@ struct BinanceKline {
 /// Binance REST API K线响应格式 (数组)
 type BinanceRestKline = Vec<serde_json::Value>;
 
+/// 倍量报警比例（从环境变量读取，默认2.0倍）
+fn get_volume_alert_ratio() -> f64 {
+    env::var("VOLUME_ALERT_RATIO")
+        .unwrap_or_else(|_| "2.0".to_string())
+        .parse::<f64>()
+        .unwrap_or(2.0)
+}
+
 /// 倍量报警检测
 /// 检测条件：
-/// 1. 当前成交量 >= 前一根的 2 倍
+/// 1. 当前成交量 >= 前一根的 N 倍（默认2倍，可配置）
 /// 2. 倍量K线往前两根K线与当前K线同色
 /// 3. 倍量K线往后两根K线有一根实体小于 100 美元
 /// 返回：(倍量位置, 成交量倍数, 满足条件的小K线位置)
@@ -149,14 +157,16 @@ fn check_volume_alert(candles: &[Candle]) -> Option<(usize, f64, usize)> {
         return None;
     }
 
+    let alert_ratio = get_volume_alert_ratio();
+
     // 从倒数第 2 根开始检查（倒数第 1 根可能还在更新）
     let len = candles.len();
     for i in (2..len - 2).rev() {
         let prev = &candles[i - 1];
         let current = &candles[i];
 
-        // 倍量检测：当前成交量 >= 前一根的 2 倍
-        if prev.volume > 0.0 && current.volume >= prev.volume * 2.0 {
+        // 倍量检测：当前成交量 >= 前一根的 N 倍
+        if prev.volume > 0.0 && current.volume >= prev.volume * alert_ratio {
             let ratio = current.volume / prev.volume;
 
             // 检查前两根K线是否与当前K线同色
