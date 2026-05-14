@@ -883,14 +883,16 @@ impl KlineCache {
         info!("[PINBAR] 检测到 {} 个信号", signals.len());
 
         if signals.is_empty() {
+            info!("[PINBAR] 无信号，跳过");
             return None;
         }
 
         let sig = signals.first().unwrap();
+        info!("[PINBAR] 最新信号: time={} type={}", sig.time, sig.signal_type);
 
         // 去重：如果信号的 K 线时间等于上次发送的时间，则跳过
         if self.last_pinbar_time == Some(sig.time) {
-            debug!("[PINBAR] 去重跳过: {}", sig.time);
+            info!("[PINBAR] 去重跳过: {}", sig.time);
             return None;
         }
 
@@ -1014,7 +1016,9 @@ impl KlineCache {
         println!();
 
         // 发送钉钉通知
+        info!("[PINBAR] 准备发送钉钉通知...");
         let _ = notification::send_dingtalk_markdown("PINBAR 信号", &signal_msg);
+        info!("[PINBAR] 钉钉通知已发送");
 
         // 返回最新的信号
         Some(Signal {
