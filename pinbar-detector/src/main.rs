@@ -1117,7 +1117,7 @@ async fn main() -> anyhow::Result<()> {
                     if let Some(cache) = caches.get_mut(&key) {
                         cache.load_from_api(klines);
                         // 加载后立即检测一次
-                        cache.detect_and_notify(symbol);
+                        cache.detect_and_notify(symbol).await;
                     }
                 }
             }
@@ -1282,7 +1282,7 @@ async fn main() -> anyhow::Result<()> {
                                         // PINBAR 检测（新的完整K线）- detect_and_notify 内部会发送钉钉通知
                                         let parts: Vec<&str> = key.split('@').collect();
                                         if parts.len() == 2 {
-                                            cache.detect_and_notify(parts[0]);
+                                            cache.detect_and_notify(parts[0]).await;
                                         }
 
                                         // 倍量报警检测
