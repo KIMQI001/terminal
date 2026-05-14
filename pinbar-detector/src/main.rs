@@ -1044,6 +1044,11 @@ async fn main() -> anyhow::Result<()> {
 
     // 加载 .env 文件
     dotenvy::dotenv().ok();
+
+    // 打印倍量报警比例
+    let volume_ratio = get_volume_alert_ratio();
+    info!("倍量报警比例: {}x", volume_ratio);
+
     let startup_msg = "### 🚀 Pinbar 实时检测服务已启动\n\n- **服务**: Pinbar Detector\n- **监控**: BTCUSDC @ 15m\n- **功能**: Pinbar 信号检测 + 倍量报警";
     if let Err(e) = notification::send_dingtalk_markdown("服务启动", startup_msg).await {
         eprintln!("[启动] 钉钉通知发送失败: {}", e);
