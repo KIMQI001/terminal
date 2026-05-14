@@ -1017,8 +1017,11 @@ impl KlineCache {
 
         // 发送钉钉通知
         info!("[PINBAR] 准备发送钉钉通知...");
-        let _ = notification::send_dingtalk_markdown("PINBAR 信号", &signal_msg);
-        info!("[PINBAR] 钉钉通知已发送");
+        if let Err(e) = notification::send_dingtalk_markdown("PINBAR 信号", &signal_msg).await {
+            warn!("[PINBAR] 钉钉通知发送失败: {}", e);
+        } else {
+            info!("[PINBAR] 钉钉通知已发送");
+        }
 
         // 返回最新的信号
         Some(Signal {
