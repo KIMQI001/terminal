@@ -512,7 +512,7 @@ export function TradingChart() {
           if (volumeSeriesRef.current) {
             const volumeData = data.map((c, i) => {
               const prevVolume = i > 0 ? (data[i - 1].volume ?? 0) : 0;
-              const isHighVolume = prevVolume > 0 && (c.volume ?? 0) >= prevVolume * 2;
+              const isHighVolume = prevVolume > 0 && (c.volume ?? 0) >= prevVolume * 1.9;
 
               // 检查后两根K线实体是否有一根小于100点（用于判断是否变色）
               const next1Body = i + 1 < data.length ? Math.abs((data[i + 1].close ?? 0) - (data[i + 1].open ?? 0)) : 0;
@@ -608,7 +608,7 @@ export function TradingChart() {
           const prevVolume = lastKlineTimeRef.current > 0
             ? useChartStore.getState().candles.find(c => c.time === lastKlineTimeRef.current)?.volume ?? 0
             : 0;
-          const isHighVolume = prevVolume > 0 && (candle.volume ?? 0) >= prevVolume * 2;
+          const isHighVolume = prevVolume > 0 && (candle.volume ?? 0) >= prevVolume * 1.9;
 
           let color: string;
           if (isHighVolume) {
