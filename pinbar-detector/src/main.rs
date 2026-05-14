@@ -937,7 +937,7 @@ impl KlineCache {
 
         // 构建并发送钉钉消息
         let signal_msg = format!(
-            "### 📊 PINBAR 信号\n\n\
+            "PINBAR 信号\n\n### 📊 PINBAR 信号\n\n\
             - **交易对**: {}\n\
             - **周期**: {}\n\
             - **类型**: {}\n\
@@ -1166,7 +1166,7 @@ async fn main() -> anyhow::Result<()> {
                         String::new()
                     };
                     let signal_msg = format!(
-                        "### 📊 PINBAR 信号\n\n\
+                        "PINBAR 信号\n\n### 📊 PINBAR 信号\n\n\
                         - **交易对**: {}\n\
                         - **周期**: {}\n\
                         - **类型**: {}\n\
