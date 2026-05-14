@@ -179,11 +179,10 @@ fn check_volume_alert(candles: &[Candle]) -> Option<(usize, f64, usize)> {
                 continue;
             }
 
-            // 检查后续两根 K 线实体是否有一根小于 100
+            // 检查后续第一根 K 线实体是否小于 100（立即发，不等第二根）
             let next1_body = (candles[i + 1].close - candles[i + 1].open).abs();
-            let next2_body = (candles[i + 2].close - candles[i + 2].open).abs();
 
-            // 返回满足条件的小K线位置
+            // 如果第一根小于 100，立即发送报警
             if next1_body < 100.0 {
                 let vol_is_bearish = current.close < current.open;
                 let direction = if vol_is_bearish { "做多 🐂" } else { "做空 🐻" };
@@ -193,14 +192,19 @@ fn check_volume_alert(candles: &[Candle]) -> Option<(usize, f64, usize)> {
                     i, ratio, i + 1, next1_body, direction, entry, stop);
                 return Some((i, ratio, i + 1));
             }
-            if next2_body < 100.0 {
-                let vol_is_bearish = current.close < current.open;
-                let direction = if vol_is_bearish { "做多 🐂" } else { "做空 🐻" };
-                let entry = candles[i + 2].open;
-                let stop = current.low.min(candles[i + 2].low);
-                info!("倍量反转: 位置={}, 比例={:.1}x, 小K线位置={}, 实体={:.2}, 方向={}, 入场=${:.2}, 止损=${:.2}",
-                    i, ratio, i + 2, next2_body, direction, entry, stop);
-                return Some((i, ratio, i + 2));
+
+            // 如果第一根不小于 100，检查第二根
+            if i + 2 < len {
+                let next2_body = (candles[i + 2].close - candles[i + 2].open).abs();
+                if next2_body < 100.0 {
+                    let vol_is_bearish = current.close < current.open;
+                    let direction = if vol_is_bearish { "做多 🐂" } else { "做空 🐻" };
+                    let entry = candles[i + 2].open;
+                    let stop = current.low.min(candles[i + 2].low);
+                    info!("倍量反转: 位置={}, 比例={:.1}x, 小K线位置={}, 实体={:.2}, 方向={}, 入场=${:.2}, 止损=${:.2}",
+                        i, ratio, i + 2, next2_body, direction, entry, stop);
+                    return Some((i, ratio, i + 2));
+                }
             }
         }
     }
