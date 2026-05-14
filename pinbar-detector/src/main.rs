@@ -868,7 +868,7 @@ impl KlineCache {
     }
 
     /// 检测并打印 PINBAR 信号，发送钉钉通知
-    fn detect_and_notify(&mut self, symbol: &str) -> Option<Signal> {
+    async fn detect_and_notify(&mut self, symbol: &str) -> Option<Signal> {
         if self.candles.len() < 50 {
             return None;
         }
