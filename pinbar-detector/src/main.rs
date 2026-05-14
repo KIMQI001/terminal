@@ -880,6 +880,8 @@ impl KlineCache {
             RECENT_SIGNALS_LIMIT,
         );
 
+        info!("[PINBAR] 检测到 {} 个信号", signals.len());
+
         if signals.is_empty() {
             return None;
         }
