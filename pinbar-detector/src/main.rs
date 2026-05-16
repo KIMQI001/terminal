@@ -161,7 +161,7 @@ fn check_volume_alert(candles: &[Candle]) -> Option<(usize, f64, usize)> {
 
     // 从倒数第 2 根开始检查（倒数第 1 根可能还在更新）
     let len = candles.len();
-    for i in (2..len - 2).rev() {
+    for i in (2..len - 1).rev() {
         let prev = &candles[i - 1];
         let current = &candles[i];
 
