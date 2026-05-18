@@ -246,23 +246,11 @@ async fn send_volume_alert(
         small_candle.close + 5.0  // 做空加5点
     };
 
-    // 止损价格：倍量K线和小实体K线的最低价中的较低者（做多）
-    // 做空则用两者的最高价
-    let raw_stop_loss = if vol_is_bearish {
-        vol_candle.low.min(small_candle.low)
-    } else {
-        vol_candle.high.max(small_candle.high)
-    };
-
-    // 止损点数 = |入场价 - 原始止损价|，然后 +100，但不超过200
-    let stop_loss_distance = (entry_price - raw_stop_loss).abs();
-    let adjusted_stop_loss_distance = stop_loss_distance.min(200.0 - 100.0) + 100.0;
-
-    // 最终止损价
+    // 止损价格：固定200点
     let stop_loss = if vol_is_bearish {
-        entry_price - adjusted_stop_loss_distance
+        entry_price - 200.0  // 做多：入场价 - 200点
     } else {
-        entry_price + adjusted_stop_loss_distance
+        entry_price + 200.0  // 做空：入场价 + 200点
     };
 
     // 仅在 should_trade=true 时下单（运行时），启动时不下单
