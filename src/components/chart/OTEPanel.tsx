@@ -50,16 +50,18 @@ export function OTEPanel() {
     const clickCount = oteClickCount % 3;
 
     // 计算入场价格（点击循环：激进→中间→保守）
+    // 看多+30（更激进），看跌-30（更激进）
+    const offset = isBullish ? 30 : -30;
     let entry: number;
     if (clickCount === 0) {
-      // 第1次：激进位置 fib618（止损大但价格最优）
-      entry = ote.fib618;
+      // 第1次：激进位置 fib618 ±30
+      entry = ote.fib618 + offset;
     } else if (clickCount === 1) {
-      // 第2次：中间位置 fib675
-      entry = ote.fib675;
+      // 第2次：中间位置 fib675 ±30
+      entry = ote.fib675 + offset;
     } else {
-      // 第3次：保守位置 fib786（止损小但价格差）
-      entry = ote.fib786;
+      // 第3次：保守位置 fib786 ±30
+      entry = ote.fib786 + offset;
     }
 
     const stopLoss = ote.fib786;
