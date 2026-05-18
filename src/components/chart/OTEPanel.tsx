@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useChartStore } from "@/stores/chartStore";
 import { useOrderStore, OTEPrefillData, TradingLine } from "@/stores/orderStore";
@@ -10,6 +10,7 @@ const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d'] as const;
 
 export function OTEPanel() {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [oteClickCount, setOteClickCount] = useState(0);
   const { oteZones, multiTimeframeOTE } = useIndicatorStore();
   const { candles } = useChartStore();
   const { setPrefillData, setTradingLines, openModal } = useOrderStore();
@@ -37,18 +38,33 @@ export function OTEPanel() {
     return nearest;
   }, [multiTimeframeOTE, currentPrice]);
 
-  // 点击OTE条目，填充交易参数
+  // 切换 OTE Zone 时重置计数
+  useEffect(() => {
+    setOteClickCount(0);
+  }, [oteZones.length]);
+
+  // 点击OTE条目，填充交易参数（点击循环：激进→中间→保守）
   const handleOTEClick = (ote: OTEZone) => {
     const isBullish = ote.type === "bullish";
     const side = isBullish ? "buy" : "sell";
-    const entry = ote.fib675;
+    const clickCount = oteClickCount % 3;
+
+    // 计算入场价格（点击循环：激进→中间→保守）
+    let entry: number;
+    if (clickCount === 0) {
+      // 第1次：激进位置 fib618（止损大但价格最优）
+      entry = ote.fib618;
+    } else if (clickCount === 1) {
+      // 第2次：中间位置 fib675
+      entry = ote.fib675;
+    } else {
+      // 第3次：保守位置 fib786（止损小但价格差）
+      entry = ote.fib786;
+    }
+
     const stopLoss = ote.fib786;
     const size = Math.abs(ote.fib786 - ote.fib618);
-
-    // 止盈 = size的5倍
-    const takeProfit = isBullish
-      ? entry + size * 5  // 看涨: 向上5倍
-      : entry - size * 5; // 看跌: 向下5倍
+    const takeProfit = isBullish ? entry + size * 5 : entry - size * 5;
 
     const prefillData: OTEPrefillData = {
       side,
@@ -67,6 +83,9 @@ export function OTEPanel() {
 
     setPrefillData(prefillData);
     openModal();
+
+    // 计数+1
+    setOteClickCount(prev => prev + 1);
   };
 
   return (
