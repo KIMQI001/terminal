@@ -1294,6 +1294,9 @@ export function TradingChart() {
                   : ohlcvData.volume.toFixed(2)}
             </span>
           </span>
+          <span className="text-purple-600">
+            CHG <span className="font-semibold">{Math.abs(ohlcvData.close - ohlcvData.open).toFixed(2)}</span>
+          </span>
         </div>
       )}
       <div
