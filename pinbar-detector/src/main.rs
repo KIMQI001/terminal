@@ -146,6 +146,14 @@ fn get_volume_alert_ratio() -> f64 {
         .unwrap_or(2.0)
 }
 
+/// 是否启用交易（从环境变量读取，默认true）
+fn get_enable_trading() -> bool {
+    env::var("ENABLE_TRADING")
+        .unwrap_or_else(|_| "true".to_string())
+        .parse::<bool>()
+        .unwrap_or(true)
+}
+
 /// 倍量报警检测
 /// 检测条件：
 /// 1. 当前成交量 >= 前一根的 N 倍（默认2倍，可配置）
@@ -1289,7 +1297,7 @@ async fn main() -> anyhow::Result<()> {
                                                     if parts.len() == 2 {
                                                         let symbol = parts[0];
                                                         let candles = cache.candles.clone();
-                                                        // 运行时 should_trade=true，实际下单
+                                                        // 运行时 should_trade=ENABLE_TRADING，决定是否实际下单
                                                         send_volume_alert(
                                                             symbol,
                                                             &candles,
@@ -1297,7 +1305,7 @@ async fn main() -> anyhow::Result<()> {
                                                             ratio,
                                                             small_index,
                                                             binance_config.as_ref(),
-                                                            true,
+                                                            get_enable_trading(),
                                                         )
                                                         .await;
                                                     }
