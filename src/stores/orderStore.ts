@@ -345,7 +345,14 @@ export const useOrderStore = create<OrderState>((set, get) => ({
       return;
     }
 
-    const { realOrders } = get();
+    const { realOrders, wsConnected } = get();
+
+    // 如果 WebSocket 已连接且有数据，跳过 REST API 调用（WebSocket 会实时推送更新）
+    if (wsConnected && realOrders.length > 0) {
+      console.log('[OrderStore] WebSocket 已连接，跳过 REST API 获取挂单');
+      return;
+    }
+
     // 只在首次加载（数据为空）时显示 loading
     if (realOrders.length === 0) {
       set({ isLoadingOrders: true });
