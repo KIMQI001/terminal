@@ -348,10 +348,14 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     const { realOrders, wsConnected } = get();
 
     // 如果 WebSocket 已连接且有数据，跳过 REST API 调用（WebSocket 会实时推送更新）
+    // 这样可以避免频繁调用 REST API 触发 Binance 限流
     if (wsConnected && realOrders.length > 0) {
       console.log('[OrderStore] WebSocket 已连接，跳过 REST API 获取挂单');
       return;
     }
+
+    // WebSocket 未连接或没有数据时，才用 REST API（作为后备）
+    console.log('[OrderStore] WebSocket 未连接，使用 REST API 获取挂单');
 
     // 只在首次加载（数据为空）时显示 loading
     if (realOrders.length === 0) {

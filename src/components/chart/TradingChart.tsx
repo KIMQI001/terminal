@@ -145,18 +145,12 @@ export function TradingChart() {
     };
   }, []);
 
-  // 图表加载时自动获取订单和持仓，并定时刷新
+  // 图表加载时自动获取订单和持仓（WebSocket 连接时由 WebSocket 推送更新，不需要轮询）
   useEffect(() => {
+    // 首次加载时获取一次数据
     fetchOpenOrders(symbol);
     fetchPositions();
-
-    const interval = setInterval(() => {
-      fetchOpenOrders(symbol);
-      fetchPositions();
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [symbol, fetchOpenOrders, fetchPositions]);
+  }, [symbol]);
 
   // 可以开始测量的条件：Shift 按下 或 工具栏激活
   const canStartMeasure = isShiftPressed || isToolActive;
