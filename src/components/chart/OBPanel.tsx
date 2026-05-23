@@ -67,8 +67,8 @@ export function OBPanel() {
     // 入场点使用 0.22 位置（类似 FVG fib22）
     const size = ob.high - ob.low;
     const entry = isBullish
-      ? ob.high - size * 0.22  // 看涨: 接近顶部 22%
-      : ob.low + size * 0.22;  // 看跌: 接近底部 22%
+      ? Math.ceil(ob.high - size * 0.22)  // 看涨: 接近顶部
+      : Math.floor(ob.low + size * 0.22);  // 看跌: 接近底部
     const stopLoss = isBullish ? ob.low : ob.high; // 止损在OB边界
 
     // 止盈 = size的5倍

@@ -55,13 +55,13 @@ export function OTEPanel() {
     let entry: number;
     if (clickCount === 0) {
       // 第1次：激进位置 fib618 ±30
-      entry = ote.fib618 + offset;
+      entry = isBullish ? Math.ceil(ote.fib618 + offset) : Math.floor(ote.fib618 + offset);
     } else if (clickCount === 1) {
       // 第2次：中间位置 fib675 ±30
-      entry = ote.fib675 + offset;
+      entry = isBullish ? Math.ceil(ote.fib675 + offset) : Math.floor(ote.fib675 + offset);
     } else {
       // 第3次：保守位置 fib786 ±30
-      entry = ote.fib786 + offset;
+      entry = isBullish ? Math.ceil(ote.fib786 + offset) : Math.floor(ote.fib786 + offset);
     }
 
     const stopLoss = ote.fib786;

@@ -60,7 +60,7 @@ export function FVGPanel() {
   const handleFVGClick = (fvg: FVG) => {
     const isBullish = fvg.type === "bullish";
     const side = isBullish ? "buy" : "sell";
-    const entry = fvg.fib22;
+    const entry = isBullish ? Math.ceil(fvg.fib22) : Math.floor(fvg.fib22);
     const size = fvg.high - fvg.low;
     const stopLoss = isBullish ? fvg.low : fvg.high;
 
