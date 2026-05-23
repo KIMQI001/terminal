@@ -57,7 +57,7 @@ async fn get_klines(
     Query(query): Query<KlineQuery>,
 ) -> Json<KlineResponse> {
     let symbol = symbol.to_uppercase();
-    let limit = query.limit.unwrap_or(500).min(5000) as usize;
+    let limit = query.limit.unwrap_or(15000).min(15000) as usize;
 
     // 优先从缓存获取
     let mut klines = state
