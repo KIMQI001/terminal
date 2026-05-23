@@ -11,7 +11,7 @@ use crate::types::{aggregate_to_4d, ExchangeType, Kline, KlineSimple, Subscripti
 
 /// 内存缓存配置
 const DEFAULT_CACHE_SIZE: usize = 1000; // 默认缓存大小
-const LARGE_CACHE_SIZE: usize = 5000; // BTC/ETH 大缓存
+const LARGE_CACHE_SIZE: usize = 15000; // BTC/ETH 大缓存（约150天15m）
 const DB_BATCH_SIZE: usize = 100; // 批量写入数据库的数量
 
 /// 获取时间周期的秒数
@@ -140,7 +140,7 @@ async fn fix_missing_klines(
 }
 
 /// 根据交易对获取缓存大小
-/// BTC/ETH 使用 5000 根 K 线，其他使用 1000 根
+/// BTC/ETH 使用 15000 根 K 线（约150天），其他使用 3000 根
 fn get_cache_size(symbol: &str) -> usize {
     let s = symbol.to_uppercase();
     if s.starts_with("BTC") || s.starts_with("ETH") {
@@ -206,7 +206,7 @@ impl KlineManager {
     }
 
     /// 初始化订阅（从数据库加载 + 从交易所获取最新数据）
-    /// BTC/ETH 会获取 5000 根 K 线，其他交易对获取 1000 根
+    /// BTC/ETH 会获取 15000 根 K 线（约150天），其他交易对获取 3000 根
     pub async fn init_subscription(
         &self,
         symbol: &str,
