@@ -454,8 +454,8 @@ export function TradingChart() {
     const loadData = async () => {
       setLoading(true);
       try {
-        // BTC/ETH 请求 5000 根，其他交易对请求 1000 根
-        const limit = (currentSymbol === "BTCUSDC" || currentSymbol === "ETHUSDC") ? 5000 : 1000;
+        // BTC/ETH 请求 15000 根（约150天），其他交易对请求 3000 根
+        const limit = (currentSymbol === "BTCUSDC" || currentSymbol === "ETHUSDC") ? 15000 : 3000;
         const data = await fetchKlines(currentSymbol, currentTimeframe, limit);
 
         // 检查是否已被取消（symbol/timeframe 已变化）
@@ -671,7 +671,7 @@ export function TradingChart() {
     let isCancelled = false;
 
     const loadAllMultiTimeframeData = async () => {
-      const limit = (symbol === "BTCUSDC" || symbol === "ETHUSDC") ? 5000 : 1000;
+      const limit = (symbol === "BTCUSDC" || symbol === "ETHUSDC") ? 15000 : 3000;
 
       // 并行请求所有周期的 K 线数据（排除当前周期）
       const otherTimeframes = allTimeframes.filter(tf => tf !== timeframe);
