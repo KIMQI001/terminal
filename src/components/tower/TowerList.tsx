@@ -17,7 +17,10 @@ const MIN_TP_DISTANCE = 1500; // Minimum take profit distance in points
 export function TowerList({ currentPrice, blocks, onOrder }: TowerListProps) {
   const { bearishBlocks, bullishBlocks } = useMemo(() => {
     // Convert API blocks to TowerBlocks with SL/TP calculations
-    const towerBlocks: TowerBlock[] = blocks.map((b) => ({
+    // 过滤掉 5m 周期（太短）
+    const towerBlocks: TowerBlock[] = blocks
+      .filter((b) => b.timeframe !== "5m")
+      .map((b) => ({
       id: b.id,
       type: b.type,
       source: b.source,
