@@ -781,8 +781,13 @@ async function cancelOppositeOrders(
       return { success: true, error: undefined, canceledCount: 0 };
     }
 
-    // 找出要取消的订单
-    const ordersToCancel = towerOrders.filter(o => sidesToCancel.includes(o.side));
+    // 找出要取消的入场单（不带 _sl、_tp 后缀）
+    const ordersToCancel = towerOrders.filter(o =>
+      sidesToCancel.includes(o.side) &&
+      !o.clientOrderId?.endsWith('_sl') &&
+      !o.clientOrderId?.endsWith('_tp') &&
+      !o.clientOrderId?.startsWith('ict_protect_')
+    );
     if (ordersToCancel.length === 0) {
       return { success: true, error: undefined, canceledCount: 0 };
     }
@@ -1648,57 +1653,28 @@ async function repairPositionOrders(
     const quantity = Math.abs(position.positionAmt);
     const entryPrice = position.entryPrice;
 
-    // 检查是否有止损单
-    const hasStopLoss = openOrders.some(o =>
+    // 检查是否有 ict_protect_xxx 保护止损单
+    const hasProtectOrder = openOrders.some(o =>
       o.positionSide === positionSide &&
-      o.type === 'STOP_MARKET'
+      o.clientOrderId?.startsWith('ict_protect_')
     );
 
-    // 检查是否有止盈单
-    const hasTakeProfit = openOrders.some(o =>
-      o.positionSide === positionSide &&
-      (o.type === 'TAKE_PROFIT_MARKET' || o.type === 'TRAILING_STOP_MARKET')
-    );
+    // 如果没有保护单，下一个 200 点保护止损
+    if (!hasProtectOrder) {
+      const stopLoss = positionSide === 'LONG'
+        ? entryPrice - 200  // 多单：入场价 - 200
+        : entryPrice + 200; // 空单：入场价 + 200
 
-    // 检查是否有限价平仓单（也算止盈止损）
-    const closeSide = positionSide === 'LONG' ? 'SELL' : 'BUY';
-    const hasLimitClose = openOrders.some(o =>
-      o.positionSide === positionSide &&
-      o.side === closeSide &&
-      o.type === 'LIMIT'
-    );
+      console.log(`[TowerScheduler] ${symbol} ${positionSide} 缺少保护止损，下达保护单: 入场=${entryPrice}, 止损=${stopLoss}`);
 
-    // 如果有限价平仓单，认为用户手动设置了，不修复
-    if (hasLimitClose) continue;
-
-    if (!hasStopLoss || !hasTakeProfit) {
-      console.log(`[TowerScheduler] 发现仓位缺少止盈止损: ${symbol} ${positionSide}, 数量=${quantity}, 入场价=${entryPrice}`);
-      console.log(`[TowerScheduler] 当前状态: 止损=${hasStopLoss}, 止盈=${hasTakeProfit}`);
-
-      // 计算止损止盈价格
-      const { stopLoss, takeProfit } = calculateSlTpForPosition(entryPrice, positionSide);
-
-      // 补下止损单
-      if (!hasStopLoss) {
-        await placeRepairOrder(apiConfig, {
-          symbol,
-          positionSide,
-          quantity,
-          type: 'STOP_MARKET',
-          stopPrice: stopLoss,
-        });
-      }
-
-      // 补下止盈单
-      if (!hasTakeProfit) {
-        await placeRepairOrder(apiConfig, {
-          symbol,
-          positionSide,
-          quantity,
-          type: 'TAKE_PROFIT_MARKET',
-          stopPrice: takeProfit,
-        });
-      }
+      await placeRepairOrder(apiConfig, {
+        symbol,
+        positionSide,
+        quantity,
+        type: 'STOP_MARKET',
+        stopPrice: stopLoss,
+        isProtect: true,  // 标记为保护单
+      });
     }
   }
 }
@@ -1737,6 +1713,7 @@ async function placeRepairOrder(
     quantity: number;
     type: 'STOP_MARKET' | 'TAKE_PROFIT_MARKET';
     stopPrice: number;
+    isProtect?: boolean;  // 是否为保护单
   }
 ): Promise<void> {
   const baseUrl = apiConfig.isTestnet
@@ -1745,12 +1722,24 @@ async function placeRepairOrder(
 
   const closeSide = params.positionSide === 'LONG' ? 'SELL' : 'BUY';
   const timestamp = Date.now();
-  // 格式: ict_repair_{方向}_{类型}_{点位}
-  // 例如: ict_repair_L_SL_94800 (22字符)
-  const sideShort = params.positionSide === 'LONG' ? 'L' : 'S';
-  const typeShort = params.type === 'STOP_MARKET' ? 'SL' : 'TP';
-  const priceStr = Math.round(params.stopPrice).toString();
-  const clientOrderId = `ict_repair_${sideShort}_${typeShort}_${priceStr}`;
+
+  // 生成订单 ID：保护单用 ict_protect_，普通修复单用 ict_repair_
+  let clientOrderId: string;
+  if (params.isProtect) {
+    // 格式: ict_protect_{方向}_{入场价}
+    // 例如: ict_protect_L_79500
+    const sideShort = params.positionSide === 'LONG' ? 'L' : 'S';
+    const entryPriceStr = Math.round(params.stopPrice).toString();  // 注意这里是止损价反推入场价
+    clientOrderId = `ict_protect_${sideShort}_${entryPriceStr}`;
+    console.log(`[TowerScheduler] 下达保护止损单: ${clientOrderId}, 止损=${params.stopPrice}`);
+  } else {
+    // 格式: ict_repair_{方向}_{类型}_{点位}
+    // 例如: ict_repair_L_SL_94800 (22字符)
+    const sideShort = params.positionSide === 'LONG' ? 'L' : 'S';
+    const typeShort = params.type === 'STOP_MARKET' ? 'SL' : 'TP';
+    const priceStr = Math.round(params.stopPrice).toString();
+    clientOrderId = `ict_repair_${sideShort}_${typeShort}_${priceStr}`;
+  }
 
   // 使用 Algo Order API
   const orderParams: Record<string, string | number> = {
