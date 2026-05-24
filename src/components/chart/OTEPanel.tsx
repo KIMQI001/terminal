@@ -52,17 +52,21 @@ export function OTEPanel() {
     // 计算入场价格（点击循环：激进→中间→保守）
     // 看多+30（更激进），看跌-30（更激进）
     const offset = isBullish ? 30 : -30;
-    let entry: number;
+    let rawEntry: number;
     if (clickCount === 0) {
       // 第1次：激进位置 fib618 ±30
-      entry = isBullish ? Math.ceil(ote.fib618 + offset) : Math.floor(ote.fib618 + offset);
+      rawEntry = ote.fib618 + offset;
     } else if (clickCount === 1) {
       // 第2次：中间位置 fib675 ±30
-      entry = isBullish ? Math.ceil(ote.fib675 + offset) : Math.floor(ote.fib675 + offset);
+      rawEntry = ote.fib675 + offset;
     } else {
       // 第3次：保守位置 fib786 ±30
-      entry = isBullish ? Math.ceil(ote.fib786 + offset) : Math.floor(ote.fib786 + offset);
+      rawEntry = ote.fib786 + offset;
     }
+    // 入场价格取整到 5 或 0（看多向上，看跌向下）
+    const entry = isBullish
+      ? Math.ceil(rawEntry / 5) * 5
+      : Math.floor(rawEntry / 5) * 5;
 
     const stopLoss = ote.fib786;
     const size = Math.abs(ote.fib786 - ote.fib618);

@@ -60,7 +60,11 @@ export function FVGPanel() {
   const handleFVGClick = (fvg: FVG) => {
     const isBullish = fvg.type === "bullish";
     const side = isBullish ? "buy" : "sell";
-    const entry = isBullish ? Math.ceil(fvg.fib22) : Math.floor(fvg.fib22);
+    // 入场价格取整到 5 或 0（看多向上，看跌向下）
+    const rawEntry = fvg.fib22;
+    const entry = isBullish
+      ? Math.ceil(rawEntry / 5) * 5
+      : Math.floor(rawEntry / 5) * 5;
     const size = fvg.high - fvg.low;
     const stopLoss = isBullish ? fvg.low : fvg.high;
 
