@@ -261,27 +261,30 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
       isTestnet: 'isTestnet' in apiConfig ? (apiConfig as { isTestnet?: boolean }).isTestnet : false,
     };
 
-    // 1. 检查是否有持仓（有持仓时跳过，避免取消止盈止损单）
+    // 1. 检查持仓状态（有持仓时取消反向订单，不跳过更新）
     const positionsResult = await exchangeAdapter.getPositions(exchange, exchangeConfig, management.symbol);
-    if (positionsResult.success && positionsResult.positions && positionsResult.positions.length > 0) {
-      const positions = positionsResult.positions.filter(p => Math.abs(p.positionAmt) >= 0.001);
-      if (positions.length > 0) {
-        console.log(`[TowerScheduler] 有持仓，跳过更新: ${positions.map(p => `${p.positionSide} ${p.positionAmt}`).join(', ')}`);
-        addRecord({
-          managementId: management.id,
-          bullishCount: 0,
-          bearishCount: 0,
-          totalMargin: 0,
-          success: true,
-          skipped: true,
-          errorMessage: undefined,
-        });
-        updateRunTime(management.id);
-        return;
+    let currentPositions: { positionSide: string; positionAmt: number }[] = [];
+    if (positionsResult.success && positionsResult.positions) {
+      currentPositions = positionsResult.positions.filter(p => Math.abs(p.positionAmt) >= 0.001);
+    }
+
+    // 判断当前持仓方向
+    const hasLongPosition = currentPositions.some(p => p.positionSide === 'LONG');
+    const hasShortPosition = currentPositions.some(p => p.positionSide === 'SHORT');
+
+    if (currentPositions.length > 0) {
+      console.log(`[TowerScheduler] 有持仓，保留同向订单，取消反向订单: ${currentPositions.map(p => `${p.positionSide} ${p.positionAmt}`).join(', ')}`);
+    }
+
+    // 2. 取消反向订单（有持仓时只取消反向订单）
+    if (hasLongPosition || hasShortPosition) {
+      const cancelResult = await cancelOppositeOrders(exchange, exchangeConfig, management.symbol, hasLongPosition, hasShortPosition);
+      if (cancelResult.canceledCount > 0) {
+        console.log(`[TowerScheduler] 取消了 ${cancelResult.canceledCount} 个反向订单`);
       }
     }
 
-    // 2. 检查当前订单数量和位置
+    // 3. 检查当前订单数量和位置
     const orderCheck = await checkOrdersCount(exchange, exchangeConfig, management.symbol, management.towerLayers);
 
     // 如果有订单在 P/D 中性区域，强制重新排列
@@ -330,21 +333,25 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
       return;
     }
 
-    // 4. 取消现有订单
-    const cancelResult = await cancelAllTowerOrders(exchange, exchangeConfig, management.symbol);
-    if (!cancelResult.success) {
-      console.error(`[TowerScheduler] 取消订单失败: ${cancelResult.error}`);
-      addRecord({
-        managementId: management.id,
-        bullishCount: 0,
-        bearishCount: 0,
-        totalMargin: 0,
-        success: false,
-        skipped: false,
-        errorMessage: `取消订单失败: ${cancelResult.error}`,
-      });
-      updateRunTime(management.id);
-      return;
+    // 4. 取消现有订单（无持仓时全部取消，有持仓时已在上一步取消反向订单）
+    if (!hasLongPosition && !hasShortPosition) {
+      const cancelResult = await cancelAllTowerOrders(exchange, exchangeConfig, management.symbol);
+      if (!cancelResult.success) {
+        console.error(`[TowerScheduler] 取消订单失败: ${cancelResult.error}`);
+        addRecord({
+          managementId: management.id,
+          bullishCount: 0,
+          bearishCount: 0,
+          totalMargin: 0,
+          success: false,
+          skipped: false,
+          errorMessage: `取消订单失败: ${cancelResult.error}`,
+        });
+        updateRunTime(management.id);
+        return;
+      }
+    } else {
+      console.log(`[TowerScheduler] 有持仓，跳过全量取消订单`);
     }
 
     // 等待订单取消完成
@@ -730,6 +737,75 @@ async function getLeverage(
   } catch (error) {
     console.error('[TowerScheduler] 获取杠杆异常:', error);
     return 20;
+  }
+}
+
+/**
+ * 取消反向订单（根据持仓方向选择性取消）
+ * 有多头持仓时只取消空单，有空头持仓时只取消多单
+ */
+async function cancelOppositeOrders(
+  exchange: ExchangeType,
+  exchangeConfig: exchangeAdapter.ExchangeApiConfig,
+  symbol: string,
+  hasLongPosition: boolean,
+  hasShortPosition: boolean
+): Promise<{ success: boolean; error?: string; canceledCount: number }> {
+  try {
+    // 获取当前挂单
+    const ordersResult = await exchangeAdapter.getOpenOrders(exchange, exchangeConfig, symbol);
+    if (!ordersResult.success || !ordersResult.orders) {
+      return { success: true, error: undefined, canceledCount: 0 };
+    }
+
+    const towerOrders = ordersResult.orders.filter(
+      o => o.clientOrderId?.startsWith('ict_tower') && o.type === 'LIMIT'
+    );
+
+    if (towerOrders.length === 0) {
+      return { success: true, error: undefined, canceledCount: 0 };
+    }
+
+    // 确定要取消的订单方向
+    let sidesToCancel: string[] = [];
+    if (hasLongPosition) {
+      // 有多头持仓 → 取消空单（SELL）
+      sidesToCancel.push('SELL');
+    }
+    if (hasShortPosition) {
+      // 有空头持仓 → 取消多单（BUY）
+      sidesToCancel.push('BUY');
+    }
+
+    if (sidesToCancel.length === 0) {
+      return { success: true, error: undefined, canceledCount: 0 };
+    }
+
+    // 找出要取消的订单
+    const ordersToCancel = towerOrders.filter(o => sidesToCancel.includes(o.side));
+    if (ordersToCancel.length === 0) {
+      return { success: true, error: undefined, canceledCount: 0 };
+    }
+
+    console.log(`[TowerScheduler] 取消反向订单: ${ordersToCancel.map(o => `${o.side}@${o.price}`).join(', ')}`);
+
+    // 逐个取消
+    let canceledCount = 0;
+    for (const order of ordersToCancel) {
+      const result = await exchangeAdapter.cancelOrder(exchange, exchangeConfig, symbol, order.orderId);
+      if (result.success) {
+        canceledCount++;
+      }
+      await delay(50);
+    }
+
+    return { success: true, error: undefined, canceledCount };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '网络错误',
+      canceledCount: 0,
+    };
   }
 }
 
