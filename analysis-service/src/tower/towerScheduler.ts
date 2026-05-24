@@ -932,9 +932,9 @@ function calculateOrders(
   cgData: CGLiqData | null
 ): TowerOrder[] {
   const { currentPrice, blocks } = towerData;
-  const { baseMargin, marginIncrement, towerLayers, bullishStartLayer, bearishStartLayer, minSpacingRatio } = management;
+  const { baseMargin, marginIncrement, towerLayers, bullishStartLayer, bearishStartLayer, minSpacingRatio, bullishLowFilter, bearishHighFilter } = management;
 
-  console.log(`[TowerScheduler] 计算订单: 基础保证金=${baseMargin}, 递增=${marginIncrement}, 杠杆=${leverage}x`);
+  console.log(`[TowerScheduler] 计算订单: 基础保证金=${baseMargin}, 递增=${marginIncrement}, 杠杆=${leverage}x, 多L过滤=${bullishLowFilter}, 空H过滤=${bearishHighFilter}`);
 
   // ===== CG 首单数据 =====
   // 如果有 CG 数据和日K的 P/D 区域，用于计算首单
@@ -1177,6 +1177,24 @@ function calculateOrders(
     bullishCandidates = bullishCandidates.filter(b => distanceFilter(b, 'bullish'));
     bearishCandidates = bearishCandidates.filter(b => distanceFilter(b, 'bearish'));
     console.log(`[TowerScheduler] 距离过滤: 多单 ${beforeBullish} -> ${bullishCandidates.length}, 空单 ${beforeBearish} -> ${bearishCandidates.length}`);
+  }
+
+  // 多L空H过滤：只下L以下的多单，只下H以上的空单
+  if (dailyHL) {
+    const originalBullishCount = bullishCandidates.length;
+    const originalBearishCount = bearishCandidates.length;
+
+    // 多单过滤：bullishLowFilter=1 时，只下 L 以下的多单（L = dailyHL.low）
+    if (bullishLowFilter === 1) {
+      bullishCandidates = bullishCandidates.filter(b => b.entry <= dailyHL.low);
+      console.log(`[TowerScheduler] 多L过滤: ${originalBullishCount} -> ${bullishCandidates.length} (需 <= L=${dailyHL.low.toFixed(0)})`);
+    }
+
+    // 空单过滤：bearishHighFilter=1 时，只下 H 以上的空单（H = dailyHL.high）
+    if (bearishHighFilter === 1) {
+      bearishCandidates = bearishCandidates.filter(b => b.entry >= dailyHL.high);
+      console.log(`[TowerScheduler] 空H过滤: ${originalBearishCount} -> ${bearishCandidates.length} (需 >= H=${dailyHL.high.toFixed(0)})`);
+    }
   }
 
   // ICT 塔块独立选取，不受 CG 影响

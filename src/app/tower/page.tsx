@@ -62,6 +62,8 @@ interface TowerManagementConfig {
   minEntryDistance: number;
   trailingActivationRatio: number;  // 追踪止盈激活比例（默认 0.02 = 2%）
   trailingCallbackRate: number;     // 追踪止盈回撤率（默认 0.3 = 0.3%）
+  bullishLowFilter: number;         // 多L过滤：1=只下L以下的多单，0=不限制
+  bearishHighFilter: number;        // 空H过滤：1=只下H以上的空单，0=不限制
   lastRunAt: string | null;
   nextRunAt: string | null;
   createdAt: string;
@@ -186,6 +188,8 @@ export default function TowerPage() {
   const [autoInterval, setAutoInterval] = useState(15); // 托管间隔（分钟），默认15分钟
   const [trailingActivationRatio, setTrailingActivationRatio] = useState(2); // 追踪止盈激活比例（百分比），默认2%
   const [trailingCallbackRate, setTrailingCallbackRate] = useState(0.3); // 追踪止盈回撤率（百分比），默认0.3%
+  const [bullishLowFilter, setBullishLowFilter] = useState(0); // 多L过滤：1=只下L以下的多单
+  const [bearishHighFilter, setBearishHighFilter] = useState(0); // 空H过滤：1=只下H以上的空单
   const [isAutoOrdering, setIsAutoOrdering] = useState(false);
   const [orderProgress, setOrderProgress] = useState<{
     current: number;
@@ -288,6 +292,8 @@ export default function TowerPage() {
           minEntryDistance,
           trailingActivationRatio: trailingActivationRatio / 100, // 转换为小数
           trailingCallbackRate,
+          bullishLowFilter,
+          bearishHighFilter,
         }),
       });
       return response.json();
@@ -332,6 +338,8 @@ export default function TowerPage() {
       setAutoInterval(config.intervalMinutes);
       setTrailingActivationRatio((config.trailingActivationRatio ?? 0.02) * 100); // 转换为百分比
       setTrailingCallbackRate(config.trailingCallbackRate ?? 0.3);
+      setBullishLowFilter(config.bullishLowFilter ?? 0);
+      setBearishHighFilter(config.bearishHighFilter ?? 0);
       // 同步到 localStorage
       localStorage.setItem(STORAGE_KEYS.BASE_MARGIN, String(config.baseMargin));
       localStorage.setItem(STORAGE_KEYS.MARGIN_INCREMENT, String(config.marginIncrement));
@@ -1183,6 +1191,34 @@ export default function TowerPage() {
                     className="w-12 px-1 py-1.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500 disabled:opacity-60"
                   />
                   <span className="text-xs text-[var(--text-tertiary)]">%回</span>
+                </div>
+
+                {/* 多L过滤 */}
+                <div className="flex items-center gap-1" title="多L过滤: 1=只下L以下的多单">
+                  <span className="text-xs text-green-500">多L</span>
+                  <input
+                    type="number"
+                    value={bullishLowFilter}
+                    onChange={(e) => setBullishLowFilter(Number(e.target.value))}
+                    disabled={isAutoManaged}
+                    min="0"
+                    max="1"
+                    className="w-8 px-1 py-1.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500 disabled:opacity-60"
+                  />
+                </div>
+
+                {/* 空H过滤 */}
+                <div className="flex items-center gap-1" title="空H过滤: 1=只下H以上的空单">
+                  <span className="text-xs text-red-500">空H</span>
+                  <input
+                    type="number"
+                    value={bearishHighFilter}
+                    onChange={(e) => setBearishHighFilter(Number(e.target.value))}
+                    disabled={isAutoManaged}
+                    min="0"
+                    max="1"
+                    className="w-8 px-1 py-1.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500 disabled:opacity-60"
+                  />
                 </div>
 
                 <button

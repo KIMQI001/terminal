@@ -94,6 +94,8 @@ towerManagementRoutes.post('/', (req: Request, res: Response) => {
       minEntryDistance = 5,
       trailingActivationRatio = 0.02,
       trailingCallbackRate = 0.3,
+      bullishLowFilter = 0,
+      bearishHighFilter = 0,
     } = req.body;
 
     if (!userId || !symbol) {
@@ -119,6 +121,8 @@ towerManagementRoutes.post('/', (req: Request, res: Response) => {
       minEntryDistance,
       trailingActivationRatio,
       trailingCallbackRate,
+      bullishLowFilter,
+      bearishHighFilter,
     });
 
     console.log(`[TowerManagement API] 更新配置: userId=${userId}, symbol=${symbol}, exchange=${exchange || 'binance'}, active=${isActive}`);
@@ -157,6 +161,8 @@ towerManagementRoutes.post('/start', (req: Request, res: Response) => {
       minEntryDistance = 5,
       trailingActivationRatio = 0.02,
       trailingCallbackRate = 0.3,
+      bullishLowFilter = 0,
+      bearishHighFilter = 0,
     } = req.body;
 
     if (!userId || !symbol) {
@@ -183,6 +189,8 @@ towerManagementRoutes.post('/start', (req: Request, res: Response) => {
       minEntryDistance,
       trailingActivationRatio,
       trailingCallbackRate,
+      bullishLowFilter,
+      bearishHighFilter,
     });
 
     console.log(`[TowerManagement API] 启动托管: userId=${userId}, symbol=${symbol}, exchange=${exchange || 'binance'}, baseMargin=${baseMargin}, layers=${towerLayers}, 启动间距=${minEntryDistance}‰`);

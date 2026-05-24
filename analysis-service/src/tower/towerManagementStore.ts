@@ -25,6 +25,8 @@ export interface TowerManagementConfig {
   minEntryDistance: number;      // 启动间距（点数）
   trailingActivationRatio: number; // 追踪止盈激活比例（默认 0.02 = 2%）
   trailingCallbackRate: number;    // 追踪止盈回撤率（默认 0.3 = 0.3%）
+  bullishLowFilter: number;       // 多单过滤：1=只下L以下的多单，0=不限制
+  bearishHighFilter: number;      // 空单过滤：1=只下H以上的空单，0=不限制
   lastRunAt: string | null;      // 上次执行时间
   nextRunAt: string | null;      // 下次执行时间
   createdAt: string;
@@ -148,6 +150,17 @@ export function initTowerManagementTables(): void {
     console.log('[TowerManagement] 添加 trailing_callback_rate 字段');
   } catch { /* 列已存在 */ }
 
+  // 迁移：添加多空过滤字段
+  try {
+    db.exec(`ALTER TABLE tower_management ADD COLUMN bullish_low_filter INTEGER NOT NULL DEFAULT 0`);
+    console.log('[TowerManagement] 添加 bullish_low_filter 字段');
+  } catch { /* 列已存在 */ }
+
+  try {
+    db.exec(`ALTER TABLE tower_management ADD COLUMN bearish_high_filter INTEGER NOT NULL DEFAULT 0`);
+    console.log('[TowerManagement] 添加 bearish_high_filter 字段');
+  } catch { /* 列已存在 */ }
+
   console.log('[TowerManagement] 表初始化完成');
 }
 
@@ -196,6 +209,8 @@ export function upsertManagement(config: {
   minEntryDistance: number;
   trailingActivationRatio?: number;
   trailingCallbackRate?: number;
+  bullishLowFilter?: number;
+  bearishHighFilter?: number;
 }): TowerManagementConfig {
   const exchange = config.exchange || 'binance';
   const trailingActivationRatio = config.trailingActivationRatio ?? 0.02;
@@ -224,6 +239,8 @@ export function upsertManagement(config: {
         min_entry_distance = ?,
         trailing_activation_ratio = ?,
         trailing_callback_rate = ?,
+        bullish_low_filter = ?,
+        bearish_high_filter = ?,
         next_run_at = ?,
         updated_at = ?
       WHERE user_id = ? AND symbol = ?
@@ -240,6 +257,8 @@ export function upsertManagement(config: {
       config.minEntryDistance,
       trailingActivationRatio,
       trailingCallbackRate,
+      config.bullishLowFilter ?? 0,
+      config.bearishHighFilter ?? 0,
       nextRunAt,
       now,
       config.userId,
@@ -253,9 +272,9 @@ export function upsertManagement(config: {
       INSERT INTO tower_management (
         user_id, symbol, exchange, is_active, interval_minutes, base_margin, margin_increment,
         tower_layers, bullish_start_layer, bearish_start_layer, min_spacing_ratio, min_entry_distance,
-        trailing_activation_ratio, trailing_callback_rate,
+        trailing_activation_ratio, trailing_callback_rate, bullish_low_filter, bearish_high_filter,
         next_run_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       config.userId,
       config.symbol,
@@ -271,6 +290,8 @@ export function upsertManagement(config: {
       config.minEntryDistance,
       trailingActivationRatio,
       trailingCallbackRate,
+      config.bullishLowFilter ?? 0,
+      config.bearishHighFilter ?? 0,
       nextRunAt,
       now,
       now
@@ -483,6 +504,8 @@ function rowToConfig(row: ManagementRow): TowerManagementConfig {
     minEntryDistance: row.min_entry_distance ?? 500,
     trailingActivationRatio: row.trailing_activation_ratio ?? 0.02,
     trailingCallbackRate: row.trailing_callback_rate ?? 0.3,
+    bullishLowFilter: (row as any).bullish_low_filter ?? 0,
+    bearishHighFilter: (row as any).bearish_high_filter ?? 0,
     lastRunAt: row.last_run_at,
     nextRunAt: row.next_run_at,
     createdAt: row.created_at,
