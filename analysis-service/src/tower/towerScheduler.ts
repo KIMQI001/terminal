@@ -43,6 +43,9 @@ interface CGLiqData {
 // Coinglass 服务地址
 const COINGLASS_SERVICE_URL = process.env.COINGLASS_SERVICE_URL || 'http://127.0.0.1:3004';
 
+// 是否使用 Coinglass 清算数据（默认关闭）
+const USE_CG_DATA = process.env.TOWER_USE_CG_DATA === 'true';
+
 // 时间周期优先级（同距离时大级别优先）
 const TIMEFRAME_PRIORITY: Record<string, number> = {
   '1d': 5, '4h': 4, '1h': 3, '15m': 2, '5m': 1
@@ -386,8 +389,8 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     // 7. 获取日K前高前低（用于区域过滤）
     const dailyHL = await getDailyHL(management.symbol, towerData.currentPrice);
 
-    // 8. 获取 Coinglass 清算数据
-    const cgData = await fetchCGLiqData(management.symbol);
+    // 8. 获取 Coinglass 清算数据（可选，默认关闭）
+    const cgData = USE_CG_DATA ? await fetchCGLiqData(management.symbol) : null;
 
     // 9. 计算要下的订单
     const orders = calculateOrders(towerData, effectiveManagement, leverage, dailyHL, cgData);
@@ -582,9 +585,9 @@ async function checkCGUpdateOpportunity(
       return { shouldUpdate: false, reason: '1%距离内有订单' };
     }
 
-    // 4. 获取 CG 数据
-    const cgData = await fetchCGLiqData(symbol);
-    if (!cgData) {
+    // 4. 获取 CG 数据（可选，默认关闭）
+    const cgData = USE_CG_DATA ? await fetchCGLiqData(symbol) : null;
+    if (!cgData && USE_CG_DATA) {
       return { shouldUpdate: false, reason: '无CG数据' };
     }
 
@@ -601,8 +604,10 @@ async function checkCGUpdateOpportunity(
     const hasCGShort = !!cgShortOrder;
     console.log(`[TowerScheduler] CG首单状态: 多=${hasCGLong}${hasCGLong ? `@${cgLongOrder!.price.toFixed(0)}` : ''}, 空=${hasCGShort}${hasCGShort ? `@${cgShortOrder!.price.toFixed(0)}` : ''}, D=${dailyHL.dStart.toFixed(0)}, P=${dailyHL.pStart.toFixed(0)}`);
 
-    // 5.6 检查 CG 多单机会（无论是否已有）
-    if (cgData.longTop.length > 0) {
+    // 5.6-5.9 CG 检查（只有开启 CG 数据时才执行）
+    if (cgData) {
+      // 5.6 检查 CG 多单机会（无论是否已有）
+      if (cgData.longTop.length > 0) {
       const longBelowD = cgData.longTop.filter(l => l.price < dailyHL.dStart);
       if (longBelowD.length > 0) {
         const maxLong = longBelowD.reduce((max, l) => l.amount > max.amount ? l : max, longBelowD[0]);
@@ -705,6 +710,7 @@ async function checkCGUpdateOpportunity(
         }
       }
     }
+    } // 结束 if (cgData)
 
     return { shouldUpdate: false, reason: '无更优CG机会' };
   } catch (error) {
