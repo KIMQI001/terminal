@@ -32,7 +32,7 @@ export interface TowerBlocksResult {
  */
 export async function fetchTowerBlocks(symbol: string): Promise<TowerBlocksResult | null> {
   try {
-    const timeframes: Timeframe[] = ['5m', '15m', '1h', '4h', '1d'];
+    const timeframes: Timeframe[] = ['15m', '1h', '4h', '1d'];
 
     console.log(`[TowerBlocksFetcher] 获取塔块数据: ${symbol}`);
 
@@ -48,7 +48,7 @@ export async function fetchTowerBlocks(symbol: string): Promise<TowerBlocksResul
     const towerBlocks: TowerBlock[] = [];
 
     // 获取当前价格
-    const latestCandles = allCandles[0]; // 5m 最新
+    const latestCandles = allCandles[0]; // 15m 最新
     const currentPrice = latestCandles.length > 0 ? latestCandles[latestCandles.length - 1].close : 0;
 
     if (currentPrice === 0) {
@@ -149,7 +149,7 @@ export async function fetchTowerBlocks(symbol: string): Promise<TowerBlocksResul
     // 去重：入场价格相近（50点内）的同类型塔块只保留一个
     const DEDUP_THRESHOLD = 50;
     const timeframePriority: Record<string, number> = {
-      '1d': 5, '4h': 4, '1h': 3, '15m': 2, '5m': 1
+      '1d': 5, '4h': 4, '1h': 3, '15m': 2
     };
 
     const dedupedBlocks = filteredBlocks.reduce((acc, block) => {

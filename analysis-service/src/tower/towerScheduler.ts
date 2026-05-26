@@ -48,7 +48,7 @@ const USE_CG_DATA = process.env.TOWER_USE_CG_DATA === 'true';
 
 // 时间周期优先级（同距离时大级别优先）
 const TIMEFRAME_PRIORITY: Record<string, number> = {
-  '1d': 5, '4h': 4, '1h': 3, '15m': 2, '5m': 1
+  '1d': 5, '4h': 4, '1h': 3, '15m': 2
 };
 
 /**
