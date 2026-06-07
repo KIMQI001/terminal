@@ -609,11 +609,17 @@ async fn monitor_positions(config: &crate::binance::BinanceConfig, symbol: &str)
                             // 例如：70000开多，70350当前价，盈利350点 >= 激活300点
                             // 保护性止损 = 70000 + 100 = 70100（锁定100点利润）
                             if current_profit >= protective_activation {
-                                let protective_stop_price = if position_side == "LONG" {
+                                let raw_protective_stop_price = if position_side == "LONG" {
                                     entry_price + protective_stop_points
                                 } else {
                                     entry_price - protective_stop_points
                                 };
+
+                                // 按价格精度舍入，避免与现有止损价比较时因精度差异导致重复下单
+                                let (_, price_precision) = crate::binance::get_precision(symbol);
+                                let protective_stop_price = crate::binance::format_price(
+                                    raw_protective_stop_price, price_precision
+                                ).parse::<f64>().unwrap_or(raw_protective_stop_price);
 
                                 // 获取现有的止损单价格
                                 let existing_stop_price = existing_orders.iter()
@@ -621,11 +627,14 @@ async fn monitor_positions(config: &crate::binance::BinanceConfig, symbol: &str)
                                     .filter_map(|o| o.price.parse::<f64>().ok())
                                     .next();
 
-                                // 只有当新的保护性止损比现有止损更有利时才更新
+                                // 使用 0.5 * tickSize 作为容差，避免重复下单
+                                let tolerance = 0.5_f64 / 10f64.powi(price_precision as i32);
+
+                                // 只有当新的保护性止损比现有止损更有利（超出容差）时才更新
                                 let should_update = if position_side == "LONG" {
-                                    existing_stop_price.map_or(true, |existing| protective_stop_price > existing)
+                                    existing_stop_price.map_or(true, |existing| protective_stop_price - existing > tolerance)
                                 } else {
-                                    existing_stop_price.map_or(true, |existing| protective_stop_price < existing)
+                                    existing_stop_price.map_or(true, |existing| existing - protective_stop_price > tolerance)
                                 };
 
                                 if should_update {

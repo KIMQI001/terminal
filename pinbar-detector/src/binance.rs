@@ -140,7 +140,7 @@ pub struct OpenOrderInfo {
 }
 
 // 交易对精度配置
-fn get_precision(symbol: &str) -> (u32, u32) {
+pub fn get_precision(symbol: &str) -> (u32, u32) {
     match symbol {
         "BTCUSDT" | "BTCUSDC" => (3, 1),
         "ETHUSDT" | "ETHUSDC" => (3, 2),
@@ -154,7 +154,7 @@ fn format_quantity(qty: f64, precision: u32) -> String {
     format!("{:.prec$}", qty, prec = precision as usize)
 }
 
-fn format_price(price: f64, precision: u32) -> String {
+pub fn format_price(price: f64, precision: u32) -> String {
     format!("{:.prec$}", price, prec = precision as usize)
 }
 
