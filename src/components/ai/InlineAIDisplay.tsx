@@ -187,12 +187,41 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
   // 开单相关
   const { setPrefillData, setTradingLines, openModal } = useOrderStore();
 
-  // 点击流动性点开单
+  // 点击流动性点开单（单击 - 直接入场）
   const handleLiquidityClick = (point: LiquidityPoint, isAbove: boolean) => {
     const side = isAbove ? 'sell' : 'buy';  // 上方H做空，下方L做多
     const entry = point.price;
     const stopLoss = isAbove ? entry + 200 : entry - 200;  // 止损200点
     const takeProfit = isAbove ? entry - 1000 : entry + 1000;  // 止盈1000点
+
+    const prefillData: OTEPrefillData = {
+      side,
+      entry,
+      stopLoss,
+      takeProfit,
+    };
+
+    const lines: TradingLine[] = [
+      { price: entry, type: 'entry', side },
+      { price: stopLoss, type: 'stopLoss', side },
+      { price: takeProfit, type: 'takeProfit', side },
+    ];
+
+    setTradingLines(lines);
+    setPrefillData(prefillData);
+    openModal();
+  };
+
+  // 双击流动性点开挂单（入场偏移200点，止损=极值点不破极点）
+  const handleLiquidityPendingClick = (point: LiquidityPoint, isAbove: boolean) => {
+    const side = isAbove ? 'sell' : 'buy';  // 上方H做空，下方L做多
+    const extreme = point.price;  // 极值点（H/L）
+    // 入场 = 极值点 ± 200点（向当前价方向偏移）
+    const entry = isAbove ? extreme - 200 : extreme + 200;
+    // 止损 = 极值点（不破极点）
+    const stopLoss = extreme;
+    // 止盈 = 入场价 ± 1000点
+    const takeProfit = isAbove ? entry - 1000 : entry + 1000;
 
     const prefillData: OTEPrefillData = {
       side,
@@ -514,7 +543,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
             <div className="flex">
               {/* 左侧: 上方 H 点 */}
               <div className="flex-1 pr-2">
-                <div className="text-[9px] font-semibold text-gray-500 mb-1">H 点 (做空)</div>
+                <div className="text-[9px] font-semibold text-gray-500 mb-1">H 点 (做空·单击市价/双击挂单)</div>
                 {liquidityPoints.aboveH.length === 0 ? (
                   <div className="text-[9px] text-gray-400 text-center py-2">暂无</div>
                 ) : (
@@ -526,6 +555,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                         <div
                           key={idx}
                           onClick={() => handleLiquidityClick(point, true)}
+                          onDoubleClick={() => handleLiquidityPendingClick(point, true)}
                           className={`grid grid-cols-3 gap-1 px-1 py-0.5 rounded cursor-pointer hover:bg-green-100 transition-colors ${isNearest ? 'border border-dashed border-green-500 bg-green-50' : ''}`}
                         >
                           <div className="flex items-center gap-1">
@@ -550,7 +580,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
 
               {/* 右侧: 下方 L 点 */}
               <div className="flex-1 pl-2">
-                <div className="text-[9px] font-semibold text-gray-500 mb-1">L 点 (做多)</div>
+                <div className="text-[9px] font-semibold text-gray-500 mb-1">L 点 (做多·单击市价/双击挂单)</div>
                 {liquidityPoints.belowL.length === 0 ? (
                   <div className="text-[9px] text-gray-400 text-center py-2">暂无</div>
                 ) : (
@@ -562,6 +592,7 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                         <div
                           key={idx}
                           onClick={() => handleLiquidityClick(point, false)}
+                          onDoubleClick={() => handleLiquidityPendingClick(point, false)}
                           className={`grid grid-cols-3 gap-1 px-1 py-0.5 rounded cursor-pointer hover:bg-red-100 transition-colors ${isNearest ? 'border border-dashed border-red-500 bg-red-50' : ''}`}
                         >
                           <div className="flex items-center gap-1">
