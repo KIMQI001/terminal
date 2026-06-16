@@ -64,6 +64,7 @@ interface TowerManagementConfig {
   trailingCallbackRate: number;     // 追踪止盈回撤率（默认 0.3 = 0.3%）
   bullishLowFilter: number;         // 多L过滤：1=只下L以下的多单，0=不限制
   bearishHighFilter: number;        // 空H过滤：1=只下H以上的空单，0=不限制
+  useHLPDFilter: boolean;           // HLPD区域过滤：true=多单<=D/空单>=P, false=不限
   monitorTimeframe: string;         // 周期过滤：0=所有周期, 15m/1h/4h/1d 只下指定周期
   lastRunAt: string | null;
   nextRunAt: string | null;
@@ -191,6 +192,7 @@ export default function TowerPage() {
   const [trailingCallbackRate, setTrailingCallbackRate] = useState(0.3); // 追踪止盈回撤率（百分比），默认0.3%
   const [bullishLowFilter, setBullishLowFilter] = useState(0); // 多L过滤：1=只下L以下的多单
   const [bearishHighFilter, setBearishHighFilter] = useState(0); // 空H过滤：1=只下H以上的空单
+  const [useHLPDFilter, setUseHLPDFilter] = useState(true); // HLPD区域过滤：true=多<=D/空>=P, false=不限
   const [monitorTimeframe, setMonitorTimeframe] = useState<string>("0"); // 周期过滤：0=所有，15m/1h/4h/1d 只下指定周期
   const [isAutoOrdering, setIsAutoOrdering] = useState(false);
   const [orderProgress, setOrderProgress] = useState<{
@@ -296,6 +298,7 @@ export default function TowerPage() {
           trailingCallbackRate,
           bullishLowFilter,
           bearishHighFilter,
+          useHLPDFilter,
           monitorTimeframe,
         }),
       });
@@ -343,6 +346,7 @@ export default function TowerPage() {
       setTrailingCallbackRate(config.trailingCallbackRate ?? 0.3);
       setBullishLowFilter(config.bullishLowFilter ?? 0);
       setBearishHighFilter(config.bearishHighFilter ?? 0);
+      setUseHLPDFilter(config.useHLPDFilter ?? true);
       setMonitorTimeframe(config.monitorTimeframe ?? "0");
       // 同步到 localStorage
       localStorage.setItem(STORAGE_KEYS.BASE_MARGIN, String(config.baseMargin));
@@ -1226,6 +1230,18 @@ export default function TowerPage() {
                     min="0"
                     max="1"
                     className="w-8 px-1 py-1.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500 disabled:opacity-60"
+                  />
+                </div>
+
+                {/* HLPD区域过滤 */}
+                <div className="flex items-center gap-1" title="HLPD区域过滤: 开启=多单<=D/空单>=P, 关闭=不限区域">
+                  <span className="text-xs text-[var(--text-tertiary)]">HLPD</span>
+                  <input
+                    type="checkbox"
+                    checked={useHLPDFilter}
+                    onChange={(e) => setUseHLPDFilter(e.target.checked)}
+                    disabled={isAutoManaged}
+                    className="w-4 h-4 cursor-pointer disabled:opacity-60"
                   />
                 </div>
 

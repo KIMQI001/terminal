@@ -1019,14 +1019,14 @@ function calculateOrders(
   cgData: CGLiqData | null
 ): TowerOrder[] {
   const { currentPrice, blocks: rawBlocks } = towerData;
-  const { baseMargin, marginIncrement, towerLayers, bullishStartLayer, bearishStartLayer, minSpacingRatio, bullishLowFilter, bearishHighFilter, monitorTimeframe } = management;
+  const { baseMargin, marginIncrement, towerLayers, bullishStartLayer, bearishStartLayer, minSpacingRatio, bullishLowFilter, bearishHighFilter, useHLPDFilter, monitorTimeframe } = management;
 
   // 周期过滤：0 表示所有周期，否则只保留指定周期（仅对 ICT 塔块生效，CG 单不受影响）
   const blocks = monitorTimeframe && monitorTimeframe !== '0'
     ? rawBlocks.filter(b => b.timeframe === monitorTimeframe)
     : rawBlocks;
 
-  console.log(`[TowerScheduler] 计算订单: 基础保证金=${baseMargin}, 递增=${marginIncrement}, 杠杆=${leverage}x, 多L过滤=${bullishLowFilter}, 空H过滤=${bearishHighFilter}, 周期过滤=${monitorTimeframe || '0'}(原始${rawBlocks.length}->过滤后${blocks.length})`);
+  console.log(`[TowerScheduler] 计算订单: 基础保证金=${baseMargin}, 递增=${marginIncrement}, 杠杆=${leverage}x, 多L过滤=${bullishLowFilter}, 空H过滤=${bearishHighFilter}, HLPD过滤=${useHLPDFilter}, 周期过滤=${monitorTimeframe || '0'}(原始${rawBlocks.length}->过滤后${blocks.length})`);
 
   // ===== CG 首单数据 =====
   // 如果有 CG 数据和日K的 P/D 区域，用于计算首单
@@ -1232,8 +1232,8 @@ function calculateOrders(
     currentPrice
   );
 
-  // 区域过滤: 只在折扣区开多，只在溢价区开空
-  if (dailyHL) {
+  // 区域过滤: 只在折扣区开多，只在溢价区开空（可通过 useHLPDFilter 关闭）
+  if (dailyHL && useHLPDFilter) {
     const originalBullishCount = bullishCandidates.length;
     const originalBearishCount = bearishCandidates.length;
 
@@ -1245,6 +1245,8 @@ function calculateOrders(
     console.log(`[TowerScheduler] 区域过滤: H=${dailyHL.high.toFixed(0)} P=${dailyHL.pStart.toFixed(0)} D=${dailyHL.dStart.toFixed(0)} L=${dailyHL.low.toFixed(0)}`);
     console.log(`[TowerScheduler] 多单: ${originalBullishCount} -> ${bullishCandidates.length} (需 <= D=${dailyHL.dStart.toFixed(0)})`);
     console.log(`[TowerScheduler] 空单: ${originalBearishCount} -> ${bearishCandidates.length} (需 >= P=${dailyHL.pStart.toFixed(0)})`);
+  } else if (!useHLPDFilter) {
+    console.log(`[TowerScheduler] HLPD区域过滤已关闭，跳过 P/D 区域限制`);
   } else {
     console.log(`[TowerScheduler] 未获取到日K数据，跳过区域过滤`);
   }

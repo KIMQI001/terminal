@@ -27,6 +27,7 @@ export interface TowerManagementConfig {
   trailingCallbackRate: number;    // 追踪止盈回撤率（默认 0.3 = 0.3%）
   bullishLowFilter: number;       // 多单过滤：1=只下L以下的多单，0=不限制
   bearishHighFilter: number;      // 空单过滤：1=只下H以上的空单，0=不限制
+  useHLPDFilter: boolean;         // 是否启用HLPD区域过滤（多单<=D, 空单>=P），默认 true
   monitorTimeframe: string;       // 周期过滤：0=所有周期, 15m/1h/4h/1d 只下指定周期
   lastRunAt: string | null;      // 上次执行时间
   nextRunAt: string | null;      // 下次执行时间
@@ -64,6 +65,9 @@ interface ManagementRow {
   min_entry_distance: number;
   trailing_activation_ratio: number;
   trailing_callback_rate: number;
+  bullish_low_filter: number;
+  bearish_high_filter: number;
+  use_hlpd_filter: number;
   monitor_timeframe: string;
   last_run_at: string | null;
   next_run_at: string | null;
@@ -169,6 +173,12 @@ export function initTowerManagementTables(): void {
     console.log('[TowerManagement] 添加 monitor_timeframe 字段');
   } catch { /* 列已存在 */ }
 
+  // 迁移：添加 HLPD 区域过滤开关字段
+  try {
+    db.exec(`ALTER TABLE tower_management ADD COLUMN use_hlpd_filter INTEGER NOT NULL DEFAULT 1`);
+    console.log('[TowerManagement] 添加 use_hlpd_filter 字段');
+  } catch { /* 列已存在 */ }
+
   console.log('[TowerManagement] 表初始化完成');
 }
 
@@ -219,12 +229,14 @@ export function upsertManagement(config: {
   trailingCallbackRate?: number;
   bullishLowFilter?: number;
   bearishHighFilter?: number;
+  useHLPDFilter?: boolean;
   monitorTimeframe?: string;
 }): TowerManagementConfig {
   const exchange = config.exchange || 'binance';
   const trailingActivationRatio = config.trailingActivationRatio ?? 0.02;
   const trailingCallbackRate = config.trailingCallbackRate ?? 0.3;
   const monitorTimeframe = config.monitorTimeframe ?? '0';
+  const useHLPDFilter = config.useHLPDFilter ?? true;
   const db = getDatabase();
   const now = new Date().toISOString();
 
@@ -251,6 +263,7 @@ export function upsertManagement(config: {
         trailing_callback_rate = ?,
         bullish_low_filter = ?,
         bearish_high_filter = ?,
+        use_hlpd_filter = ?,
         monitor_timeframe = ?,
         next_run_at = ?,
         updated_at = ?
@@ -270,6 +283,7 @@ export function upsertManagement(config: {
       trailingCallbackRate,
       config.bullishLowFilter ?? 0,
       config.bearishHighFilter ?? 0,
+      useHLPDFilter ? 1 : 0,
       monitorTimeframe,
       nextRunAt,
       now,
@@ -277,7 +291,7 @@ export function upsertManagement(config: {
       config.symbol
     );
 
-    console.log(`[TowerManagement] 更新托管配置: userId=${config.userId}, symbol=${config.symbol}, exchange=${exchange}, active=${config.isActive}, monitorTimeframe=${monitorTimeframe}`);
+    console.log(`[TowerManagement] 更新托管配置: userId=${config.userId}, symbol=${config.symbol}, exchange=${exchange}, active=${config.isActive}, monitorTimeframe=${monitorTimeframe}, useHLPDFilter=${useHLPDFilter}`);
   } else {
     // 创建
     db.prepare(`
@@ -285,8 +299,8 @@ export function upsertManagement(config: {
         user_id, symbol, exchange, is_active, interval_minutes, base_margin, margin_increment,
         tower_layers, bullish_start_layer, bearish_start_layer, min_spacing_ratio, min_entry_distance,
         trailing_activation_ratio, trailing_callback_rate, bullish_low_filter, bearish_high_filter,
-        monitor_timeframe, next_run_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        use_hlpd_filter, monitor_timeframe, next_run_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       config.userId,
       config.symbol,
@@ -304,13 +318,14 @@ export function upsertManagement(config: {
       trailingCallbackRate,
       config.bullishLowFilter ?? 0,
       config.bearishHighFilter ?? 0,
+      useHLPDFilter ? 1 : 0,
       monitorTimeframe,
       nextRunAt,
       now,
       now
     );
 
-    console.log(`[TowerManagement] 创建托管配置: userId=${config.userId}, symbol=${config.symbol}, exchange=${exchange}, monitorTimeframe=${monitorTimeframe}`);
+    console.log(`[TowerManagement] 创建托管配置: userId=${config.userId}, symbol=${config.symbol}, exchange=${exchange}, monitorTimeframe=${monitorTimeframe}, useHLPDFilter=${useHLPDFilter}`);
   }
 
   return getManagement(config.userId, config.symbol)!;
@@ -519,6 +534,7 @@ function rowToConfig(row: ManagementRow): TowerManagementConfig {
     trailingCallbackRate: row.trailing_callback_rate ?? 0.3,
     bullishLowFilter: (row as any).bullish_low_filter ?? 0,
     bearishHighFilter: (row as any).bearish_high_filter ?? 0,
+    useHLPDFilter: ((row as any).use_hlpd_filter ?? 1) === 1,
     monitorTimeframe: (row as any).monitor_timeframe ?? '0',
     lastRunAt: row.last_run_at,
     nextRunAt: row.next_run_at,
