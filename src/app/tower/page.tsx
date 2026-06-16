@@ -1132,7 +1132,7 @@ export default function TowerPage() {
                   onChange={(e) => setMinEntryDistance(Number(e.target.value))}
                   className="w-14 px-1 py-1 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500"
                 >
-                  {[5, 10, 15, 20, 25, 30].map((n) => (
+                  {[2, 5, 10, 15, 20, 25, 30].map((n) => (
                     <option key={n} value={n}>{n}‰</option>
                   ))}
                 </select>
