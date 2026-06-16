@@ -1018,10 +1018,15 @@ function calculateOrders(
   dailyHL: DailyHL | null,
   cgData: CGLiqData | null
 ): TowerOrder[] {
-  const { currentPrice, blocks } = towerData;
-  const { baseMargin, marginIncrement, towerLayers, bullishStartLayer, bearishStartLayer, minSpacingRatio, bullishLowFilter, bearishHighFilter } = management;
+  const { currentPrice, blocks: rawBlocks } = towerData;
+  const { baseMargin, marginIncrement, towerLayers, bullishStartLayer, bearishStartLayer, minSpacingRatio, bullishLowFilter, bearishHighFilter, monitorTimeframe } = management;
 
-  console.log(`[TowerScheduler] 计算订单: 基础保证金=${baseMargin}, 递增=${marginIncrement}, 杠杆=${leverage}x, 多L过滤=${bullishLowFilter}, 空H过滤=${bearishHighFilter}`);
+  // 周期过滤：0 表示所有周期，否则只保留指定周期（仅对 ICT 塔块生效，CG 单不受影响）
+  const blocks = monitorTimeframe && monitorTimeframe !== '0'
+    ? rawBlocks.filter(b => b.timeframe === monitorTimeframe)
+    : rawBlocks;
+
+  console.log(`[TowerScheduler] 计算订单: 基础保证金=${baseMargin}, 递增=${marginIncrement}, 杠杆=${leverage}x, 多L过滤=${bullishLowFilter}, 空H过滤=${bearishHighFilter}, 周期过滤=${monitorTimeframe || '0'}(原始${rawBlocks.length}->过滤后${blocks.length})`);
 
   // ===== CG 首单数据 =====
   // 如果有 CG 数据和日K的 P/D 区域，用于计算首单
