@@ -128,7 +128,7 @@ export function DailyKPanel() {
     openModal();
   };
 
-  // 竖排渲染一根锚点K线
+  // 渲染单根锚点K线（O/H/L/C 四个价位按钮 + 当前位置条）
   const renderAnchorColumn = (
     label: string,
     anchor: AnchorResult | null,
@@ -153,10 +153,10 @@ export function DailyKPanel() {
       return (
         <button
           onClick={() => handleClickPrice(side, value)}
-          className={`w-full flex justify-between px-1.5 py-0.5 ${hoverClass} border border-gray-200 rounded transition-colors cursor-pointer`}
+          className={`w-full flex justify-between px-1 py-0.5 ${hoverClass} border border-gray-200 rounded transition-colors cursor-pointer`}
           title={`${key} 价位 ${isAbove ? "高于" : "低于"}现价，点击预填${action}`}
         >
-          <span className={labelClass}>{key} {arrow} {action}</span>
+          <span className={labelClass}>{key} {arrow}</span>
           <span className={`${valueClass} font-semibold`}>{value.toFixed(1)}</span>
         </button>
       );
@@ -189,28 +189,38 @@ export function DailyKPanel() {
   };
 
   return (
-    <div className="bg-white/95 border border-gray-200 rounded-lg shadow-lg w-[160px]">
-      {/* 标题栏 */}
+    <div className="bg-white/95 border border-gray-200 rounded-lg shadow-lg">
+      {/* 标题栏 - 折叠按钮 */}
       <div
-        className="flex items-center justify-between px-2 py-1.5 cursor-pointer hover:bg-gray-50 rounded-t-lg border-b border-gray-100"
+        className="flex items-center justify-between px-3 py-1.5 cursor-pointer hover:bg-gray-50 rounded-t-lg border-b border-gray-100"
         onClick={() => setIsCollapsed(!isCollapsed)}
       >
-        <span className="text-xs font-semibold text-gray-600">日K锚点</span>
+        <span className="text-xs font-semibold text-gray-600">日K锚点 (点击开单)</span>
         <span className="text-gray-400 text-[10px]">{isCollapsed ? '▶' : '▼'}</span>
       </div>
 
+      {/* 内容区 - 左右两栏 */}
       {!isCollapsed && (
-        <div className="px-2 py-2 space-y-2">
-          {loading && !dailyAnchor ? (
-            <div className="text-[10px] text-gray-400 text-center py-2">加载中...</div>
-          ) : (
-            <>
-              {renderAnchorColumn("1D", dailyAnchor, "text-blue-600")}
-              <div className="border-t border-gray-100 pt-2">
-                {renderAnchorColumn("4D", fourDayAnchor, "text-purple-600")}
-              </div>
-            </>
-          )}
+        <div className="flex">
+          {/* 左侧: 1D */}
+          <div className="px-2 py-2 w-[200px]">
+            {loading && !dailyAnchor ? (
+              <div className="text-[10px] text-gray-400 text-center py-2">加载中...</div>
+            ) : (
+              renderAnchorColumn("1D", dailyAnchor, "text-blue-600")
+            )}
+          </div>
+
+          <div className="w-px bg-gray-200 my-2" />
+
+          {/* 右侧: 4D */}
+          <div className="px-2 py-2 min-w-[130px]">
+            {loading && !fourDayAnchor ? (
+              <div className="text-[10px] text-gray-400 text-center py-2">加载中...</div>
+            ) : (
+              renderAnchorColumn("4D", fourDayAnchor, "text-purple-600")
+            )}
+          </div>
         </div>
       )}
     </div>
