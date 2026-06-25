@@ -51,13 +51,36 @@ function findAnchor(klines: AnchorCandle[], currentPrice: number): AnchorCandle 
   return null;
 }
 
+/**
+ * 把日K聚合成 N 日K（例如 4D = 每 4 根日K合并）
+ */
+function aggregateNDaily(dailyKlines: AnchorCandle[], n: number): AnchorCandle[] {
+  const result: AnchorCandle[] = [];
+  // 从右往左分组成 N 根一组
+  const len = dailyKlines.length;
+  const groupCount = Math.floor(len / n);
+  for (let g = groupCount - 1; g >= 0; g--) {
+    const start = g * n;
+    const end = start + n;
+    const group = dailyKlines.slice(start, end);
+    if (group.length === 0) continue;
+    const time = group[0].time;
+    const open = group[0].open;
+    const close = group[group.length - 1].close;
+    const high = Math.max(...group.map((c) => c.high));
+    const low = Math.min(...group.map((c) => c.low));
+    result.push({ time, open, high, low, close });
+  }
+  // 按时间升序（从左到右：旧→新）
+  return result.reverse();
+}
+
 export function DailyKPanel() {
   const { symbol, candles } = useChartStore();
   const { setPrefillData, openModal } = useOrderStore();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [dailyAnchor, setDailyAnchor] = useState<AnchorResult | null>(null);
   const [fourDayAnchor, setFourDayAnchor] = useState<AnchorResult | null>(null);
-  const [loading, setLoading] = useState(false);
 
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
 
@@ -65,13 +88,13 @@ export function DailyKPanel() {
     if (!symbol || currentPrice <= 0) return;
 
     let cancelled = false;
-    setLoading(true);
 
     const load = async () => {
       try {
         const dailyData = await fetchKlines(symbol, "1d", 200);
         if (cancelled || dailyData.length < 2) return;
 
+        // 1D 锚点
         const dCandle = findAnchor(dailyData, currentPrice);
         if (dCandle) {
           const range = dCandle.high - dCandle.low;
@@ -83,28 +106,22 @@ export function DailyKPanel() {
           setDailyAnchor(null);
         }
 
-        // 4D 锚点（参考）
-        try {
-          const fourDData = await fetchKlines(symbol, "4d", 200);
-          if (!cancelled && fourDData.length >= 2) {
-            const fCandle = findAnchor(fourDData, currentPrice);
-            if (fCandle) {
-              const range = fCandle.high - fCandle.low;
-              const pos = range > 0
-                ? Math.max(0, Math.min(100, ((currentPrice - fCandle.low) / range) * 100))
-                : 0;
-              setFourDayAnchor({ candle: fCandle, positionPercent: pos });
-            } else {
-              setFourDayAnchor(null);
-            }
+        // 4D 锚点（参考）—— 从日K聚合成 4D
+        const fourDKlines = aggregateNDaily(dailyData, 4);
+        const fCandle = findAnchor(fourDKlines, currentPrice);
+        if (!cancelled) {
+          if (fCandle) {
+            const range = fCandle.high - fCandle.low;
+            const pos = range > 0
+              ? Math.max(0, Math.min(100, ((currentPrice - fCandle.low) / range) * 100))
+              : 0;
+            setFourDayAnchor({ candle: fCandle, positionPercent: pos });
+          } else {
+            setFourDayAnchor(null);
           }
-        } catch {
-          setFourDayAnchor(null);
         }
       } catch {
         // 静默失败
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     };
 
@@ -204,22 +221,14 @@ export function DailyKPanel() {
         <div className="flex">
           {/* 左侧: 1D */}
           <div className="px-2 py-2 w-[200px]">
-            {loading && !dailyAnchor ? (
-              <div className="text-[10px] text-gray-400 text-center py-2">加载中...</div>
-            ) : (
-              renderAnchorColumn("1D", dailyAnchor, "text-blue-600")
-            )}
+            {renderAnchorColumn("1D", dailyAnchor, "text-blue-600")}
           </div>
 
           <div className="w-px bg-gray-200 my-2" />
 
           {/* 右侧: 4D */}
           <div className="px-2 py-2 min-w-[130px]">
-            {loading && !fourDayAnchor ? (
-              <div className="text-[10px] text-gray-400 text-center py-2">加载中...</div>
-            ) : (
-              renderAnchorColumn("4D", fourDayAnchor, "text-purple-600")
-            )}
+            {renderAnchorColumn("4D", fourDayAnchor, "text-purple-600")}
           </div>
         </div>
       )}
