@@ -21,6 +21,7 @@ import { MeasurementTool } from "./MeasurementTool";
 import { ICTOverlay } from "./ICTOverlay";
 import { OTEPanel } from "./OTEPanel";
 import { FVGPanel } from "./FVGPanel";
+import { DailyKPanel } from "./DailyKPanel";
 import { LiquidityGridPanel } from "./LiquidityGridPanel";
 import { OBPanel } from "./OBPanel";
 import { OrderCancelOverlay } from "./OrderCancelOverlay";
@@ -1312,6 +1313,7 @@ export function TradingChart() {
         <OTEPanel />
         <FVGPanel />
         <OBPanel />
+        <DailyKPanel />
         {user?.role === 'admin' && <LiquidityGridPanel />}
       </div>
       <MeasurementTool />
