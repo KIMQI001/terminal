@@ -140,8 +140,27 @@ export function DailyKPanel() {
       );
     }
     const { candle, positionPercent } = anchor;
-    const handleH = () => handleClickPrice("sell", candle.high);
-    const handleL = () => handleClickPrice("buy", candle.low);
+
+    // 通用价位按钮：高于现价→做空，低于现价→做多
+    const renderLevel = (key: string, value: number) => {
+      const isAbove = value >= currentPrice;
+      const side = isAbove ? "sell" : "buy";
+      const arrow = isAbove ? "↓" : "↑";
+      const action = isAbove ? "做空" : "做多";
+      const labelClass = isAbove ? "text-red-500" : "text-green-500";
+      const valueClass = isAbove ? "text-red-600" : "text-green-600";
+      const hoverClass = isAbove ? "hover:bg-red-50" : "hover:bg-green-50";
+      return (
+        <button
+          onClick={() => handleClickPrice(side, value)}
+          className={`w-full flex justify-between px-1.5 py-0.5 ${hoverClass} border border-gray-200 rounded transition-colors cursor-pointer`}
+          title={`${key} 价位 ${isAbove ? "高于" : "低于"}现价，点击预填${action}`}
+        >
+          <span className={labelClass}>{key} {arrow} {action}</span>
+          <span className={`${valueClass} font-semibold`}>{value.toFixed(1)}</span>
+        </button>
+      );
+    };
 
     return (
       <div className="space-y-1">
@@ -150,30 +169,10 @@ export function DailyKPanel() {
           <span className="text-gray-500 font-mono">{formatTime(candle.time)}</span>
         </div>
         <div className="space-y-0.5 font-mono text-[10px]">
-          <div className="flex justify-between">
-            <span className="text-gray-400">O</span>
-            <span className="text-gray-700">{candle.open.toFixed(1)}</span>
-          </div>
-          <button
-            onClick={handleH}
-            className="w-full flex justify-between px-1.5 py-0.5 bg-red-50 hover:bg-red-100 border border-red-200 rounded transition-colors cursor-pointer"
-            title="点击 H 价位预填做空"
-          >
-            <span className="text-red-500">H ↓ 做空</span>
-            <span className="text-red-600 font-semibold">{candle.high.toFixed(1)}</span>
-          </button>
-          <button
-            onClick={handleL}
-            className="w-full flex justify-between px-1.5 py-0.5 bg-green-50 hover:bg-green-100 border border-green-200 rounded transition-colors cursor-pointer"
-            title="点击 L 价位预填做多"
-          >
-            <span className="text-green-500">L ↑ 做多</span>
-            <span className="text-green-600 font-semibold">{candle.low.toFixed(1)}</span>
-          </button>
-          <div className="flex justify-between">
-            <span className="text-gray-400">C</span>
-            <span className="text-gray-700">{candle.close.toFixed(1)}</span>
-          </div>
+          {renderLevel("O", candle.open)}
+          {renderLevel("H", candle.high)}
+          {renderLevel("L", candle.low)}
+          {renderLevel("C", candle.close)}
         </div>
         {/* 当前位置条 */}
         <div className="relative h-1.5 bg-gray-200 rounded overflow-hidden">
