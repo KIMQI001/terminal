@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node -r dotenv/config src/index.ts"
+    "dev": "ts-node -r dotenv/config src/index.ts",
+    "blocks-15m": "ts-node -r dotenv/config src/tower/ictBlocks15m.cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.0",
