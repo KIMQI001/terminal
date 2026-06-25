@@ -14,8 +14,8 @@ const orderTypes: { value: OrderType; label: string }[] = [
 ];
 
 const leverageOptions = [5, 20, 50, 100];
-const DEFAULT_AMOUNT_PRESETS = [20, 50, 100, 200];
-const STORAGE_KEY = 'order-amount-presets';
+const PERCENTAGE_PRESETS = [25, 33, 50];
+const STORAGE_KEY = 'order-percentage-presets';
 
 export function OrderForm() {
   const { symbol, candles } = useChartStore();
@@ -25,14 +25,14 @@ export function OrderForm() {
   const [orderType, setOrderType] = useState<OrderType>("limit");
   const [selectedSide, setSelectedSide] = useState<OrderSide | null>(null);
   const [price, setPrice] = useState<string>("");
-  const [amountUSD, setAmountUSD] = useState<string>("");
+  const [amountPercent, setAmountPercent] = useState<string>("");
   const [stopLoss, setStopLoss] = useState<string>("");
   const [takeProfit, setTakeProfit] = useState<string>("");
 
   const [isSettingLeverage, setIsSettingLeverage] = useState(false);
-  const [amountPresets, setAmountPresets] = useState<number[]>(DEFAULT_AMOUNT_PRESETS);
+  const [percentagePresets, setPercentagePresets] = useState<number[]>(PERCENTAGE_PRESETS);
   const [isEditingPresets, setIsEditingPresets] = useState(false);
-  const [editingPresets, setEditingPresets] = useState<string[]>(['20', '50', '100', '200']);
+  const [editingPresets, setEditingPresets] = useState<string[]>(PERCENTAGE_PRESETS.map(String));
 
   // 从 localStorage 加载预设值
   useEffect(() => {
@@ -40,8 +40,8 @@ export function OrderForm() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length === 4) {
-          setAmountPresets(parsed);
+        if (Array.isArray(parsed) && parsed.length === PERCENTAGE_PRESETS.length) {
+          setPercentagePresets(parsed);
           setEditingPresets(parsed.map(String));
         }
       } catch {
@@ -104,25 +104,31 @@ export function OrderForm() {
     setTradingLines(lines);
   }, [price, stopLoss, takeProfit, selectedSide, setTradingLines]);
 
+  // 计算实际 USDT 金额（百分比 × 余额）
+  const actualUSD = useMemo(() => {
+    const pct = parseFloat(amountPercent) || 0;
+    const free = quoteBalance?.free || 0;
+    return free * pct / 100;
+  }, [amountPercent, quoteBalance]);
+
   // 计算币数量（保证金 * 杠杆 / 价格）
   const coinQuantity = useMemo(() => {
     const p = orderType === "market" ? lastPrice : parseFloat(price) || 0;
-    const usd = parseFloat(amountUSD) || 0;
     if (p <= 0) return 0;
-    // 输入金额是保证金，乘以杠杆得到实际开仓价值
-    return (usd * currentLeverage) / p;
-  }, [orderType, price, amountUSD, lastPrice, currentLeverage]);
+    // actualUSD 是保证金，乘以杠杆得到实际开仓价值
+    return (actualUSD * currentLeverage) / p;
+  }, [orderType, price, actualUSD, lastPrice, currentLeverage]);
 
-  // 点击预设金额
-  const handlePresetAmount = (amount: number) => {
-    setAmountUSD(amount.toString());
+  // 点击预设百分比
+  const handlePresetPercent = (pct: number) => {
+    setAmountPercent(pct.toString());
   };
 
   // 保存预设值
   const handleSavePresets = () => {
-    const newPresets = editingPresets.map(v => parseInt(v) || 0).filter(v => v > 0);
-    if (newPresets.length === 4) {
-      setAmountPresets(newPresets);
+    const newPresets = editingPresets.map(v => parseFloat(v) || 0).filter(v => v > 0);
+    if (newPresets.length === PERCENTAGE_PRESETS.length) {
+      setPercentagePresets(newPresets);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(newPresets));
       setIsEditingPresets(false);
     }
@@ -130,11 +136,19 @@ export function OrderForm() {
 
   // 取消编辑
   const handleCancelEdit = () => {
-    setEditingPresets(amountPresets.map(String));
+    setEditingPresets(percentagePresets.map(String));
     setIsEditingPresets(false);
   };
 
   const handleSubmit = async (side: OrderSide) => {
+    // 入场价（限价用 price，市价用最新价）
+    const entryPrice = orderType === "market" ? lastPrice : parseFloat(price) || 0;
+    if (entryPrice <= 0) return;
+
+    // 强制 SL = 入场价 ± 200 点（LONG: -200，SHORT: +200）
+    const slOffset = side === "buy" ? -200 : 200;
+    const finalStopLoss = entryPrice + slOffset;
+
     // 为手动下单生成 clientOrderIdPrefix，格式: m_{timestamp}
     // 使用短前缀 'm' 保证 clientAlgoId 不超过 36 字符限制
     // 止盈止损单通过 _sl, _tp 后缀与主单关联，实现订单分组
@@ -144,7 +158,7 @@ export function OrderForm() {
       type: orderType,
       side,
       price: orderType !== "market" ? parseFloat(price) : undefined,
-      stopPrice: stopLoss ? parseFloat(stopLoss) : undefined,
+      stopPrice: finalStopLoss,
       takeProfit: takeProfit ? parseFloat(takeProfit) : undefined,
       quantity: coinQuantity, // 使用计算出的币数量
       clientOrderIdPrefix,
@@ -154,7 +168,7 @@ export function OrderForm() {
 
     if (result.success) {
       // Reset form
-      setAmountUSD("");
+      setAmountPercent("");
       setStopLoss("");
       setTakeProfit("");
       setSelectedSide(null);
@@ -234,7 +248,10 @@ export function OrderForm() {
 
       {/* 止损输入 */}
       <div className="space-y-1.5">
-        <label className="text-xs text-[var(--text-secondary)]">止损 (SL)</label>
+        <div className="flex items-center justify-between">
+          <label className="text-xs text-[var(--text-secondary)]">止损 (SL)</label>
+          <span className="text-xs text-orange-500">下单时强制 ±200</span>
+        </div>
         <Input
           type="number"
           placeholder="止损价格"
@@ -256,11 +273,11 @@ export function OrderForm() {
         />
       </div>
 
-      {/* 金额输入 */}
+      {/* 仓位百分比输入 */}
       <div className="space-y-1.5">
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-2">
-            <label className="text-xs text-[var(--text-secondary)]">金额</label>
+            <label className="text-xs text-[var(--text-secondary)]">仓位</label>
             {!isEditingPresets && (
               <button
                 onClick={() => setIsEditingPresets(true)}
@@ -275,10 +292,10 @@ export function OrderForm() {
           </span>
         </div>
 
-        {/* 金额预设按钮 */}
+        {/* 百分比预设按钮 */}
         {isEditingPresets ? (
           <div className="space-y-2">
-            <div className="grid grid-cols-4 gap-1">
+            <div className={`grid gap-1`} style={{ gridTemplateColumns: `repeat(${PERCENTAGE_PRESETS.length}, minmax(0, 1fr))` }}>
               {editingPresets.map((value, index) => (
                 <input
                   key={index}
@@ -309,14 +326,18 @@ export function OrderForm() {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-4 gap-1">
-            {amountPresets.map((amount) => (
+          <div className={`grid gap-1`} style={{ gridTemplateColumns: `repeat(${PERCENTAGE_PRESETS.length}, minmax(0, 1fr))` }}>
+            {percentagePresets.map((pct) => (
               <button
-                key={amount}
-                onClick={() => handlePresetAmount(amount)}
-                className="py-1.5 text-xs bg-[var(--bg-tertiary)] rounded hover:bg-[var(--border)] transition-colors"
+                key={pct}
+                onClick={() => handlePresetPercent(pct)}
+                className={`py-1.5 text-xs rounded transition-colors ${
+                  parseFloat(amountPercent) === pct
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-[var(--bg-tertiary)] hover:bg-[var(--border)]'
+                }`}
               >
-                {amount}
+                {pct}%
               </button>
             ))}
           </div>
@@ -324,13 +345,14 @@ export function OrderForm() {
 
         <Input
           type="number"
-          placeholder="金额"
-          value={amountUSD}
-          onChange={(e) => setAmountUSD(e.target.value)}
-          suffix={quoteAsset}
+          placeholder="百分比"
+          value={amountPercent}
+          onChange={(e) => setAmountPercent(e.target.value)}
+          suffix="%"
         />
-        <div className="text-xs text-[var(--text-secondary)]">
-          ≈ {coinQuantity.toLocaleString(undefined, { maximumFractionDigits: 6 })} {baseAsset}
+        <div className="text-xs text-[var(--text-secondary)] space-y-0.5">
+          <div>≈ {actualUSD.toLocaleString(undefined, { maximumFractionDigits: 2 })} {quoteAsset}</div>
+          <div>≈ {coinQuantity.toLocaleString(undefined, { maximumFractionDigits: 6 })} {baseAsset}</div>
         </div>
       </div>
 
@@ -345,7 +367,7 @@ export function OrderForm() {
       <div className="grid grid-cols-2 gap-2">
         <Button
           onClick={() => handleSubmit("buy")}
-          disabled={isPlacingOrder || !amountUSD || parseFloat(amountUSD) <= 0 || coinQuantity <= 0}
+          disabled={isPlacingOrder || !amountPercent || parseFloat(amountPercent) <= 0 || coinQuantity <= 0}
           className={`text-white ${
             selectedSide === 'buy'
               ? 'bg-blue-600 hover:bg-blue-700 ring-2 ring-blue-300'
@@ -356,7 +378,7 @@ export function OrderForm() {
         </Button>
         <Button
           onClick={() => handleSubmit("sell")}
-          disabled={isPlacingOrder || !amountUSD || parseFloat(amountUSD) <= 0 || coinQuantity <= 0}
+          disabled={isPlacingOrder || !amountPercent || parseFloat(amountPercent) <= 0 || coinQuantity <= 0}
           className={`text-white ${
             selectedSide === 'sell'
               ? 'bg-purple-600 hover:bg-purple-700 ring-2 ring-purple-300'
