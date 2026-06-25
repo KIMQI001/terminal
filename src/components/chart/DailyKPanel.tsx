@@ -3,12 +3,15 @@
 /**
  * 日K锚点面板
  * - 当前价格向左找到的第一个日K（含 4D K线参考）
- * - 显示其 OHLC + 时间
- * - 提示当前价格在日K区间的位置（百分比）
+ * - 竖排显示 O/H/L/C
+ * - 点击 H → 做空（H 价位，SL = H + 200）
+ * - 点击 L → 做多（L 价位，SL = L - 200）
  */
 
 import { useState, useEffect } from "react";
 import { useChartStore } from "@/stores/chartStore";
+import { useOrderStore } from "@/stores/orderStore";
+import { usePositionStore } from "@/stores/positionStore";
 import { fetchKlines } from "@/lib/binance/api";
 
 interface AnchorCandle {
@@ -26,7 +29,8 @@ interface AnchorResult {
 }
 
 function formatTime(ts: number): string {
-  const d = new Date(ts);
+  // kline-server 返回的是秒，需要 *1000
+  const d = new Date(ts * 1000);
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
@@ -50,12 +54,17 @@ function findAnchor(klines: AnchorCandle[], currentPrice: number): AnchorCandle 
 
 export function DailyKPanel() {
   const { symbol, candles } = useChartStore();
+  const { placeOrder, isPlacingOrder } = useOrderStore();
+  const { getBalance, currentLeverage } = usePositionStore();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [dailyAnchor, setDailyAnchor] = useState<AnchorResult | null>(null);
   const [fourDayAnchor, setFourDayAnchor] = useState<AnchorResult | null>(null);
   const [loading, setLoading] = useState(false);
 
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
+  const quoteAsset = symbol.endsWith("USDC") ? "USDC" : "USDT";
+  const baseAsset = symbol.replace("USDT", "").replace("USDC", "");
+  const quoteBalance = getBalance(quoteAsset);
 
   useEffect(() => {
     if (!symbol || currentPrice <= 0) return;
@@ -97,7 +106,7 @@ export function DailyKPanel() {
         } catch {
           setFourDayAnchor(null);
         }
-      } catch (err) {
+      } catch {
         // 静默失败
       } finally {
         if (!cancelled) setLoading(false);
@@ -108,41 +117,87 @@ export function DailyKPanel() {
     return () => { cancelled = true; };
   }, [symbol, currentPrice]);
 
-  const renderAnchorRow = (
+  // 点击 H/L 直接下单（默认 25% 仓位，SL = 入场价 ± 200）
+  const handleClickPrice = async (
+    side: "buy" | "sell",
+    entryPrice: number
+  ) => {
+    if (isPlacingOrder) return;
+    if (entryPrice <= 0) return;
+
+    const free = quoteBalance?.free || 0;
+    const margin = free * 0.25; // 默认 25% 仓位
+    if (margin <= 0) {
+      alert("余额不足，无法下单");
+      return;
+    }
+    const quantity = (margin * currentLeverage) / entryPrice;
+    if (quantity <= 0) return;
+
+    const slOffset = side === "buy" ? -200 : 200;
+    const finalStopLoss = entryPrice + slOffset;
+
+    const clientOrderIdPrefix = `d_${Date.now()}`;
+
+    await placeOrder(
+      {
+        type: "limit",
+        side,
+        price: entryPrice,
+        stopPrice: finalStopLoss,
+        quantity,
+        clientOrderIdPrefix,
+      },
+      symbol
+    );
+  };
+
+  // 竖排渲染一根锚点K线
+  const renderAnchorColumn = (
     label: string,
     anchor: AnchorResult | null,
-    color: string
+    colorClass: string
   ) => {
     if (!anchor) {
       return (
-        <div className="grid grid-cols-5 gap-1 text-[9px] py-0.5 items-center">
-          <span className={`font-medium ${color}`}>{label}</span>
-          <span className="col-span-4 text-gray-300">-</span>
-        </div>
+        <div className="text-[9px] text-gray-300 py-1">-</div>
       );
     }
     const { candle, positionPercent } = anchor;
+    const handleH = () => handleClickPrice("sell", candle.high);
+    const handleL = () => handleClickPrice("buy", candle.low);
+
     return (
-      <div className="space-y-0.5">
+      <div className="space-y-1">
         <div className="flex items-center justify-between text-[9px]">
-          <span className={`font-semibold ${color}`}>{label}</span>
+          <span className={`font-semibold ${colorClass}`}>{label}</span>
           <span className="text-gray-500 font-mono">{formatTime(candle.time)}</span>
         </div>
-        <div className="grid grid-cols-4 gap-1 text-[10px] font-mono">
-          <div className="flex flex-col">
-            <span className="text-gray-400 text-[8px]">O</span>
+        <div className="space-y-0.5 font-mono text-[10px]">
+          <div className="flex justify-between">
+            <span className="text-gray-400">O</span>
             <span className="text-gray-700">{candle.open.toFixed(1)}</span>
           </div>
-          <div className="flex flex-col">
-            <span className="text-gray-400 text-[8px]">H</span>
-            <span className="text-red-500">{candle.high.toFixed(1)}</span>
-          </div>
-          <div className="flex flex-col">
-            <span className="text-gray-400 text-[8px]">L</span>
-            <span className="text-green-500">{candle.low.toFixed(1)}</span>
-          </div>
-          <div className="flex flex-col">
-            <span className="text-gray-400 text-[8px]">C</span>
+          <button
+            onClick={handleH}
+            disabled={isPlacingOrder}
+            className="w-full flex justify-between px-1.5 py-0.5 bg-red-50 hover:bg-red-100 border border-red-200 rounded transition-colors disabled:opacity-50 cursor-pointer"
+            title="点击 H 价位做空"
+          >
+            <span className="text-red-500">H ↓ 做空</span>
+            <span className="text-red-600 font-semibold">{candle.high.toFixed(1)}</span>
+          </button>
+          <button
+            onClick={handleL}
+            disabled={isPlacingOrder}
+            className="w-full flex justify-between px-1.5 py-0.5 bg-green-50 hover:bg-green-100 border border-green-200 rounded transition-colors disabled:opacity-50 cursor-pointer"
+            title="点击 L 价位做多"
+          >
+            <span className="text-green-500">L ↑ 做多</span>
+            <span className="text-green-600 font-semibold">{candle.low.toFixed(1)}</span>
+          </button>
+          <div className="flex justify-between">
+            <span className="text-gray-400">C</span>
             <span className="text-gray-700">{candle.close.toFixed(1)}</span>
           </div>
         </div>
@@ -156,15 +211,18 @@ export function DailyKPanel() {
             {positionPercent.toFixed(0)}%
           </div>
         </div>
+        <div className="text-[8px] text-gray-400 text-center">
+          25% {baseAsset} · SL±200
+        </div>
       </div>
     );
   };
 
   return (
-    <div className="bg-white/95 border border-gray-200 rounded-lg shadow-lg w-[200px]">
+    <div className="bg-white/95 border border-gray-200 rounded-lg shadow-lg w-[160px]">
       {/* 标题栏 */}
       <div
-        className="flex items-center justify-between px-3 py-1.5 cursor-pointer hover:bg-gray-50 rounded-t-lg border-b border-gray-100"
+        className="flex items-center justify-between px-2 py-1.5 cursor-pointer hover:bg-gray-50 rounded-t-lg border-b border-gray-100"
         onClick={() => setIsCollapsed(!isCollapsed)}
       >
         <span className="text-xs font-semibold text-gray-600">日K锚点</span>
@@ -177,9 +235,9 @@ export function DailyKPanel() {
             <div className="text-[10px] text-gray-400 text-center py-2">加载中...</div>
           ) : (
             <>
-              {renderAnchorRow("1D", dailyAnchor, "text-blue-600")}
+              {renderAnchorColumn("1D", dailyAnchor, "text-blue-600")}
               <div className="border-t border-gray-100 pt-2">
-                {renderAnchorRow("4D", fourDayAnchor, "text-purple-600")}
+                {renderAnchorColumn("4D", fourDayAnchor, "text-purple-600")}
               </div>
             </>
           )}
