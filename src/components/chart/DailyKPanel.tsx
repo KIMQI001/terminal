@@ -11,7 +11,6 @@
 import { useState, useEffect } from "react";
 import { useChartStore } from "@/stores/chartStore";
 import { useOrderStore } from "@/stores/orderStore";
-import { usePositionStore } from "@/stores/positionStore";
 import { fetchKlines } from "@/lib/binance/api";
 
 interface AnchorCandle {
@@ -54,17 +53,13 @@ function findAnchor(klines: AnchorCandle[], currentPrice: number): AnchorCandle 
 
 export function DailyKPanel() {
   const { symbol, candles } = useChartStore();
-  const { placeOrder, isPlacingOrder } = useOrderStore();
-  const { getBalance, currentLeverage } = usePositionStore();
+  const { setPrefillData, openModal } = useOrderStore();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [dailyAnchor, setDailyAnchor] = useState<AnchorResult | null>(null);
   const [fourDayAnchor, setFourDayAnchor] = useState<AnchorResult | null>(null);
   const [loading, setLoading] = useState(false);
 
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
-  const quoteAsset = symbol.endsWith("USDC") ? "USDC" : "USDT";
-  const baseAsset = symbol.replace("USDT", "").replace("USDC", "");
-  const quoteBalance = getBalance(quoteAsset);
 
   useEffect(() => {
     if (!symbol || currentPrice <= 0) return;
@@ -117,39 +112,20 @@ export function DailyKPanel() {
     return () => { cancelled = true; };
   }, [symbol, currentPrice]);
 
-  // 点击 H/L 直接下单（默认 25% 仓位，SL = 入场价 ± 200）
-  const handleClickPrice = async (
+  // 点击 H/L 只预填表单（跟 OTE 面板一样），不直接下单
+  const handleClickPrice = (
     side: "buy" | "sell",
     entryPrice: number
   ) => {
-    if (isPlacingOrder) return;
     if (entryPrice <= 0) return;
-
-    const free = quoteBalance?.free || 0;
-    const margin = free * 0.25; // 默认 25% 仓位
-    if (margin <= 0) {
-      alert("余额不足，无法下单");
-      return;
-    }
-    const quantity = (margin * currentLeverage) / entryPrice;
-    if (quantity <= 0) return;
-
     const slOffset = side === "buy" ? -200 : 200;
-    const finalStopLoss = entryPrice + slOffset;
-
-    const clientOrderIdPrefix = `d_${Date.now()}`;
-
-    await placeOrder(
-      {
-        type: "limit",
-        side,
-        price: entryPrice,
-        stopPrice: finalStopLoss,
-        quantity,
-        clientOrderIdPrefix,
-      },
-      symbol
-    );
+    setPrefillData({
+      side,
+      entry: entryPrice,
+      stopLoss: entryPrice + slOffset,
+      takeProfit: 0,
+    });
+    openModal();
   };
 
   // 竖排渲染一根锚点K线
@@ -180,18 +156,16 @@ export function DailyKPanel() {
           </div>
           <button
             onClick={handleH}
-            disabled={isPlacingOrder}
-            className="w-full flex justify-between px-1.5 py-0.5 bg-red-50 hover:bg-red-100 border border-red-200 rounded transition-colors disabled:opacity-50 cursor-pointer"
-            title="点击 H 价位做空"
+            className="w-full flex justify-between px-1.5 py-0.5 bg-red-50 hover:bg-red-100 border border-red-200 rounded transition-colors cursor-pointer"
+            title="点击 H 价位预填做空"
           >
             <span className="text-red-500">H ↓ 做空</span>
             <span className="text-red-600 font-semibold">{candle.high.toFixed(1)}</span>
           </button>
           <button
             onClick={handleL}
-            disabled={isPlacingOrder}
-            className="w-full flex justify-between px-1.5 py-0.5 bg-green-50 hover:bg-green-100 border border-green-200 rounded transition-colors disabled:opacity-50 cursor-pointer"
-            title="点击 L 价位做多"
+            className="w-full flex justify-between px-1.5 py-0.5 bg-green-50 hover:bg-green-100 border border-green-200 rounded transition-colors cursor-pointer"
+            title="点击 L 价位预填做多"
           >
             <span className="text-green-500">L ↑ 做多</span>
             <span className="text-green-600 font-semibold">{candle.low.toFixed(1)}</span>
@@ -210,9 +184,6 @@ export function DailyKPanel() {
           <div className="absolute inset-0 flex items-center justify-center text-[8px] text-gray-700 font-mono">
             {positionPercent.toFixed(0)}%
           </div>
-        </div>
-        <div className="text-[8px] text-gray-400 text-center">
-          25% {baseAsset} · SL±200
         </div>
       </div>
     );
