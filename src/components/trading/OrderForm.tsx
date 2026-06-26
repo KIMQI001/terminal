@@ -20,7 +20,7 @@ const STORAGE_KEY = 'order-percentage-presets';
 export function OrderForm() {
   const { symbol, candles } = useChartStore();
   const { placeOrder, isPlacingOrder, orderError, prefillData, setPrefillData, setTradingLines } = useOrderStore();
-  const { getBalance, currentLeverage, isLoadingLeverage, isLoadingBalances, fetchLeverage, setLeverage, balances } = usePositionStore();
+  const { getBalance, currentLeverage, isLoadingLeverage, isLoadingBalances, balanceError, fetchLeverage, setLeverage, balances, fetchBalances } = usePositionStore();
 
   const [orderType, setOrderType] = useState<OrderType>("limit");
   const [selectedSide, setSelectedSide] = useState<OrderSide | null>(null);
@@ -288,7 +288,7 @@ export function OrderForm() {
               </button>
             )}
           </div>
-          <span className="text-xs text-[var(--text-secondary)]">
+          <span className="text-xs text-[var(--text-secondary)] flex items-center gap-1">
             可用:{' '}
             {isLoadingBalances && balances.length === 0 ? (
               <span className="text-gray-400">加载中...</span>
@@ -297,7 +297,18 @@ export function OrderForm() {
                 {quoteBalance?.free.toLocaleString() || 0} {quoteAsset}
               </>
             )}
+            <button
+              onClick={() => fetchBalances()}
+              disabled={isLoadingBalances}
+              className="ml-1 text-gray-400 hover:text-blue-500 disabled:opacity-50"
+              title="刷新余额"
+            >
+              {isLoadingBalances ? '⟳' : '↻'}
+            </button>
           </span>
+          {balanceError && (
+            <div className="text-[10px] text-red-500 mt-1">⚠ {balanceError}</div>
+          )}
         </div>
 
         {/* 百分比预设按钮 */}

@@ -9,6 +9,7 @@ interface PositionState {
   isLoadingPositions: boolean;
   currentLeverage: number;
   isLoadingLeverage: boolean;
+  balanceError: string | null;
   eventSource: EventSource | null;
   wsConnected: boolean;
 
@@ -35,6 +36,7 @@ export const usePositionStore = create<PositionState>((set, get) => ({
   isLoadingPositions: false,
   currentLeverage: 20,
   isLoadingLeverage: false,
+  balanceError: null,
   eventSource: null,
   wsConnected: false,
 
@@ -146,7 +148,7 @@ export const usePositionStore = create<PositionState>((set, get) => ({
       return;
     }
 
-    set({ isLoadingBalances: true });
+    set({ isLoadingBalances: true, balanceError: null });
 
     try {
       const response = await fetch('/api/user/test-connection', {
@@ -166,10 +168,14 @@ export const usePositionStore = create<PositionState>((set, get) => ({
           free: parseFloat(b.free),
           locked: parseFloat(b.locked),
         }));
-        set({ balances });
+        set({ balances, balanceError: null });
+      } else {
+        set({ balanceError: data.error || '获取余额失败' });
       }
     } catch (error) {
+      const msg = error instanceof Error ? error.message : '网络错误';
       console.error('Failed to fetch balances:', error);
+      set({ balanceError: msg });
     } finally {
       set({ isLoadingBalances: false });
     }
@@ -319,7 +325,7 @@ export const usePositionStore = create<PositionState>((set, get) => ({
 
         // 处理持仓更新
         if (data.type === 'position' && data.data) {
-          const { positions: posUpdates, balances } = data.data;
+          const { positions: posUpdates } = data.data;
 
           // 转换持仓数据格式
           const positions: Position[] = (posUpdates || []).map((p: {
