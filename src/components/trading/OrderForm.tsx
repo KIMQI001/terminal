@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { useChartStore } from "@/stores/chartStore";
 import { useOrderStore, TradingLine } from "@/stores/orderStore";
 import { usePositionStore } from "@/stores/positionStore";
+import { useUserStore } from "@/stores/userStore";
 import { OrderType, OrderSide } from "@/types/order";
 
 const orderTypes: { value: OrderType; label: string }[] = [
@@ -21,6 +22,7 @@ export function OrderForm() {
   const { symbol, candles } = useChartStore();
   const { placeOrder, isPlacingOrder, orderError, prefillData, setPrefillData, setTradingLines } = useOrderStore();
   const { getBalance, currentLeverage, isLoadingLeverage, isLoadingBalances, balanceError, fetchLeverage, setLeverage, balances, fetchBalances } = usePositionStore();
+  const { token } = useUserStore();
 
   const [orderType, setOrderType] = useState<OrderType>("limit");
   const [selectedSide, setSelectedSide] = useState<OrderSide | null>(null);
@@ -318,7 +320,21 @@ export function OrderForm() {
             </button>
           </span>
           {balanceError && (
-            <div className="text-[10px] text-red-500 mt-1">⚠ {balanceError}</div>
+            <div className="text-[10px] text-red-500 mt-1 space-y-1">
+              <div>⚠ {balanceError}</div>
+              {balanceError.includes('未授权') && token && (
+                <button
+                  onClick={() => {
+                    if (confirm('Token 已失效，需要重新登录。是否跳转？')) {
+                      window.location.href = '/login';
+                    }
+                  }}
+                  className="text-blue-500 hover:text-blue-600 underline"
+                >
+                  重新登录
+                </button>
+              )}
+            </div>
           )}
           {balances.length > 0 && (
             <div className="text-[10px] text-gray-400 mt-1">

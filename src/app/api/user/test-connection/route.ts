@@ -6,17 +6,21 @@ import crypto from 'crypto';
 // 验证用户身份
 async function authenticateUser(request: NextRequest): Promise<{ userId: number; username: string } | null> {
   const authHeader = request.headers.get('Authorization');
+  console.log(`[test-connection] Authorization header: ${authHeader ? authHeader.substring(0, 20) + '...' : 'NULL'}`);
   const token = extractTokenFromHeader(authHeader);
 
   if (!token) {
+    console.log('[test-connection] ❌ No token in header');
     return null;
   }
 
   const payload = await verifyToken(token);
   if (!payload) {
+    console.log(`[test-connection] ❌ Token verify failed, JWT_SECRET=${process.env.JWT_SECRET ? 'set' : 'default'}`);
     return null;
   }
 
+  console.log(`[test-connection] ✅ Auth OK: userId=${payload.userId}`);
   return { userId: payload.userId, username: payload.username };
 }
 
