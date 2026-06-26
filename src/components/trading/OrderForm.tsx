@@ -301,11 +301,6 @@ export function OrderForm() {
                     ? 'text-blue-600 font-medium'
                     : 'text-gray-400'
                 }
-                title={
-                  balances.length > 0
-                    ? `所有余额: ${balances.map((b) => `${b.asset}=${b.free}`).join(', ')}`
-                    : '未获取到余额'
-                }
               >
                 {quoteBalance?.free.toLocaleString() || 0} {quoteAsset}
               </span>
@@ -334,11 +329,6 @@ export function OrderForm() {
                   重新登录
                 </button>
               )}
-            </div>
-          )}
-          {balances.length > 0 && (
-            <div className="text-[10px] text-gray-400 mt-1">
-              全部: {balances.map((b) => `${b.asset} ${b.free}`).join(' | ')}
             </div>
           )}
         </div>

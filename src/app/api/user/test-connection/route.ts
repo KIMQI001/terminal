@@ -6,21 +6,17 @@ import crypto from 'crypto';
 // 验证用户身份
 async function authenticateUser(request: NextRequest): Promise<{ userId: number; username: string } | null> {
   const authHeader = request.headers.get('Authorization');
-  console.log(`[test-connection] Authorization header: ${authHeader ? authHeader.substring(0, 20) + '...' : 'NULL'}`);
   const token = extractTokenFromHeader(authHeader);
 
   if (!token) {
-    console.log('[test-connection] ❌ No token in header');
     return null;
   }
 
   const payload = await verifyToken(token);
   if (!payload) {
-    console.log(`[test-connection] ❌ Token verify failed, JWT_SECRET=${process.env.JWT_SECRET ? 'set' : 'default'}`);
     return null;
   }
 
-  console.log(`[test-connection] ✅ Auth OK: userId=${payload.userId}`);
   return { userId: payload.userId, username: payload.username };
 }
 
@@ -61,9 +57,6 @@ async function testBinanceConnection(apiKey: string, apiSecret: string, isTestne
       free: asset.availableBalance,
       locked: (parseFloat(asset.walletBalance) - parseFloat(asset.availableBalance)).toFixed(8),
     })) || [];
-
-  console.log(`[Binance Account] 全部资产:`, data.assets?.map((a: { asset: string; walletBalance: string; availableBalance: string }) => `${a.asset}=${a.availableBalance}`).join(', '));
-  console.log(`[Binance Account] 返回 ${balances.length} 个非零资产`);
 
   return { success: true, balance: balances };
 }
