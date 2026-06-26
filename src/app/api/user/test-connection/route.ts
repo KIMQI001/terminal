@@ -58,6 +58,9 @@ async function testBinanceConnection(apiKey: string, apiSecret: string, isTestne
       locked: (parseFloat(asset.walletBalance) - parseFloat(asset.availableBalance)).toFixed(8),
     })) || [];
 
+  console.log(`[Binance Account] 全部资产:`, data.assets?.map((a: { asset: string; walletBalance: string; availableBalance: string }) => `${a.asset}=${a.availableBalance}`).join(', '));
+  console.log(`[Binance Account] 返回 ${balances.length} 个非零资产`);
+
   return { success: true, balance: balances };
 }
 

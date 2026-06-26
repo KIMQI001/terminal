@@ -293,9 +293,20 @@ export function OrderForm() {
             {isLoadingBalances && balances.length === 0 ? (
               <span className="text-gray-400">加载中...</span>
             ) : (
-              <>
+              <span
+                className={
+                  quoteBalance && quoteBalance.free > 0
+                    ? 'text-blue-600 font-medium'
+                    : 'text-gray-400'
+                }
+                title={
+                  balances.length > 0
+                    ? `所有余额: ${balances.map((b) => `${b.asset}=${b.free}`).join(', ')}`
+                    : '未获取到余额'
+                }
+              >
                 {quoteBalance?.free.toLocaleString() || 0} {quoteAsset}
-              </>
+              </span>
             )}
             <button
               onClick={() => fetchBalances()}
@@ -308,6 +319,11 @@ export function OrderForm() {
           </span>
           {balanceError && (
             <div className="text-[10px] text-red-500 mt-1">⚠ {balanceError}</div>
+          )}
+          {balances.length > 0 && (
+            <div className="text-[10px] text-gray-400 mt-1">
+              全部: {balances.map((b) => `${b.asset} ${b.free}`).join(' | ')}
+            </div>
           )}
         </div>
 
