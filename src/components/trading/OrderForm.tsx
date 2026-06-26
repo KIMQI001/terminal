@@ -20,7 +20,7 @@ const STORAGE_KEY = 'order-percentage-presets';
 export function OrderForm() {
   const { symbol, candles } = useChartStore();
   const { placeOrder, isPlacingOrder, orderError, prefillData, setPrefillData, setTradingLines } = useOrderStore();
-  const { getBalance, currentLeverage, isLoadingLeverage, fetchLeverage, setLeverage } = usePositionStore();
+  const { getBalance, currentLeverage, isLoadingLeverage, isLoadingBalances, fetchLeverage, setLeverage, balances } = usePositionStore();
 
   const [orderType, setOrderType] = useState<OrderType>("limit");
   const [selectedSide, setSelectedSide] = useState<OrderSide | null>(null);
@@ -29,7 +29,6 @@ export function OrderForm() {
   const [stopLoss, setStopLoss] = useState<string>("");
   const [takeProfit, setTakeProfit] = useState<string>("");
 
-  const [isSettingLeverage, setIsSettingLeverage] = useState(false);
   const [percentagePresets, setPercentagePresets] = useState<number[]>(PERCENTAGE_PRESETS);
   const [isEditingPresets, setIsEditingPresets] = useState(false);
   const [editingPresets, setEditingPresets] = useState<string[]>(PERCENTAGE_PRESETS.map(String));
@@ -62,9 +61,11 @@ export function OrderForm() {
 
   // 设置杠杆
   const handleSetLeverage = async (leverage: number) => {
-    setIsSettingLeverage(true);
-    await setLeverage(symbol, leverage);
-    setIsSettingLeverage(false);
+    try {
+      await setLeverage(symbol, leverage);
+    } catch (err) {
+      console.error('设置杠杆失败:', err);
+    }
   };
 
   // 根据交易对判断使用 USDC 还是 USDT
@@ -208,12 +209,12 @@ export function OrderForm() {
             <button
               key={lev}
               onClick={() => handleSetLeverage(lev)}
-              disabled={isSettingLeverage || isLoadingLeverage}
+              disabled={isLoadingLeverage}
               className={`py-1.5 text-xs font-medium rounded transition-colors ${
                 currentLeverage === lev
                   ? "bg-blue-500 text-white"
                   : "bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--border)]"
-              } ${(isSettingLeverage || isLoadingLeverage) ? 'opacity-50 cursor-not-allowed' : ''}`}
+              } ${isLoadingLeverage ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               {lev}x
             </button>
@@ -288,7 +289,14 @@ export function OrderForm() {
             )}
           </div>
           <span className="text-xs text-[var(--text-secondary)]">
-            可用: {quoteBalance?.free.toLocaleString() || 0} {quoteAsset}
+            可用:{' '}
+            {isLoadingBalances && balances.length === 0 ? (
+              <span className="text-gray-400">加载中...</span>
+            ) : (
+              <>
+                {quoteBalance?.free.toLocaleString() || 0} {quoteAsset}
+              </>
+            )}
           </span>
         </div>
 
