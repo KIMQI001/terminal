@@ -136,11 +136,12 @@ export function DailyKPanel() {
   ) => {
     if (entryPrice <= 0) return;
     const slOffset = side === "buy" ? -200 : 200;
+    const tpOffset = side === "buy" ? 1000 : -1000;
     setPrefillData({
       side,
       entry: entryPrice,
       stopLoss: entryPrice + slOffset,
-      takeProfit: 0,
+      takeProfit: entryPrice + tpOffset,
     });
     openModal();
   };
