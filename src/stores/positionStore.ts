@@ -25,6 +25,12 @@ interface PositionState {
   fetchPositions: () => Promise<void>;
   fetchLeverage: (symbol: string) => Promise<void>;
   setLeverage: (symbol: string, leverage: number) => Promise<boolean>;
+  updatePositionSLTP: (
+    symbol: string,
+    positionSide: 'LONG' | 'SHORT',
+    stopLoss?: number,
+    takeProfit?: number
+  ) => Promise<{ success: boolean; error?: string; warnings?: string[] }>;
   initUserWebSocket: () => Promise<void>;
   disconnectUserWebSocket: () => Promise<void>;
 }
@@ -301,6 +307,41 @@ export const usePositionStore = create<PositionState>((set, get) => ({
       return false;
     } finally {
       set({ isLoadingLeverage: false });
+    }
+  },
+
+  updatePositionSLTP: async (
+    symbol: string,
+    positionSide: 'LONG' | 'SHORT',
+    stopLoss?: number,
+    takeProfit?: number
+  ) => {
+    const token = useUserStore.getState().token;
+    if (!token) return { success: false, error: '未登录' };
+
+    try {
+      const response = await fetch('/api/user/positions/sl-tp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          symbol,
+          positionSide,
+          stopLoss: stopLoss && stopLoss > 0 ? stopLoss : undefined,
+          takeProfit: takeProfit && takeProfit > 0 ? takeProfit : undefined,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        // 立即刷新持仓以显示新 SL/TP
+        get().fetchPositions();
+        return { success: true, warnings: data.warnings };
+      }
+      return { success: false, error: data.error };
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : '网络错误' };
     }
   },
 
