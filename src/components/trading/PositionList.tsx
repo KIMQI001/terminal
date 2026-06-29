@@ -89,12 +89,10 @@ export function PositionList() {
     const slNum = !isNaN(sl) && sl > 0 ? sl : 0;
     const tpNum = !isNaN(tp) && tp > 0 ? tp : 0;
 
-    // 两个都为空表示取消两边
+    // 两边都为空：不修改（空=保持当前或按入场价默认）
     if (slNum === 0 && tpNum === 0) {
-      if (!position.stopLoss && !position.takeProfit) {
-        cancelEdit();
-        return;
-      }
+      cancelEdit();
+      return;
     }
 
     setSavingSLTP(true);
@@ -289,7 +287,7 @@ export function PositionList() {
             )}
             {isEditing && (
               <div className="text-[10px] text-gray-400">
-                回车保存 · Esc 取消 · 留空=取消该边
+                回车保存 · Esc 取消 · 留空=保持（无则按 ±200/±1000 默认）
               </div>
             )}
 

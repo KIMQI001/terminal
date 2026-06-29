@@ -129,11 +129,19 @@ async function placeAlgoOrder(
   }
 }
 
+// 默认 SL/TP 偏移（相对入场价）
+const DEFAULT_SL_OFFSET = 200;
+const DEFAULT_TP_OFFSET = 1000;
+
+function readAlgoPrice(o: BinanceAlgoOrder | undefined): number {
+  if (!o) return 0;
+  return parseFloat(o.triggerPrice || o.stopPrice || '0');
+}
+
 // POST /api/user/positions/sl-tp
 // 修改持仓的止盈/止损
 // body: { symbol, positionSide: 'LONG'|'SHORT', stopLoss?, takeProfit? }
-//   stopLoss = 0 或不传 = 取消止损
-//   takeProfit = 0 或不传 = 取消止盈
+//   stopLoss / takeProfit 留空或不传 = 该侧不修改（保留旧单；旧单没有则按 entry ± 偏移默认）
 export async function POST(request: NextRequest) {
   const user = await authenticateUser(request);
   if (!user) return NextResponse.json({ error: '未授权' }, { status: 401 });
@@ -144,18 +152,58 @@ export async function POST(request: NextRequest) {
     if (!symbol || !positionSide) {
       return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
     }
+    if (positionSide !== 'LONG' && positionSide !== 'SHORT') {
+      return NextResponse.json({ error: 'positionSide 必须为 LONG 或 SHORT' }, { status: 400 });
+    }
 
     const config = await getDecryptedApiConfig(user.userId, 'binance');
     if (!config) {
       return NextResponse.json({ error: '未找到 Binance API 配置' }, { status: 404 });
     }
 
-    // 获取该持仓的所有 Algo 条件单
-    const algoOrders = await getOpenAlgoOrders(config.apiKey, config.apiSecret, config.isTestnet, symbol);
-    const relatedOrders = algoOrders.filter(
-      (o) => o.symbol === symbol && o.positionSide === positionSide
-    );
+    const baseUrl = config.isTestnet ? 'https://testnet.binancefuture.com' : 'https://fapi.binance.com';
 
+    // 1. 查持仓：拿 entryPrice 和 quantity（默认 SL/TP 需要 entryPrice）
+    const ts1 = Date.now();
+    const posQs = `symbol=${symbol}&timestamp=${ts1}`;
+    const posSig = sign(posQs, config.apiSecret);
+    const posRes = await fetch(`${baseUrl}/fapi/v2/positionRisk?${posQs}&signature=${posSig}`, {
+      headers: { 'X-MBX-APIKEY': config.apiKey },
+    });
+    const posData = await posRes.json();
+    const targetPos = (Array.isArray(posData) ? posData : []).find(
+      (p: { symbol: string; positionSide: string; positionAmt: string; entryPrice: string }) =>
+        p.symbol === symbol && p.positionSide === positionSide
+    );
+    if (!targetPos || parseFloat(targetPos.positionAmt) === 0) {
+      return NextResponse.json({ success: false, error: '未找到持仓或数量为 0' }, { status: 400 });
+    }
+    const entryPrice = parseFloat(targetPos.entryPrice);
+    const quantity = Math.abs(parseFloat(targetPos.positionAmt));
+
+    // 2. 查该持仓现有的 Algo 条件单
+    const algoOrders = await getOpenAlgoOrders(config.apiKey, config.apiSecret, config.isTestnet, symbol);
+    const relatedOrders = algoOrders.filter((o) => o.positionSide === positionSide);
+    const existingSL = relatedOrders.find((o) => o.type === 'STOP_MARKET');
+    const existingTP = relatedOrders.find((o) => o.type === 'TAKE_PROFIT_MARKET');
+
+    // 3. 决定最终 SL/TP：用户输入 > 保留旧单 > 默认（entry ± 偏移）
+    const slProvided = typeof stopLoss === 'number' && stopLoss > 0;
+    const tpProvided = typeof takeProfit === 'number' && takeProfit > 0;
+
+    const finalSL = slProvided
+      ? stopLoss
+      : existingSL
+        ? readAlgoPrice(existingSL)
+        : (positionSide === 'LONG' ? entryPrice - DEFAULT_SL_OFFSET : entryPrice + DEFAULT_SL_OFFSET);
+
+    const finalTP = tpProvided
+      ? takeProfit
+      : existingTP
+        ? readAlgoPrice(existingTP)
+        : (positionSide === 'LONG' ? entryPrice + DEFAULT_TP_OFFSET : entryPrice - DEFAULT_TP_OFFSET);
+
+    // 4. 取消现有的所有 Algo 条件单
     const cancelResults = await Promise.allSettled(
       relatedOrders.map((o) =>
         cancelAlgoOrder(config.apiKey, config.apiSecret, config.isTestnet, symbol, o.algoId)
@@ -164,56 +212,36 @@ export async function POST(request: NextRequest) {
     const cancelledCount = cancelResults.filter((r) => r.status === 'fulfilled' && r.value.success).length;
     console.log(`[positions/sl-tp] 取消了 ${cancelledCount}/${relatedOrders.length} 个旧 Algo 单`);
 
-    // 取持仓数量用于新单
-    const baseUrl = config.isTestnet ? 'https://testnet.binancefuture.com' : 'https://fapi.binance.com';
-    const ts = Date.now();
-    const posQs = `symbol=${symbol}&timestamp=${ts}`;
-    const posSig = sign(posQs, config.apiSecret);
-    const posRes = await fetch(`${baseUrl}/fapi/v2/positionRisk?${posQs}&signature=${posSig}`, {
-      headers: { 'X-MBX-APIKEY': config.apiKey },
-    });
-    const posData = await posRes.json();
-    const targetPos = (Array.isArray(posData) ? posData : []).find(
-      (p: { symbol: string; positionSide: string }) =>
-        p.symbol === symbol && p.positionSide === positionSide
-    );
-    if (!targetPos || parseFloat(targetPos.positionAmt) === 0) {
-      return NextResponse.json({ success: false, error: '未找到持仓或数量为 0' }, { status: 400 });
-    }
-    const quantity = Math.abs(parseFloat(targetPos.positionAmt));
-
-    // 平仓方向（与持仓方向相反）
+    // 5. 平仓方向（与持仓方向相反）
     const closeSide: 'BUY' | 'SELL' = positionSide === 'LONG' ? 'SELL' : 'BUY';
 
+    // 6. 挂新单
     const results: { stopLoss?: { success: boolean; orderId?: number; error?: string }; takeProfit?: { success: boolean; orderId?: number; error?: string } } = {};
     const warnings: string[] = [];
+    const prefix = `manual_${Date.now()}`;
 
-    // 止损
-    if (stopLoss && stopLoss > 0) {
-      const prefix = `manual_${Date.now()}`;
+    if (finalSL > 0) {
       const slRes = await placeAlgoOrder(config.apiKey, config.apiSecret, config.isTestnet, {
         symbol,
         side: closeSide,
         positionSide,
         type: 'STOP_MARKET',
         quantity,
-        triggerPrice: stopLoss,
+        triggerPrice: finalSL,
         clientAlgoId: `${prefix}_sl`,
       });
       results.stopLoss = slRes;
       if (!slRes.success) warnings.push(`止损单失败: ${slRes.error}`);
     }
 
-    // 止盈
-    if (takeProfit && takeProfit > 0) {
-      const prefix = `manual_${Date.now()}`;
+    if (finalTP > 0) {
       const tpRes = await placeAlgoOrder(config.apiKey, config.apiSecret, config.isTestnet, {
         symbol,
         side: closeSide,
         positionSide,
         type: 'TAKE_PROFIT_MARKET',
         quantity,
-        triggerPrice: takeProfit,
+        triggerPrice: finalTP,
         clientAlgoId: `${prefix}_tp`,
       });
       results.takeProfit = tpRes;
@@ -223,6 +251,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       cancelledOld: cancelledCount,
+      finalStopLoss: finalSL > 0 ? finalSL : undefined,
+      finalTakeProfit: finalTP > 0 ? finalTP : undefined,
       results,
       warnings: warnings.length > 0 ? warnings : undefined,
     });
