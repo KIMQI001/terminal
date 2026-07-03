@@ -48,6 +48,7 @@ import { detectOTEZones } from "@/lib/chart/indicators/ote";
 import { detectBreakerBlocks } from "@/lib/chart/indicators/breakerBlocks";
 import { detectInducements } from "@/lib/chart/indicators/inducement";
 import { detectEquilibriumZones } from "@/lib/chart/indicators/equilibrium";
+import { computeInitialBalance } from "@/lib/chart/indicators/initialBalance";
 
 export function TradingChart() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -120,6 +121,7 @@ export function TradingChart() {
     setMultiTimeframeOB,
     setMultiTimeframeTrend,
     setMultiTimeframeEquilibrium,
+    setInitialBalance,
   } = useIndicatorStore();
 
   const {
@@ -882,6 +884,37 @@ export function TradingChart() {
       clearInterval(interval);
     };
   }, [symbol, setDailyHL]);
+
+  // Initial Balance (21-22 北京) vs PDH/PDL → Always In 检测
+  useEffect(() => {
+    let isCancelled = false;
+
+    const calculateInitialBalance = async () => {
+      try {
+        // 1h 拿 IB 时段（13-14 UTC = 21-22 北京）
+        // 1d 拿 PDH/PDL
+        const [hourlyData, dailyData] = await Promise.all([
+          fetchKlines(symbol, '1h', 200).catch(() => []),
+          fetchKlines(symbol, '1d', 30).catch(() => []),
+        ]);
+        if (isCancelled) return;
+        const ib = computeInitialBalance(hourlyData, dailyData);
+        setInitialBalance(ib);
+      } catch (error) {
+        console.error('Failed to calculate Initial Balance:', error);
+        if (!isCancelled) setInitialBalance(null);
+      }
+    };
+
+    calculateInitialBalance();
+    // 5 分钟刷新一次（IB 1 小时更新一次即可，5 分钟确保重算）
+    const interval = setInterval(calculateInitialBalance, 5 * 60 * 1000);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
+  }, [symbol, setInitialBalance]);
 
   // Update ICT Primitives with data
   useEffect(() => {

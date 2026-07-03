@@ -7,6 +7,7 @@ import { Inducement } from "@/lib/chart/indicators/inducement";
 import { MissedPivot, GhostLevel } from "@/lib/chart/indicators/swingPoints";
 import { EngulfingPinbar } from "@/lib/chart/indicators/engulfingPinbar";
 import { EquilibriumLevel, ZoneSide } from "@/lib/chart/indicators/equilibrium";
+import { InitialBalanceData } from "@/lib/chart/indicators/initialBalance";
 
 // 多周期 OTE 类型
 interface MultiTimeframeOTE {
@@ -87,6 +88,7 @@ interface IndicatorStoreState {
   multiTimeframeOB: MultiTimeframeOB;
   multiTimeframeTrend: MultiTimeframeTrend;
   multiTimeframeEquilibrium: MultiTimeframeEquilibrium;
+  initialBalance: InitialBalanceData | null;
 
   toggleIndicator: (key: keyof IndicatorState) => void;
   setSwingPoints: (points: SwingPoint[]) => void;
@@ -110,6 +112,7 @@ interface IndicatorStoreState {
     timeframe: Timeframe,
     entry: MultiTimeframeEquilibriumEntry | null
   ) => void;
+  setInitialBalance: (data: InitialBalanceData | null) => void;
   clearAll: () => void;
 }
 
@@ -179,6 +182,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
     '1d': null,
     '1w': null,
   },
+  initialBalance: null,
 
   toggleIndicator: (key) =>
     set((state) => ({
@@ -236,6 +240,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
         [timeframe]: entry,
       },
     })),
+  setInitialBalance: (data) => set({ initialBalance: data }),
   clearAll: () =>
     set({
       swingPoints: [],

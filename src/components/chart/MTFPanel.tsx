@@ -9,6 +9,7 @@ import {
   MultiTimeframeEquilibriumEntry,
 } from "@/stores/indicatorStore";
 import { ZoneSide } from "@/lib/chart/indicators/equilibrium";
+import { AlwaysInDirection } from "@/lib/chart/indicators/initialBalance";
 import { cn } from "@/lib/utils";
 
 const TIMEFRAMES = ['1d', '4h', '1h', '15m', '5m'] as const;
@@ -57,9 +58,21 @@ function getSideMark(side: ZoneSide) {
   return '=';
 }
 
+function getAlwaysInLabel(dir: AlwaysInDirection | undefined) {
+  if (dir === 'long') return 'ALWAYS IN LONG';
+  if (dir === 'short') return 'ALWAYS IN SHORT';
+  return 'WAIT';
+}
+
+function getAlwaysInColor(dir: AlwaysInDirection | undefined) {
+  if (dir === 'long') return 'text-green-700';
+  if (dir === 'short') return 'text-red-700';
+  return 'text-gray-500';
+}
+
 export function MTFPanel() {
   const [isExpanded, setIsExpanded] = useState(false);
-  const { multiTimeframeTrend, multiTimeframeEquilibrium } = useIndicatorStore();
+  const { multiTimeframeTrend, multiTimeframeEquilibrium, initialBalance } = useIndicatorStore();
 
   const consensus = getConsensus(multiTimeframeTrend);
 
@@ -151,6 +164,24 @@ export function MTFPanel() {
               {consensus.label}
             </span>
           </div>
+
+          {/* Always In (IB 21-22 北京 vs PDH/PDL) 行 */}
+          <div className="mt-1 flex items-center gap-2 px-1">
+            <span className="text-[10px] text-gray-500 font-medium">Always In</span>
+            <span
+              className={cn(
+                "text-[10px] font-bold ml-auto",
+                getAlwaysInColor(initialBalance?.direction)
+              )}
+            >
+              {initialBalance ? getAlwaysInLabel(initialBalance.direction) : '—'}
+            </span>
+          </div>
+          {initialBalance && (
+            <div className="text-[9px] text-gray-400 px-1 font-mono">
+              IB {Math.round(initialBalance.ibLow)}–{Math.round(initialBalance.ibHigh)} · PD {Math.round(initialBalance.pdl)}–{Math.round(initialBalance.pdh)}
+            </div>
+          )}
         </div>
       )}
     </div>
