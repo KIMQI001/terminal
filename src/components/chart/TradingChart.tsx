@@ -42,10 +42,12 @@ import {
   OTEPrimitive,
   BreakerBlockPrimitive,
   LiquidationHillPrimitive,
+  EquilibriumPrimitive,
 } from "@/lib/chart/primitives";
 import { detectOTEZones } from "@/lib/chart/indicators/ote";
 import { detectBreakerBlocks } from "@/lib/chart/indicators/breakerBlocks";
 import { detectInducements } from "@/lib/chart/indicators/inducement";
+import { detectEquilibriumZones } from "@/lib/chart/indicators/equilibrium";
 
 export function TradingChart() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -66,6 +68,7 @@ export function TradingChart() {
   const otePrimitiveRef = useRef<OTEPrimitive | null>(null);
   const breakerBlockPrimitiveRef = useRef<BreakerBlockPrimitive | null>(null);
   const liquidationHillPrimitiveRef = useRef<LiquidationHillPrimitive | null>(null);
+  const equilibriumPrimitiveRef = useRef<EquilibriumPrimitive | null>(null);
 
   // Trading price lines
   const priceLinesRef = useRef<IPriceLine[]>([]);
@@ -99,6 +102,7 @@ export function TradingChart() {
     liquidityZones,
     oteZones,
     breakerBlocks,
+    equilibriumLevels,
     setSwingPoints,
     setMissedPivots,
     setGhostLevels,
@@ -110,10 +114,12 @@ export function TradingChart() {
     setOTEZones,
     setBreakerBlocks,
     setInducements,
+    setEquilibriumLevels,
     setMultiTimeframeOTE,
     setMultiTimeframeFVG,
     setMultiTimeframeOB,
     setMultiTimeframeTrend,
+    setMultiTimeframeEquilibrium,
   } = useIndicatorStore();
 
   const {
@@ -217,6 +223,25 @@ export function TradingChart() {
         setMultiTimeframeOTE(timeframe, otes[0] || null);
       }
 
+      // Equilibrium 始终计算（位置过滤 + HTF 面板需要数据）
+      const eqZones = detectEquilibriumZones(pivotResult.pivots, lastPrice, candleData, 2);
+      setEquilibriumLevels(eqZones);
+      // 保存到多周期 EQ 存储
+      if (targetTimeframes3.includes(timeframe as typeof targetTimeframes3[number])) {
+        const top = eqZones[0];
+        setMultiTimeframeEquilibrium(
+          timeframe,
+          top
+            ? {
+                equilibrium: top.equilibrium,
+                side: top.side,
+                swingHigh: top.swingHigh,
+                swingLow: top.swingLow,
+              }
+            : null
+        );
+      }
+
       // Breaker blocks (need order blocks first)
       if (enabled.breakerBlocks) {
         const obs = detectOrderBlocks(candleData); // Need all OBs including mitigated
@@ -230,7 +255,7 @@ export function TradingChart() {
         setInducements(inducements);
       }
     },
-    [enabled, timeframe, setSwingPoints, setMissedPivots, setGhostLevels, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend]
+    [enabled, timeframe, setSwingPoints, setMissedPivots, setGhostLevels, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setEquilibriumLevels, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend, setMultiTimeframeEquilibrium]
   );
 
   // Initialize chart
@@ -385,9 +410,11 @@ export function TradingChart() {
     const otePrimitive = new OTEPrimitive();
     const breakerBlockPrimitive = new BreakerBlockPrimitive();
     const liquidationHillPrimitive = new LiquidationHillPrimitive();
+    const equilibriumPrimitive = new EquilibriumPrimitive();
 
     // Attach primitives in order (bottom layer first)
     candleSeries.attachPrimitive(killzonePrimitive);
+    candleSeries.attachPrimitive(equilibriumPrimitive);  // EQ 背景：在 killzone 之后、OTE 之前
     candleSeries.attachPrimitive(otePrimitive);
     candleSeries.attachPrimitive(breakerBlockPrimitive);
     candleSeries.attachPrimitive(obPrimitive);
@@ -402,6 +429,7 @@ export function TradingChart() {
     otePrimitiveRef.current = otePrimitive;
     breakerBlockPrimitiveRef.current = breakerBlockPrimitive;
     liquidationHillPrimitiveRef.current = liquidationHillPrimitive;
+    equilibriumPrimitiveRef.current = equilibriumPrimitive;
 
     // Handle resize
     const handleResize = () => {
@@ -712,6 +740,21 @@ export function TradingChart() {
             trend = bos[bos.length - 1].type;
           }
           setMultiTimeframeTrend(tf, trend);
+
+          // Equilibrium（HTF 面板用）
+          const eqZones = detectEquilibriumZones(swings, lastPrice, data, 1);
+          const top = eqZones[0];
+          setMultiTimeframeEquilibrium(
+            tf,
+            top
+              ? {
+                  equilibrium: top.equilibrium,
+                  side: top.side,
+                  swingHigh: top.swingHigh,
+                  swingLow: top.swingLow,
+                }
+              : null
+          );
         });
       } catch (error) {
         console.error('Failed to load multi-timeframe data:', error);
@@ -728,7 +771,7 @@ export function TradingChart() {
       isCancelled = true;
       clearInterval(interval);
     };
-  }, [symbol, timeframe, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend]);
+  }, [symbol, timeframe, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend, setMultiTimeframeEquilibrium]);
 
   // 加载K线计算前高前低 - 合并 4D+1D，取更保守的 P/D 值
   const { setDailyHL, dailyHL, dailyHLLines } = useChartStore();
@@ -903,7 +946,14 @@ export function TradingChart() {
     if (liquidationHillPrimitiveRef.current) {
       liquidationHillPrimitiveRef.current.setData(liquidationData);
     }
-  }, [orderBlocks, fvgs, liquidityZones, oteZones, breakerBlocks, liquidationData, enabled.orderBlocks, enabled.fvg, enabled.liquidityZones, enabled.killzones, enabled.ote, enabled.breakerBlocks, timeframe]);
+
+    // Update Equilibrium Primitive
+    if (equilibriumPrimitiveRef.current) {
+      equilibriumPrimitiveRef.current.setData(
+        enabled.equilibrium ? equilibriumLevels : []
+      );
+    }
+  }, [orderBlocks, fvgs, liquidityZones, oteZones, breakerBlocks, equilibriumLevels, liquidationData, enabled.orderBlocks, enabled.fvg, enabled.liquidityZones, enabled.killzones, enabled.ote, enabled.breakerBlocks, enabled.equilibrium, timeframe]);
 
   // Update Swing Points Markers (蜡烛图模式)
   useEffect(() => {

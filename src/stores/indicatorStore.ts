@@ -6,6 +6,7 @@ import { BreakerBlock } from "@/lib/chart/indicators/breakerBlocks";
 import { Inducement } from "@/lib/chart/indicators/inducement";
 import { MissedPivot, GhostLevel } from "@/lib/chart/indicators/swingPoints";
 import { EngulfingPinbar } from "@/lib/chart/indicators/engulfingPinbar";
+import { EquilibriumLevel, ZoneSide } from "@/lib/chart/indicators/equilibrium";
 
 // 多周期 OTE 类型
 interface MultiTimeframeOTE {
@@ -49,6 +50,23 @@ interface MultiTimeframeTrend {
   '1d': TrendType;
 }
 
+// 多周期 Equilibrium（仅 HTF 面板用，不画在图上）
+export interface MultiTimeframeEquilibriumEntry {
+  equilibrium: number;
+  side: ZoneSide;
+  swingHigh: number;
+  swingLow: number;
+}
+
+type MultiTimeframeEquilibrium = {
+  '5m': MultiTimeframeEquilibriumEntry | null;
+  '15m': MultiTimeframeEquilibriumEntry | null;
+  '1h': MultiTimeframeEquilibriumEntry | null;
+  '4h': MultiTimeframeEquilibriumEntry | null;
+  '1d': MultiTimeframeEquilibriumEntry | null;
+  '1w': MultiTimeframeEquilibriumEntry | null;
+};
+
 interface IndicatorStoreState {
   enabled: IndicatorState;
   swingPoints: SwingPoint[];
@@ -63,10 +81,12 @@ interface IndicatorStoreState {
   oteZones: OTEZone[];
   breakerBlocks: BreakerBlock[];
   inducements: Inducement[];
+  equilibriumLevels: EquilibriumLevel[];
   multiTimeframeOTE: MultiTimeframeOTE;
   multiTimeframeFVG: MultiTimeframeFVG;
   multiTimeframeOB: MultiTimeframeOB;
   multiTimeframeTrend: MultiTimeframeTrend;
+  multiTimeframeEquilibrium: MultiTimeframeEquilibrium;
 
   toggleIndicator: (key: keyof IndicatorState) => void;
   setSwingPoints: (points: SwingPoint[]) => void;
@@ -81,10 +101,15 @@ interface IndicatorStoreState {
   setOTEZones: (zones: OTEZone[]) => void;
   setBreakerBlocks: (blocks: BreakerBlock[]) => void;
   setInducements: (inducements: Inducement[]) => void;
+  setEquilibriumLevels: (levels: EquilibriumLevel[]) => void;
   setMultiTimeframeOTE: (timeframe: Timeframe, ote: OTEZone | null) => void;
   setMultiTimeframeFVG: (timeframe: Timeframe, fvg: FVG | null) => void;
   setMultiTimeframeOB: (timeframe: Timeframe, ob: OrderBlock | null) => void;
   setMultiTimeframeTrend: (timeframe: Timeframe, trend: TrendType) => void;
+  setMultiTimeframeEquilibrium: (
+    timeframe: Timeframe,
+    entry: MultiTimeframeEquilibriumEntry | null
+  ) => void;
   clearAll: () => void;
 }
 
@@ -100,6 +125,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
     ote: true,
     breakerBlocks: false,
     inducement: false,
+    equilibrium: true,
   },
   swingPoints: [],
   missedPivots: [],
@@ -113,6 +139,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
   oteZones: [],
   breakerBlocks: [],
   inducements: [],
+  equilibriumLevels: [],
   multiTimeframeOTE: {
     '5m': null,
     '15m': null,
@@ -144,6 +171,14 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
     '4h': 'neutral',
     '1d': 'neutral',
   },
+  multiTimeframeEquilibrium: {
+    '5m': null,
+    '15m': null,
+    '1h': null,
+    '4h': null,
+    '1d': null,
+    '1w': null,
+  },
 
   toggleIndicator: (key) =>
     set((state) => ({
@@ -165,6 +200,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
   setOTEZones: (zones) => set({ oteZones: zones }),
   setBreakerBlocks: (blocks) => set({ breakerBlocks: blocks }),
   setInducements: (inducements) => set({ inducements }),
+  setEquilibriumLevels: (levels) => set({ equilibriumLevels: levels }),
   setMultiTimeframeOTE: (timeframe, ote) =>
     set((state) => ({
       multiTimeframeOTE: {
@@ -193,6 +229,13 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
         [timeframe]: trend,
       },
     })),
+  setMultiTimeframeEquilibrium: (timeframe, entry) =>
+    set((state) => ({
+      multiTimeframeEquilibrium: {
+        ...state.multiTimeframeEquilibrium,
+        [timeframe]: entry,
+      },
+    })),
   clearAll: () =>
     set({
       swingPoints: [],
@@ -207,5 +250,6 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
       oteZones: [],
       breakerBlocks: [],
       inducements: [],
+      equilibriumLevels: [],
     }),
 }));

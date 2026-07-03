@@ -3,44 +3,76 @@
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useIndicatorStore, TrendType } from "@/stores/indicatorStore";
+import {
+  useIndicatorStore,
+  TrendType,
+  MultiTimeframeEquilibriumEntry,
+} from "@/stores/indicatorStore";
+import { ZoneSide } from "@/lib/chart/indicators/equilibrium";
 import { cn } from "@/lib/utils";
 
 const TIMEFRAMES = ['1d', '4h', '1h', '15m', '5m'] as const;
 
+type Consensus = {
+  label: string;
+  strength: 'strong' | 'weak' | 'none';
+  dir: TrendType;
+};
+
+function getConsensus(trend: Record<typeof TIMEFRAMES[number], TrendType>): Consensus {
+  let bullish = 0;
+  let bearish = 0;
+  for (const tf of TIMEFRAMES) {
+    if (trend[tf] === 'bullish') bullish++;
+    else if (trend[tf] === 'bearish') bearish++;
+  }
+  if (bullish >= 3) return { label: 'STRONG BUY', strength: 'strong', dir: 'bullish' };
+  if (bearish >= 3) return { label: 'STRONG SELL', strength: 'strong', dir: 'bearish' };
+  if (bullish >= 2) return { label: 'WEAK BUY', strength: 'weak', dir: 'bullish' };
+  if (bearish >= 2) return { label: 'WEAK SELL', strength: 'weak', dir: 'bearish' };
+  return { label: 'MIXED', strength: 'none', dir: 'neutral' };
+}
+
+function getTrendColor(trend: TrendType) {
+  if (trend === 'bullish') return 'bg-green-500';
+  if (trend === 'bearish') return 'bg-red-500';
+  return 'bg-gray-400';
+}
+
+function getTrendLabel(trend: TrendType) {
+  if (trend === 'bullish') return 'BUY';
+  if (trend === 'bearish') return 'SELL';
+  return '-';
+}
+
+function getSideColor(side: ZoneSide) {
+  if (side === 'premium') return 'text-red-500';
+  if (side === 'discount') return 'text-green-500';
+  return 'text-gray-400';
+}
+
+function getSideMark(side: ZoneSide) {
+  if (side === 'premium') return 'P';
+  if (side === 'discount') return 'D';
+  return '=';
+}
+
 export function MTFPanel() {
   const [isExpanded, setIsExpanded] = useState(false);
-  const { multiTimeframeTrend } = useIndicatorStore();
+  const { multiTimeframeTrend, multiTimeframeEquilibrium } = useIndicatorStore();
 
-  const getTrendColor = (trend: TrendType) => {
-    if (trend === 'bullish') return 'bg-green-500';
-    if (trend === 'bearish') return 'bg-red-500';
-    return 'bg-gray-400';
-  };
+  const consensus = getConsensus(multiTimeframeTrend);
 
-  const getTrendLabel = (trend: TrendType) => {
-    if (trend === 'bullish') return 'BUY';
-    if (trend === 'bearish') return 'SELL';
-    return '-';
-  };
+  // 整体 trend 用 consensus 决定（比简单多数更准）
+  const overallTrend: TrendType = consensus.dir === 'neutral' ? 'neutral' : consensus.dir;
 
-  // 计算整体趋势（用于按钮颜色）
-  const getOverallTrend = (): TrendType => {
-    let bullishCount = 0;
-    let bearishCount = 0;
-
-    for (const tf of TIMEFRAMES) {
-      const trend = multiTimeframeTrend[tf];
-      if (trend === 'bullish') bullishCount++;
-      if (trend === 'bearish') bearishCount++;
-    }
-
-    if (bullishCount > bearishCount) return 'bullish';
-    if (bearishCount > bullishCount) return 'bearish';
-    return 'neutral';
-  };
-
-  const overallTrend = getOverallTrend();
+  const consensusButtonClass = cn(
+    "px-2 h-7 text-xs gap-1",
+    consensus.strength === 'strong' && consensus.dir === 'bullish' && "border-green-600 text-green-700 font-bold",
+    consensus.strength === 'strong' && consensus.dir === 'bearish' && "border-red-600 text-red-700 font-bold",
+    consensus.strength === 'weak' && consensus.dir === 'bullish' && "border-green-400 text-green-500",
+    consensus.strength === 'weak' && consensus.dir === 'bearish' && "border-red-400 text-red-500"
+  );
 
   return (
     <div className="relative">
@@ -48,11 +80,7 @@ export function MTFPanel() {
         variant="outline"
         size="sm"
         onClick={() => setIsExpanded(!isExpanded)}
-        className={cn(
-          "px-2 h-7 text-xs gap-1",
-          overallTrend === 'bullish' && "border-green-500 text-green-600",
-          overallTrend === 'bearish' && "border-red-500 text-red-600"
-        )}
+        className={consensusButtonClass}
       >
         <div className={cn("w-2 h-2 rounded-full", getTrendColor(overallTrend))} />
         <span>MTF</span>
@@ -60,25 +88,69 @@ export function MTFPanel() {
       </Button>
 
       {isExpanded && (
-        <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-50 min-w-[120px]">
-          <div className="text-[10px] text-gray-500 font-medium mb-1 px-1">Multi-TF Trend</div>
-          {TIMEFRAMES.map(tf => {
+        <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-50 min-w-[200px]">
+          <div className="text-[10px] text-gray-500 font-medium mb-1 px-1">Multi-TF Trend + EQ</div>
+
+          {TIMEFRAMES.map((tf) => {
             const trend = multiTimeframeTrend[tf];
+            const eq: MultiTimeframeEquilibriumEntry | null =
+              multiTimeframeEquilibrium[tf];
+
             return (
-              <div key={tf} className="flex items-center gap-2 py-1 px-1 hover:bg-gray-50 rounded">
+              <div
+                key={tf}
+                className="flex items-center gap-2 py-1 px-1 hover:bg-gray-50 rounded"
+              >
                 <div className={cn("w-2.5 h-2.5 rounded-full", getTrendColor(trend))} />
                 <span className="text-xs font-medium text-gray-600 w-8">{tf}</span>
-                <span className={cn(
-                  "text-[10px] font-semibold",
-                  trend === 'bullish' && "text-green-600",
-                  trend === 'bearish' && "text-red-600",
-                  trend === 'neutral' && "text-gray-400"
-                )}>
+                <span
+                  className={cn(
+                    "text-[10px] font-semibold w-8",
+                    trend === 'bullish' && "text-green-600",
+                    trend === 'bearish' && "text-red-600",
+                    trend === 'neutral' && "text-gray-400"
+                  )}
+                >
                   {getTrendLabel(trend)}
                 </span>
+
+                {eq ? (
+                  <>
+                    <span className="text-[10px] text-gray-500 ml-auto font-mono">
+                      EQ {Math.round(eq.equilibrium)}
+                    </span>
+                    <span
+                      className={cn(
+                        "text-[10px] font-bold w-4 text-center",
+                        getSideColor(eq.side)
+                      )}
+                    >
+                      {getSideMark(eq.side)}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-[10px] text-gray-300 ml-auto">—</span>
+                )}
               </div>
             );
           })}
+
+          {/* HTF Consensus 行 */}
+          <div className="mt-2 pt-2 border-t border-gray-200 flex items-center gap-2 px-1">
+            <span className="text-[10px] text-gray-500 font-medium">Consensus</span>
+            <span
+              className={cn(
+                "text-[10px] font-bold ml-auto",
+                consensus.dir === 'bullish' && consensus.strength === 'strong' && "text-green-700",
+                consensus.dir === 'bullish' && consensus.strength === 'weak' && "text-green-500",
+                consensus.dir === 'bearish' && consensus.strength === 'strong' && "text-red-700",
+                consensus.dir === 'bearish' && consensus.strength === 'weak' && "text-red-500",
+                consensus.strength === 'none' && "text-gray-400"
+              )}
+            >
+              {consensus.label}
+            </span>
+          </div>
         </div>
       )}
     </div>

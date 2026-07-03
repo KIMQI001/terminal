@@ -12,4 +12,5 @@ export { KillzonePrimitive } from './KillzonePrimitive';
 export { OTEPrimitive } from './OTEPrimitive';
 export { BreakerBlockPrimitive } from './BreakerBlockPrimitive';
 export { LiquidationHillPrimitive } from './LiquidationHillPrimitive';
+export { EquilibriumPrimitive } from './EquilibriumPrimitive';
 export type { LiquidationBar, LiquidationHillData } from './LiquidationHillPrimitive';

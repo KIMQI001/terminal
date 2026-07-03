@@ -63,4 +63,5 @@ export interface IndicatorState {
   ote: boolean;
   breakerBlocks: boolean;
   inducement: boolean;
+  equilibrium: boolean;
 }
