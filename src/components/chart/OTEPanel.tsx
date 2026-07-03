@@ -5,14 +5,15 @@ import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useChartStore } from "@/stores/chartStore";
 import { useOrderStore, OTEPrefillData, TradingLine } from "@/stores/orderStore";
 import { OTEZone } from "@/lib/chart/indicators/ote";
+import { hasOverlap } from "@/lib/chart/indicators/overlap";
 
 const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d'] as const;
 
 export function OTEPanel() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [oteClickCount, setOteClickCount] = useState(0);
-  const { oteZones, multiTimeframeOTE } = useIndicatorStore();
-  const { candles } = useChartStore();
+  const { oteZones, multiTimeframeOTE, multiTimeframeOB, multiTimeframeFVG } = useIndicatorStore();
+  const { candles, timeframe } = useChartStore();
   const { setPrefillData, setTradingLines, openModal } = useOrderStore();
 
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
@@ -156,11 +157,17 @@ export function OTEPanel() {
                 const borderColor = isNearest ? (isBullish ? 'border-blue-500' : 'border-purple-500') : 'border-transparent';
                 const fillColor = isBullish ? 'bg-blue-200' : 'bg-purple-200';
 
+                // 重叠高亮：当前 OTE 与同周期 OB/FVG 是否同向 + 价格重叠
+                const obAtTf = multiTimeframeOB[tf as keyof typeof multiTimeframeOB];
+                const fvgAtTf = multiTimeframeFVG[tf as keyof typeof multiTimeframeFVG];
+                const isHighlighted = hasOverlap(ote, obAtTf, fvgAtTf);
+                const highlightClass = isHighlighted ? 'ring-2 ring-amber-400' : '';
+
                 return (
                   <div
                     key={tf}
                     onClick={() => handleOTEClick(ote)}
-                    className={`relative grid grid-cols-4 gap-1 text-[9px] py-0.5 items-center rounded border border-dashed ${borderColor} overflow-hidden cursor-pointer hover:bg-gray-100 transition-colors`}
+                    className={`relative grid grid-cols-4 gap-1 text-[9px] py-0.5 items-center rounded border border-dashed ${borderColor} overflow-hidden cursor-pointer hover:bg-gray-100 transition-colors ${highlightClass}`}
                   >
                     {/* 填充背景 - 从左到右填充 */}
                     {isNearest && fillPercent > 0 && (
@@ -211,11 +218,17 @@ export function OTEPanel() {
                     else fillPercent = ((currentPrice - zone.fib618) / zoneHeight) * 100;
                   }
 
+                  // 重叠高亮：当前 OTE 与当前周期 OB/FVG 是否同向 + 价格重叠
+                  const currentOb = multiTimeframeOB[timeframe as keyof typeof multiTimeframeOB];
+                  const currentFvg = multiTimeframeFVG[timeframe as keyof typeof multiTimeframeFVG];
+                  const isHighlighted = hasOverlap(zone, currentOb, currentFvg);
+                  const highlightClass = isHighlighted ? 'ring-2 ring-amber-400' : '';
+
                   return (
                     <div
                       key={index}
                       onClick={() => handleOTEClick(zone)}
-                      className={`${bgColor} ${hoverColor} rounded p-1 text-[9px] cursor-pointer transition-colors`}
+                      className={`${bgColor} ${hoverColor} rounded p-1 text-[9px] cursor-pointer transition-colors ${highlightClass}`}
                     >
                       <div className="flex items-center justify-between">
                         <span className={`font-bold ${color}`}>{label}</span>

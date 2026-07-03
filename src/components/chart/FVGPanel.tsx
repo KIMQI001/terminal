@@ -5,12 +5,13 @@ import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useChartStore } from "@/stores/chartStore";
 import { useOrderStore, OTEPrefillData, TradingLine } from "@/stores/orderStore";
 import { FVG } from "@/types/indicator";
+import { hasOverlap } from "@/lib/chart/indicators/overlap";
 
 const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d'] as const;
 
 export function FVGPanel() {
   const [isCollapsed, setIsCollapsed] = useState(true);
-  const { fvgs, multiTimeframeFVG } = useIndicatorStore();
+  const { fvgs, multiTimeframeFVG, multiTimeframeOB, multiTimeframeOTE } = useIndicatorStore();
   const { candles, timeframe } = useChartStore();
   const { setPrefillData, setTradingLines, openModal } = useOrderStore();
 
@@ -169,11 +170,17 @@ export function FVGPanel() {
                 // 优先使用数据中的 fillPercentage（历史极值），如果是0或未定义则用当前价格计算
                 const displayFillPercent = (fvg.fillPercentage && fvg.fillPercentage > 0) ? fvg.fillPercentage : fillPercent;
 
+                // 重叠高亮：当前 FVG 与同周期 OB/OTE 是否同向 + 价格重叠
+                const obAtTf = multiTimeframeOB[tf as keyof typeof multiTimeframeOB];
+                const oteAtTf = multiTimeframeOTE[tf as keyof typeof multiTimeframeOTE];
+                const isHighlighted = hasOverlap(fvg, obAtTf, oteAtTf);
+                const highlightClass = isHighlighted ? 'ring-2 ring-amber-400' : '';
+
                 return (
                   <div
                     key={tf}
                     onClick={() => handleFVGClick(fvg)}
-                    className={`relative grid grid-cols-4 gap-1 text-[9px] py-0.5 items-center rounded border border-dashed ${borderColor} overflow-hidden cursor-pointer hover:bg-gray-100 transition-colors`}
+                    className={`relative grid grid-cols-4 gap-1 text-[9px] py-0.5 items-center rounded border border-dashed ${borderColor} overflow-hidden cursor-pointer hover:bg-gray-100 transition-colors ${highlightClass}`}
                   >
                     {/* 填充背景 - 从左到右填充（所有周期都显示） */}
                     {displayFillPercent > 0 && (
@@ -217,11 +224,17 @@ export function FVGPanel() {
                   // 使用历史填充百分比
                   const fillPercent = fvg.fillPercentage;
 
+                  // 重叠高亮：当前 FVG 与当前周期 OB/OTE 是否同向 + 价格重叠
+                  const currentOb = multiTimeframeOB[timeframe as keyof typeof multiTimeframeOB];
+                  const currentOte = multiTimeframeOTE[timeframe as keyof typeof multiTimeframeOTE];
+                  const isHighlighted = hasOverlap(fvg, currentOb, currentOte);
+                  const highlightClass = isHighlighted ? 'ring-2 ring-amber-400' : '';
+
                   return (
                     <div
                       key={index}
                       onClick={() => handleFVGClick(fvg)}
-                      className={`relative ${hoverColor} rounded p-1 text-[9px] cursor-pointer transition-colors overflow-hidden`}
+                      className={`relative ${hoverColor} rounded p-1 text-[9px] cursor-pointer transition-colors overflow-hidden ${highlightClass}`}
                     >
                       {/* 底色 */}
                       <div className={`absolute inset-0 ${bgColor}`} />

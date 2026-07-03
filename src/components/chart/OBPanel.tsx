@@ -5,12 +5,13 @@ import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useChartStore } from "@/stores/chartStore";
 import { useOrderStore, OTEPrefillData, TradingLine } from "@/stores/orderStore";
 import { OrderBlock } from "@/types/indicator";
+import { hasOverlap } from "@/lib/chart/indicators/overlap";
 
 const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d'] as const;
 
 export function OBPanel() {
   const [isCollapsed, setIsCollapsed] = useState(true);
-  const { orderBlocks, multiTimeframeOB } = useIndicatorStore();
+  const { orderBlocks, multiTimeframeOB, multiTimeframeOTE, multiTimeframeFVG } = useIndicatorStore();
   const { candles, timeframe } = useChartStore();
   const { setPrefillData, setTradingLines, openModal } = useOrderStore();
 
@@ -177,11 +178,17 @@ export function OBPanel() {
                 // 优先使用数据中的 fillPercentage
                 const displayFillPercent = ob.fillPercentage ?? fillPercent;
 
+                // 重叠高亮：当前 OB 与同周期 OTE/FVG 是否同向 + 价格重叠
+                const oteAtTf = multiTimeframeOTE[tf as keyof typeof multiTimeframeOTE];
+                const fvgAtTf = multiTimeframeFVG[tf as keyof typeof multiTimeframeFVG];
+                const isHighlighted = hasOverlap(ob, oteAtTf, fvgAtTf);
+                const highlightClass = isHighlighted ? 'ring-2 ring-amber-400' : '';
+
                 return (
                   <div
                     key={tf}
                     onClick={() => handleOBClick(ob)}
-                    className={`relative grid grid-cols-4 gap-1 text-[9px] py-0.5 items-center rounded border border-dashed ${borderColor} overflow-hidden cursor-pointer hover:bg-gray-100 transition-colors`}
+                    className={`relative grid grid-cols-4 gap-1 text-[9px] py-0.5 items-center rounded border border-dashed ${borderColor} overflow-hidden cursor-pointer hover:bg-gray-100 transition-colors ${highlightClass}`}
                   >
                     {/* 填充背景 - 从左到右填充（所有周期都显示） */}
                     {displayFillPercent > 0 && (
@@ -228,11 +235,17 @@ export function OBPanel() {
                   // 计算填充百分比
                   const fillPercent = calculateFillPercent(ob);
 
+                  // 重叠高亮：当前 OB 与当前周期 OTE/FVG 是否同向 + 价格重叠
+                  const currentOte = multiTimeframeOTE[timeframe as keyof typeof multiTimeframeOTE];
+                  const currentFvg = multiTimeframeFVG[timeframe as keyof typeof multiTimeframeFVG];
+                  const isHighlighted = hasOverlap(ob, currentOte, currentFvg);
+                  const highlightClass = isHighlighted ? 'ring-2 ring-amber-400' : '';
+
                   return (
                     <div
                       key={index}
                       onClick={() => handleOBClick(ob)}
-                      className={`relative ${hoverColor} rounded p-1 text-[9px] cursor-pointer transition-colors overflow-hidden`}
+                      className={`relative ${hoverColor} rounded p-1 text-[9px] cursor-pointer transition-colors overflow-hidden ${highlightClass}`}
                     >
                       {/* 底色 */}
                       <div className={`absolute inset-0 ${bgColor}`} />
