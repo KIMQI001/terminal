@@ -5,7 +5,7 @@ import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useChartStore } from "@/stores/chartStore";
 import { useOrderStore, OTEPrefillData, TradingLine } from "@/stores/orderStore";
 import { FVG } from "@/types/indicator";
-import { hasOverlap } from "@/lib/chart/indicators/overlap";
+import { hasOverlapWithLists, getSameOrHigherTFs, ALL_TFS } from "@/lib/chart/indicators/overlap";
 
 const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d'] as const;
 
@@ -170,10 +170,15 @@ export function FVGPanel() {
                 // 优先使用数据中的 fillPercentage（历史极值），如果是0或未定义则用当前价格计算
                 const displayFillPercent = (fvg.fillPercentage && fvg.fillPercentage > 0) ? fvg.fillPercentage : fillPercent;
 
-                // 重叠高亮：当前 FVG 与同周期 OB/OTE 是否同向 + 价格重叠
-                const obAtTf = multiTimeframeOB[tf as keyof typeof multiTimeframeOB];
-                const oteAtTf = multiTimeframeOTE[tf as keyof typeof multiTimeframeOTE];
-                const isHighlighted = hasOverlap(fvg, obAtTf, oteAtTf);
+                // 重叠高亮：当前 FVG 与 same+HTF 周期 OB/OTE 是否同向 + 价格重叠
+                const sameOrHigher = getSameOrHigherTFs(tf, [...ALL_TFS]);
+                const obList = sameOrHigher
+                  .map(t => multiTimeframeOB[t as keyof typeof multiTimeframeOB])
+                  .filter(Boolean);
+                const oteList = sameOrHigher
+                  .map(t => multiTimeframeOTE[t as keyof typeof multiTimeframeOTE])
+                  .filter(Boolean);
+                const isHighlighted = hasOverlapWithLists(fvg, obList, oteList);
                 const highlightClass = isHighlighted ? 'ring-2 ring-amber-400' : '';
 
                 return (
@@ -224,10 +229,15 @@ export function FVGPanel() {
                   // 使用历史填充百分比
                   const fillPercent = fvg.fillPercentage;
 
-                  // 重叠高亮：当前 FVG 与当前周期 OB/OTE 是否同向 + 价格重叠
-                  const currentOb = multiTimeframeOB[timeframe as keyof typeof multiTimeframeOB];
-                  const currentOte = multiTimeframeOTE[timeframe as keyof typeof multiTimeframeOTE];
-                  const isHighlighted = hasOverlap(fvg, currentOb, currentOte);
+                  // 重叠高亮：当前 FVG 与 same+HTF 周期 OB/OTE 是否同向 + 价格重叠
+                  const sameOrHigher = getSameOrHigherTFs(timeframe, [...ALL_TFS]);
+                  const obList = sameOrHigher
+                    .map(t => multiTimeframeOB[t as keyof typeof multiTimeframeOB])
+                    .filter(Boolean);
+                  const oteList = sameOrHigher
+                    .map(t => multiTimeframeOTE[t as keyof typeof multiTimeframeOTE])
+                    .filter(Boolean);
+                  const isHighlighted = hasOverlapWithLists(fvg, obList, oteList);
                   const highlightClass = isHighlighted ? 'ring-2 ring-amber-400' : '';
 
                   return (
