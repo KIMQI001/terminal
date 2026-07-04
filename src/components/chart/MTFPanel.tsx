@@ -36,6 +36,16 @@ function isSessionReady(readyHour: number, readyMinute: number = 0): boolean {
   return getBeijingTotalMinutes() >= readyHour * 60 + readyMinute;
 }
 
+/**
+ * AI session 跨 00:00 边界：22:00-05:00 北京（NY PM 跨日）
+ * - 22:00-24:00: 在 22 点后
+ * - 0:00-5:00:   在 5 点前
+ */
+function isAISessionActive(): boolean {
+  const min = getBeijingTotalMinutes();
+  return min >= 22 * 60 || min < 5 * 60;
+}
+
 type ActiveSession = 'AO' | 'EO' | 'AI';
 
 /**
@@ -229,7 +239,7 @@ export function MTFPanel() {
             </span>
           </div>
 
-          {/* Always In (IB 21-22 北京 vs PDH/PDL) 行 */}
+          {/* Always In (IB 21-22 北京 vs Europe Zone) 行 */}
           <div className="mt-1 flex items-center gap-2 px-1">
             <span className="text-[10px] text-gray-500 font-medium">Always In</span>
             <span
@@ -238,14 +248,14 @@ export function MTFPanel() {
                 getAlwaysInColor(initialBalance?.direction)
               )}
             >
-              {!isSessionReady(22, 0)
+              {!isAISessionActive()
                 ? 'WAIT'
                 : initialBalance
                   ? getAlwaysInLabel(initialBalance.direction)
                   : '—'}
             </span>
           </div>
-          {initialBalance && isSessionReady(22, 0) && (
+          {initialBalance && isAISessionActive() && (
             <div className="text-[9px] text-gray-400 px-1 font-mono">
               IB {Math.round(initialBalance.ibLow)}–{Math.round(initialBalance.ibHigh)} · Europe {Math.round(initialBalance.europeLow)}–{Math.round(initialBalance.europeHigh)} (EQ {Math.round(initialBalance.europeEQ)})
             </div>
