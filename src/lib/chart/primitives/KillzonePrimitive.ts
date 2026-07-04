@@ -49,10 +49,25 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
     this._data = data;
   }
 
+  /**
+   * 根据"现在"找当前所处的 killzone（如果不在任何 session 内返回 null）
+   */
+  private getCurrentSession(nowSec: number): { kz: Killzone; startSec: number; endSec: number } | null {
+    const todayMidnight = Math.floor(nowSec / 86400) * 86400;
+    for (const kz of DEFAULT_KILLZONES) {
+      let startSec = todayMidnight + kz.startHour * 3600;
+      let endSec = todayMidnight + kz.endHour * 3600;
+      if (kz.endHour === 24) endSec = todayMidnight + 86400;
+      if (nowSec >= startSec && nowSec < endSec) {
+        return { kz, startSec, endSec };
+      }
+    }
+    return null;
+  }
+
   drawBackground(target: CanvasRenderingTarget2D): void {
     if (!this._data) return;
     const {
-      killzones,
       firstVisibleTime,
       lastVisibleTime,
       chartHeight,
@@ -63,45 +78,30 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
 
     if (!firstVisibleTime || !lastVisibleTime || !visibleRange) return;
 
+    // 只画当前 session，不画全部
+    const nowSec = Math.floor(Date.now() / 1000);
+    const session = this.getCurrentSession(nowSec);
+    if (!session) return; // 当前不在任何 session，不画
+
+    const { kz, startSec, endSec } = session;
+
+    // 不可见则不画
+    if (endSec < firstVisibleTime || startSec > lastVisibleTime) return;
+
     target.useMediaCoordinateSpace(({ context: ctx }) => {
-      // Calculate the day boundaries in the visible range
-      const startDay = Math.floor(firstVisibleTime / 86400) * 86400;
-      const endDay = Math.ceil(lastVisibleTime / 86400) * 86400;
+      const startLogical = (startSec - firstVisibleTime) / candleInterval + visibleRange.from;
+      const endLogical = (endSec - firstVisibleTime) / candleInterval + visibleRange.from;
 
-      for (let dayStart = startDay; dayStart <= endDay; dayStart += 86400) {
-        for (const kz of killzones) {
-          // Handle zones that cross midnight
-          let kzStart = dayStart + kz.startHour * 3600;
-          let kzEnd = dayStart + kz.endHour * 3600;
+      const x1 = logicalToCoordinate(startLogical as Logical);
+      const x2 = logicalToCoordinate(endLogical as Logical);
 
-          // If endHour is 24 (midnight), it means end of day
-          if (kz.endHour === 24) {
-            kzEnd = dayStart + 86400; // End of this day
-          }
+      if (x1 === null || x2 === null) return;
 
-          // If startHour > endHour, zone crosses midnight (e.g., 20:00-00:00)
-          // This case is already handled by endHour being 24
+      const width = Math.abs(x2 - x1);
+      if (width <= 0) return;
 
-          // Skip if zone is outside visible range
-          if (kzEnd < firstVisibleTime || kzStart > lastVisibleTime) continue;
-
-          // Convert times to logical coordinates
-          const startLogical = (kzStart - firstVisibleTime) / candleInterval + visibleRange.from;
-          const endLogical = (kzEnd - firstVisibleTime) / candleInterval + visibleRange.from;
-
-          const x1 = logicalToCoordinate(startLogical as Logical);
-          const x2 = logicalToCoordinate(endLogical as Logical);
-
-          if (x1 === null || x2 === null) continue;
-
-          const width = Math.abs(x2 - x1);
-          if (width <= 0) continue;
-
-          // Draw the killzone background
-          ctx.fillStyle = kz.color;
-          ctx.fillRect(Math.min(x1, x2), 0, width, chartHeight);
-        }
-      }
+      ctx.fillStyle = kz.color;
+      ctx.fillRect(Math.min(x1, x2), 0, width, chartHeight);
     });
   }
 
