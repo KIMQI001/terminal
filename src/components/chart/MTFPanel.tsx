@@ -130,13 +130,11 @@ export function MTFPanel() {
   const overallTrend: TrendType = consensus.dir === 'neutral' ? 'neutral' : consensus.dir;
 
   // 当前 session 的 bias 决定按钮灯颜色
-  // AI 的 "wait" 等同于 undefined（未就绪）
   const activeSession = getActiveSession();
   const activeBias: 'long' | 'short' | undefined = (() => {
     if (activeSession === 'AO') return asiaBias?.direction;
     if (activeSession === 'EO') return europeBias?.direction;
-    const aiDir = initialBalance?.direction;
-    return aiDir === 'wait' ? undefined : aiDir;
+    return initialBalance?.direction;
   })();
   const activeDotColor =
     activeBias === 'long' ? 'bg-green-500' :
@@ -249,7 +247,7 @@ export function MTFPanel() {
           </div>
           {initialBalance && isSessionReady(22, 0) && (
             <div className="text-[9px] text-gray-400 px-1 font-mono">
-              IB {Math.round(initialBalance.ibLow)}–{Math.round(initialBalance.ibHigh)} · PD {Math.round(initialBalance.pdl)}–{Math.round(initialBalance.pdh)}
+              IB {Math.round(initialBalance.ibLow)}–{Math.round(initialBalance.ibHigh)} · Europe {Math.round(initialBalance.europeLow)}–{Math.round(initialBalance.europeHigh)} (EQ {Math.round(initialBalance.europeEQ)})
             </div>
           )}
 

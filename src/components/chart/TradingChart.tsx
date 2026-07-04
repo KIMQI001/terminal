@@ -889,20 +889,20 @@ export function TradingChart() {
     };
   }, [symbol, setDailyHL]);
 
-  // Initial Balance (21-22 北京) vs PDH/PDL → Always In 检测
+  // Initial Balance (21-22 北京) vs Europe Zone (15-20 北京) → Always In 检测
   useEffect(() => {
     let isCancelled = false;
 
     const calculateInitialBalance = async () => {
       try {
         // 1h 拿 IB 时段（13-14 UTC = 21-22 北京）
-        // 1d 拿 PDH/PDL
-        const [hourlyData, dailyData] = await Promise.all([
+        // 15m 拿 Europe Zone（7-12 UTC = 15-20 北京）
+        const [hourlyData, fifteenMinData] = await Promise.all([
           fetchKlines(symbol, '1h', 200).catch(() => []),
-          fetchKlines(symbol, '1d', 30).catch(() => []),
+          fetchKlines(symbol, '15m', 200).catch(() => []),
         ]);
         if (isCancelled) return;
-        const ib = computeInitialBalance(hourlyData, dailyData);
+        const ib = computeInitialBalance(hourlyData, fifteenMinData);
         setInitialBalance(ib);
       } catch (error) {
         console.error('Failed to calculate Initial Balance:', error);
