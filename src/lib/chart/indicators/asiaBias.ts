@@ -1,13 +1,15 @@
 /**
- * Asia Open Window Bias — 亚洲开盘窗口方向
+ * Asia Open Window Bias — Premium/Discount 判定
  *
- * 概念：
- * - 2 根 15m K-line（23:45 UTC + 00:00 UTC）覆盖 7:45-8:15 北京
- * - 如果这 30min 的 high > 当日 0:00-7:45 北京 之前所有 K 线的最高价
- *   → 强势突破当日新高 → 看多
- * - 否则 → 看空
- *
- * 不用 30m K-line（kline-server 未订阅），用 2 根 15m 拼出精确 30min 窗口。
+ * 算法：
+ * 1. 范围 = 当日 0:00 北京 到 7:45 北京 的 K 线（AO 窗口前）
+ * 2. 算 range H, L, EQ（EQ = (H+L)/2）
+ * 3. 判定当前价（AO 第 2 根 K 线的 close）在 Premium 还是 Discount
+ * 4. 应用规则：
+ *    - Premium (价格 >= EQ): AO 2 根 K 线的 H 破 range H → LONG，否则 SHORT
+ *      （溢价区理应继续向上创新高，失败 = 弱势）
+ *    - Discount (价格 < EQ): AO 2 根 K 线的 L 破 range L → SHORT，否则 LONG
+ *      （折价区理应继续向下创新低，失败 = 强势）
  */
 
 import { Candle } from "@/types/chart";
@@ -16,38 +18,32 @@ export type AsiaBiasDirection = "long" | "short";
 
 export interface AsiaBiasData {
   direction: AsiaBiasDirection;
-  /** Asia Open Window 30min 的 high（2 根 15m 拼出） */
+  /** AO 2 根 15m K 线 (7:45-8:15 北京) 的最高 */
   asiaOpenHigh: number;
-  /** Asia Open Window 30min 的 low */
+  /** AO 2 根 15m K 线的最低 */
   asiaOpenLow: number;
-  /** Asia Open Window 起始时间（UTC 秒） */
+  /** AO 起始时间（UTC 秒） */
   asiaOpenTime: number;
-  /** 当日 0:00-7:45 北京 所有 K 线的最高 */
-  prevTodayHigh: number;
-  /** 当日 0:00-7:45 北京 所有 K 线的最低 */
-  prevTodayLow: number;
+  /** 当日 0:00-7:45 北京 范围 H */
+  rangeHigh: number;
+  /** 当日 0:00-7:45 北京 范围 L */
+  rangeLow: number;
+  /** 范围 EQ = (rangeHigh + rangeLow) / 2 */
+  rangeEQ: number;
+  /** AO 第 2 根 K 线的 close，作为判断 Premium/Discount 的价格 */
+  currentPrice: number;
+  /** currentPrice >= rangeEQ */
+  inPremium: boolean;
   /** 计算时间（毫秒） */
   computedAt: number;
 }
 
-/**
- * 把"现在"转成"当日北京 0:00"对应的 UTC 时间戳（秒）
- *
- * 0:00 北京 = 16:00 UTC of previous day
- */
 function beijingMidnightUtcSec(date: Date): number {
   const beijingDateStr = date.toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
   const [y, m, d] = beijingDateStr.split("-").map(Number);
   return Math.floor(Date.UTC(y, m - 1, d) / 1000) - 8 * 3600;
 }
 
-/**
- * 计算 Asia Open Window Bias
- *
- * @param candles15m 按时间升序的 15m K 线
- * @param nowMs 当前时间（毫秒），默认 Date.now()
- * @returns AsiaBiasData 或 null（数据未就绪时返回 null）
- */
 export function computeAsiaBias(
   candles15m: Candle[],
   nowMs: number = Date.now()
@@ -57,49 +53,61 @@ export function computeAsiaBias(
   const now = new Date(nowMs);
   const beijingMidnightUtc = beijingMidnightUtcSec(now);
 
-  // Asia Open Window: 7:45-8:15 北京 = 2 根 15m K-line
-  //   - 7:45-8:00 北京 = 15m K-line at 23:45 UTC（time 字段 = 23:45:00）
-  //   - 8:00-8:15 北京 = 15m K-line at 00:00 UTC（time 字段 = 00:00:00，次日）
-  const asiaOpenStartUtc1 = beijingMidnightUtc + 7 * 3600 + 45 * 60; // 23:45 UTC
-  const asiaOpenStartUtc2 = beijingMidnightUtc + 8 * 3600; // 00:00 UTC (次日的秒)
-  const prevTodayStartUtc = beijingMidnightUtc; // 0:00 北京 = 16:00 UTC
-  const prevTodayEndUtc = asiaOpenStartUtc1; // 7:45 北京（不含）
+  // 范围 = 0:00-7:45 北京
+  const rangeStartUtc = beijingMidnightUtc;
+  const rangeEndUtc = beijingMidnightUtc + 7 * 3600 + 45 * 60; // 7:45 北京
 
-  // 8:15 北京之前 → 30min 窗口还没结束
+  // AO 2 根 15m K-line: 7:45-8:00 + 8:00-8:15
+  const aoStart1Utc = rangeEndUtc; // 7:45 北京 = 23:45 UTC
+  const aoStart2Utc = rangeEndUtc + 15 * 60; // 8:00 北京 = 00:00 UTC (次日)
+
+  // 8:15 北京之前 → AO 窗口未完成
   const nowSec = Math.floor(nowMs / 1000);
-  if (nowSec < asiaOpenStartUtc2 + 15 * 60) {
+  if (nowSec < aoStart2Utc + 15 * 60) {
     return null;
   }
 
-  // 找 2 根 Asia Open 15m K-line
-  const c1 = candles15m.find((c) => c.time === asiaOpenStartUtc1);
-  const c2 = candles15m.find((c) => c.time === asiaOpenStartUtc2);
+  // 找 AO 2 根 K 线
+  const c1 = candles15m.find((c) => c.time === aoStart1Utc);
+  const c2 = candles15m.find((c) => c.time === aoStart2Utc);
   if (!c1 || !c2) return null;
 
-  // 拼出 30min H/L
   const asiaOpenHigh = Math.max(c1.high, c2.high);
   const asiaOpenLow = Math.min(c1.low, c2.low);
+  const currentPrice = c2.close;
 
-  // 当日 0:00-7:45 北京 之前的 15m K 线（每 15min 一根，共 29 根）
-  const prevTodayCandles = candles15m.filter(
-    (c) => c.time >= prevTodayStartUtc && c.time < prevTodayEndUtc
+  // 范围 K 线（0:00-7:45 北京）
+  const rangeCandles = candles15m.filter(
+    (c) => c.time >= rangeStartUtc && c.time < rangeEndUtc
   );
-  if (prevTodayCandles.length === 0) return null;
+  if (rangeCandles.length === 0) return null;
 
-  const prevTodayHigh = Math.max(...prevTodayCandles.map((c) => c.high));
-  const prevTodayLow = Math.min(...prevTodayCandles.map((c) => c.low));
+  const rangeHigh = Math.max(...rangeCandles.map((c) => c.high));
+  const rangeLow = Math.min(...rangeCandles.map((c) => c.low));
+  const rangeEQ = (rangeHigh + rangeLow) / 2;
 
-  // 判定：Asia Open high 破前高 → long；不破 → short
-  const direction: AsiaBiasDirection =
-    asiaOpenHigh > prevTodayHigh ? "long" : "short";
+  // 判定
+  const inPremium = currentPrice >= rangeEQ;
+  let direction: AsiaBiasDirection;
+
+  if (inPremium) {
+    // Premium: 期望 AO 向上破 H；破 = LONG，未破 = SHORT
+    direction = asiaOpenHigh > rangeHigh ? "long" : "short";
+  } else {
+    // Discount: 期望 AO 向下破 L；破 = SHORT，未破 = LONG
+    direction = asiaOpenLow < rangeLow ? "short" : "long";
+  }
 
   return {
     direction,
     asiaOpenHigh,
     asiaOpenLow,
-    asiaOpenTime: asiaOpenStartUtc1,
-    prevTodayHigh,
-    prevTodayLow,
+    asiaOpenTime: aoStart1Utc,
+    rangeHigh,
+    rangeLow,
+    rangeEQ,
+    currentPrice,
+    inPremium,
     computedAt: nowMs,
   };
 }

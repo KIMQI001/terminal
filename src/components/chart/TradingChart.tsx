@@ -920,22 +920,21 @@ export function TradingChart() {
     };
   }, [symbol, setInitialBalance]);
 
-  // Asia Open Window Bias (7:30-8:00 北京) — 用 2 根 15m K-line 拼出
+  // Asia Open Window Bias (Premium/Discount 判定) — 用 2 根 15m K-line
   useEffect(() => {
     let isCancelled = false;
 
-    const calculateAsiaBias = async () => {
+    const calculateBiases = async () => {
       try {
-        // 15m K-line: 200 根 = 50 小时 ≈ 2 天，覆盖 prev today 7.5h + buffer
+        // 15m K-line: 200 根 ≈ 50 小时，覆盖 prev today + buffer
         const candles15m = await fetchKlines(symbol, '15m', 200).catch(() => []);
         if (isCancelled) return;
-        const bias = computeAsiaBias(candles15m);
-        setAsiaBias(bias);
-        // Europe Bias 依赖 Asia Bias，一起算
-        const europe = computeEuropeBias(candles15m, bias);
+        const asia = computeAsiaBias(candles15m);
+        const europe = computeEuropeBias(candles15m);
+        setAsiaBias(asia);
         setEuropeBias(europe);
       } catch (error) {
-        console.error('Failed to calculate Asia Bias:', error);
+        console.error('Failed to calculate Asia/Europe Bias:', error);
         if (!isCancelled) {
           setAsiaBias(null);
           setEuropeBias(null);
@@ -943,9 +942,9 @@ export function TradingChart() {
       }
     };
 
-    calculateAsiaBias();
-    // 30 分钟刷新一次（8:00 / 16:00 北京前后是关键时间窗）
-    const interval = setInterval(calculateAsiaBias, 30 * 60 * 1000);
+    calculateBiases();
+    // 30 分钟刷新一次（8:15 / 16:00 北京前后是关键时间窗）
+    const interval = setInterval(calculateBiases, 30 * 60 * 1000);
 
     return () => {
       isCancelled = true;

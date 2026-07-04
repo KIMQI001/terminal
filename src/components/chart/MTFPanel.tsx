@@ -197,7 +197,7 @@ export function MTFPanel() {
             </div>
           )}
 
-          {/* Asia Open Window Bias (7:30-8:00 北京 vs 当日 0-7:30 H/L) 行 */}
+          {/* Asia Open Bias (Premium/Discount 判定) 行 */}
           <div className="mt-1 flex items-center gap-2 px-1">
             <span className="text-[10px] text-gray-500 font-medium">Asia Open</span>
             <span
@@ -210,16 +210,26 @@ export function MTFPanel() {
                 ? (asiaBias.direction === 'long' ? 'ASIA LONG' : 'ASIA SHORT')
                 : '—'}
             </span>
+            {asiaBias && (
+              <span
+                className={cn(
+                  "text-[9px] font-semibold",
+                  asiaBias.inPremium ? "text-red-500" : "text-green-500"
+                )}
+              >
+                {asiaBias.inPremium ? 'P' : 'D'}
+              </span>
+            )}
           </div>
           {asiaBias && (
             <div className="text-[9px] text-gray-400 px-1 font-mono">
-              AO {Math.round(asiaBias.asiaOpenLow)}–{Math.round(asiaBias.asiaOpenHigh)} · prev {Math.round(asiaBias.prevTodayLow)}–{Math.round(asiaBias.prevTodayHigh)}
+              AO {Math.round(asiaBias.asiaOpenLow)}–{Math.round(asiaBias.asiaOpenHigh)} · R {Math.round(asiaBias.rangeLow)}–{Math.round(asiaBias.rangeHigh)} (EQ {Math.round(asiaBias.rangeEQ)})
             </div>
           )}
 
-          {/* Europe Open Judas (15:30-16:00 北京, 反向) 行 */}
+          {/* Europe Open Bias (Premium/Discount 判定) 行 */}
           <div className="mt-1 flex items-center gap-2 px-1">
-            <span className="text-[10px] text-gray-500 font-medium">EU Judas</span>
+            <span className="text-[10px] text-gray-500 font-medium">Europe Open</span>
             <span
               className={cn(
                 "text-[10px] font-bold ml-auto",
@@ -230,13 +240,20 @@ export function MTFPanel() {
                 ? (europeBias.direction === 'long' ? 'EU LONG' : 'EU SHORT')
                 : '—'}
             </span>
-            {europeBias && europeBias.judasFlipped && (
-              <span className="text-[9px] text-amber-600 font-semibold">↺FLIP</span>
+            {europeBias && (
+              <span
+                className={cn(
+                  "text-[9px] font-semibold",
+                  europeBias.inPremium ? "text-red-500" : "text-green-500"
+                )}
+              >
+                {europeBias.inPremium ? 'P' : 'D'}
+              </span>
             )}
           </div>
           {europeBias && (
             <div className="text-[9px] text-gray-400 px-1 font-mono">
-              EO {Math.round(europeBias.europeOpenLow)}–{Math.round(europeBias.europeOpenHigh)} · prev {Math.round(europeBias.prevTodayLow)}–{Math.round(europeBias.prevTodayHigh)}
+              EO {Math.round(europeBias.europeOpenLow)}–{Math.round(europeBias.europeOpenHigh)} · R {Math.round(europeBias.rangeLow)}–{Math.round(europeBias.rangeHigh)} (EQ {Math.round(europeBias.rangeEQ)})
             </div>
           )}
         </div>

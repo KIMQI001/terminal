@@ -1,39 +1,37 @@
 /**
- * Europe Open Bias — 欧盘 Judas 反向判定
+ * Europe Open Window Bias — Premium/Discount 判定
  *
- * 概念：欧盘通常是 Asia 方向的 Judas Swing（反向假突破）
- * - 15:30-16:00 北京 = 2 根 15m K-line（7:30 UTC + 7:45 UTC）
- * - 如果 Asia 是 SHORT（看空），但欧盘 30min 的 L 没破当日 L
- *   → Judas 失败 → 反向 → LONG
- * - 如果 Asia 是 LONG（看多），但欧盘 30min 的 H 没破当日 H
- *   → Judas 失败 → 反向 → SHORT
- * - 否则（欧盘成功突破）→ 跟随 Asia 方向
- *
- * 注意：使用 7:30-8:00 UTC 假设夏令时（London BST = UTC+1，3-10 月）。
- * 冬令时（GMT）下应为 8:00-8:30 UTC，但实际数据差异不大，可忽略。
+ * 算法（与 Asia Open 完全对称）：
+ * 1. 范围 = 当日 0:00 北京 到 15:30 北京 的 K 线（EO 窗口前）
+ * 2. 算 range H, L, EQ
+ * 3. 判定当前价（EO 第 2 根 K 线 close）在 Premium 还是 Discount
+ * 4. 应用规则：
+ *    - Premium: EO H 破 range H → LONG，否则 SHORT
+ *    - Discount: EO L 破 range L → SHORT，否则 LONG
  */
 
 import { Candle } from "@/types/chart";
-import { AsiaBiasData } from "@/lib/chart/indicators/asiaBias";
 
 export type EuropeBiasDirection = "long" | "short";
 
 export interface EuropeBiasData {
   direction: EuropeBiasDirection;
-  /** Europe Open 30min 的 high */
+  /** EO 2 根 15m K 线 (15:30-16:00 北京) 的最高 */
   europeOpenHigh: number;
-  /** Europe Open 30min 的 low */
+  /** EO 2 根 15m K 线的最低 */
   europeOpenLow: number;
-  /** Europe Open 起始时间（UTC 秒） */
+  /** EO 起始时间（UTC 秒） */
   europeOpenTime: number;
-  /** 当日 0:00-15:30 北京 所有 K 线的最高 */
-  prevTodayHigh: number;
-  /** 当日 0:00-15:30 北京 所有 K 线的最低 */
-  prevTodayLow: number;
-  /** Asia Open 方向（用于解释） */
-  asiaDirection: "long" | "short";
-  /** 是否触发 Judas 翻转（true = 反向，false = 跟随 Asia） */
-  judasFlipped: boolean;
+  /** 当日 0:00-15:30 北京 范围 H */
+  rangeHigh: number;
+  /** 当日 0:00-15:30 北京 范围 L */
+  rangeLow: number;
+  /** 范围 EQ = (rangeHigh + rangeLow) / 2 */
+  rangeEQ: number;
+  /** EO 第 2 根 K 线的 close */
+  currentPrice: number;
+  /** currentPrice >= rangeEQ */
+  inPremium: boolean;
   /** 计算时间（毫秒） */
   computedAt: number;
 }
@@ -46,79 +44,68 @@ function beijingMidnightUtcSec(date: Date): number {
 
 export function computeEuropeBias(
   candles15m: Candle[],
-  asiaBias: AsiaBiasData | null,
   nowMs: number = Date.now()
 ): EuropeBiasData | null {
   if (candles15m.length < 2) return null;
-  if (!asiaBias) return null; // 需要 Asia Open 先定调
 
   const now = new Date(nowMs);
   const beijingMidnightUtc = beijingMidnightUtcSec(now);
 
-  // Europe Open Window: 15:30-16:00 北京 = 2 根 15m K-line
-  //   - 15:30-15:45 北京 = 15m K-line at 7:30 UTC
-  //   - 15:45-16:00 北京 = 15m K-line at 7:45 UTC
-  const europeOpenStartUtc1 = beijingMidnightUtc + 15 * 3600 + 30 * 60; // 7:30 UTC
-  const europeOpenStartUtc2 = beijingMidnightUtc + 15 * 3600 + 45 * 60; // 7:45 UTC
-  const prevTodayStartUtc = beijingMidnightUtc; // 0:00 北京 = 16:00 UTC
-  const prevTodayEndUtc = europeOpenStartUtc1; // 15:30 北京（不含）
+  // 范围 = 0:00-15:30 北京
+  const rangeStartUtc = beijingMidnightUtc;
+  const rangeEndUtc = beijingMidnightUtc + 15 * 3600 + 30 * 60; // 15:30 北京
 
-  // 16:00 北京之前 → 30min 窗口还没结束
+  // EO 2 根 15m K-line: 15:30-15:45 + 15:45-16:00
+  const eoStart1Utc = rangeEndUtc; // 15:30 北京 = 7:30 UTC
+  const eoStart2Utc = rangeEndUtc + 15 * 60; // 15:45 北京 = 7:45 UTC
+
+  // 16:00 北京之前 → EO 窗口未完成
   const nowSec = Math.floor(nowMs / 1000);
-  if (nowSec < europeOpenStartUtc2 + 15 * 60) {
+  if (nowSec < eoStart2Utc + 15 * 60) {
     return null;
   }
 
-  // 找 2 根 Europe Open 15m K-line
-  const c1 = candles15m.find((c) => c.time === europeOpenStartUtc1);
-  const c2 = candles15m.find((c) => c.time === europeOpenStartUtc2);
+  // 找 EO 2 根 K 线
+  const c1 = candles15m.find((c) => c.time === eoStart1Utc);
+  const c2 = candles15m.find((c) => c.time === eoStart2Utc);
   if (!c1 || !c2) return null;
 
   const europeOpenHigh = Math.max(c1.high, c2.high);
   const europeOpenLow = Math.min(c1.low, c2.low);
+  const currentPrice = c2.close;
 
-  // 当日 0:00-15:30 北京 之前的 15m K 线（约 62 根）
-  const prevTodayCandles = candles15m.filter(
-    (c) => c.time >= prevTodayStartUtc && c.time < prevTodayEndUtc
+  // 范围 K 线（0:00-15:30 北京）
+  const rangeCandles = candles15m.filter(
+    (c) => c.time >= rangeStartUtc && c.time < rangeEndUtc
   );
-  if (prevTodayCandles.length === 0) return null;
+  if (rangeCandles.length === 0) return null;
 
-  const prevTodayHigh = Math.max(...prevTodayCandles.map((c) => c.high));
-  const prevTodayLow = Math.min(...prevTodayCandles.map((c) => c.low));
+  const rangeHigh = Math.max(...rangeCandles.map((c) => c.high));
+  const rangeLow = Math.min(...rangeCandles.map((c) => c.low));
+  const rangeEQ = (rangeHigh + rangeLow) / 2;
 
-  // Judas 反向判定
+  // 判定
+  const inPremium = currentPrice >= rangeEQ;
   let direction: EuropeBiasDirection;
-  let judasFlipped: boolean;
 
-  if (asiaBias.direction === "short") {
-    // Asia 看空，期望欧盘下行失败（Judas 失败 → 反向 long）
-    if (europeOpenLow > prevTodayLow) {
-      direction = "long";
-      judasFlipped = true;
-    } else {
-      direction = "short";
-      judasFlipped = false;
-    }
+  if (inPremium) {
+    // Premium: 期望 EO 向上破 H；破 = LONG，未破 = SHORT
+    direction = europeOpenHigh > rangeHigh ? "long" : "short";
   } else {
-    // Asia 看多，期望欧盘上行失败（Judas 失败 → 反向 short）
-    if (europeOpenHigh < prevTodayHigh) {
-      direction = "short";
-      judasFlipped = true;
-    } else {
-      direction = "long";
-      judasFlipped = false;
-    }
+    // Discount: 期望 EO 向下破 L；破 = SHORT，未破 = LONG
+    direction = europeOpenLow < rangeLow ? "short" : "long";
   }
 
   return {
     direction,
     europeOpenHigh,
     europeOpenLow,
-    europeOpenTime: europeOpenStartUtc1,
-    prevTodayHigh,
-    prevTodayLow,
-    asiaDirection: asiaBias.direction,
-    judasFlipped,
+    europeOpenTime: eoStart1Utc,
+    rangeHigh,
+    rangeLow,
+    rangeEQ,
+    currentPrice,
+    inPremium,
     computedAt: nowMs,
   };
 }
