@@ -2,11 +2,12 @@
  * Asia Open Window Bias — 亚洲开盘窗口方向
  *
  * 概念：
- * - 7:00-8:00 北京 (= 1h K-line at 23:00 UTC) 是 Asia Session Open Window
- * - 用户原意是 7:30-8:00 这个 30min；用 1h K-line 近似（30min 误差可接受）
- * - 如果这根 K 线的 high > 当日 0:00-7:00 北京 之前所有 K 线的最高价
+ * - 7:30-8:00 北京 = 2 根 15m K-line（23:30 UTC + 23:45 UTC）
+ * - 如果这 30min 的 high > 当日 0:00-7:30 北京 之前所有 K 线的最高价
  *   → 强势突破当日新高 → 看多
  * - 否则 → 看空
+ *
+ * 不用 30m K-line（kline-server 未订阅），用 2 根 15m 拼出精确 30min 窗口。
  */
 
 import { Candle } from "@/types/chart";
@@ -15,15 +16,15 @@ export type AsiaBiasDirection = "long" | "short";
 
 export interface AsiaBiasData {
   direction: AsiaBiasDirection;
-  /** Asia Open Window 1h K 线的 high */
+  /** Asia Open Window 30min 的 high（2 根 15m 拼出） */
   asiaOpenHigh: number;
-  /** Asia Open Window 1h K 线的 low */
+  /** Asia Open Window 30min 的 low */
   asiaOpenLow: number;
-  /** Asia Open Window K 线起始时间（UTC 秒，1h K-line 在整点） */
+  /** Asia Open Window 起始时间（UTC 秒） */
   asiaOpenTime: number;
-  /** 当日 0:00-7:00 北京 所有 K 线的最高 */
+  /** 当日 0:00-7:30 北京 所有 K 线的最高 */
   prevTodayHigh: number;
-  /** 当日 0:00-7:00 北京 所有 K 线的最低 */
+  /** 当日 0:00-7:30 北京 所有 K 线的最低 */
   prevTodayLow: number;
   /** 计算时间（毫秒） */
   computedAt: number;
@@ -37,47 +38,50 @@ export interface AsiaBiasData {
 function beijingMidnightUtcSec(date: Date): number {
   const beijingDateStr = date.toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
   const [y, m, d] = beijingDateStr.split("-").map(Number);
-  // Date.UTC(y, m-1, d) = y-m-d 00:00:00 UTC
-  // y-m-d 00:00 北京 = y-m-d 00:00 UTC - 8h
   return Math.floor(Date.UTC(y, m - 1, d) / 1000) - 8 * 3600;
 }
 
 /**
  * 计算 Asia Open Window Bias
  *
- * @param hourlyCandles 按时间升序的 1h K 线
+ * @param candles15m 按时间升序的 15m K 线
  * @param nowMs 当前时间（毫秒），默认 Date.now()
  * @returns AsiaBiasData 或 null（数据未就绪时返回 null）
  */
 export function computeAsiaBias(
-  hourlyCandles: Candle[],
+  candles15m: Candle[],
   nowMs: number = Date.now()
 ): AsiaBiasData | null {
-  if (hourlyCandles.length < 2) return null;
+  if (candles15m.length < 2) return null;
 
   const now = new Date(nowMs);
-  // 当日 0:00 北京 对应的 UTC 时间戳
   const beijingMidnightUtc = beijingMidnightUtcSec(now);
 
-  // Asia Open Window 起点（1h K-line 整点 UTC）
-  // 7:00-8:00 北京 = 1h K-line at 23:00 UTC（time 字段是 23:00:00）
-  // 起点：beijingMidnight + 7h
-  const asiaOpenStartUtc = beijingMidnightUtc + 7 * 3600; // 23:00 UTC of "today" (Beijing)
+  // Asia Open Window: 7:30-8:00 北京 = 2 根 15m K-line
+  //   - 7:30-7:45 北京 = 15m K-line at 23:30 UTC
+  //   - 7:45-8:00 北京 = 15m K-line at 23:45 UTC
+  const asiaOpenStartUtc1 = beijingMidnightUtc + 7 * 3600 + 30 * 60; // 23:30 UTC
+  const asiaOpenStartUtc2 = beijingMidnightUtc + 7 * 3600 + 45 * 60; // 23:45 UTC
   const prevTodayStartUtc = beijingMidnightUtc; // 0:00 北京 = 16:00 UTC
-  const prevTodayEndUtc = asiaOpenStartUtc; // 7:00 北京（不含）
+  const prevTodayEndUtc = asiaOpenStartUtc1; // 7:30 北京（不含）
 
-  // 8:00 北京之前 → Asia Open 1h K 线还没结束
+  // 8:00 北京之前 → 30min 窗口还没结束
   const nowSec = Math.floor(nowMs / 1000);
-  if (nowSec < asiaOpenStartUtc + 3600) {
+  if (nowSec < asiaOpenStartUtc2 + 15 * 60) {
     return null;
   }
 
-  // 找 Asia Open 1h K 线（time === 23:00 UTC）
-  const asiaCandle = hourlyCandles.find((c) => c.time === asiaOpenStartUtc);
-  if (!asiaCandle) return null;
+  // 找 2 根 Asia Open 15m K-line
+  const c1 = candles15m.find((c) => c.time === asiaOpenStartUtc1);
+  const c2 = candles15m.find((c) => c.time === asiaOpenStartUtc2);
+  if (!c1 || !c2) return null;
 
-  // 当日 0:00-7:00 北京 之前的 K 线（16:00-22:59 UTC，共 7 根）
-  const prevTodayCandles = hourlyCandles.filter(
+  // 拼出 30min H/L
+  const asiaOpenHigh = Math.max(c1.high, c2.high);
+  const asiaOpenLow = Math.min(c1.low, c2.low);
+
+  // 当日 0:00-7:30 北京 之前的 15m K 线（每 15min 一根，共 30 根）
+  const prevTodayCandles = candles15m.filter(
     (c) => c.time >= prevTodayStartUtc && c.time < prevTodayEndUtc
   );
   if (prevTodayCandles.length === 0) return null;
@@ -87,13 +91,13 @@ export function computeAsiaBias(
 
   // 判定：Asia Open high 破前高 → long；不破 → short
   const direction: AsiaBiasDirection =
-    asiaCandle.high > prevTodayHigh ? "long" : "short";
+    asiaOpenHigh > prevTodayHigh ? "long" : "short";
 
   return {
     direction,
-    asiaOpenHigh: asiaCandle.high,
-    asiaOpenLow: asiaCandle.low,
-    asiaOpenTime: asiaCandle.time,
+    asiaOpenHigh,
+    asiaOpenLow,
+    asiaOpenTime: asiaOpenStartUtc1,
     prevTodayHigh,
     prevTodayLow,
     computedAt: nowMs,

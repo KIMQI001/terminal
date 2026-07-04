@@ -918,15 +918,16 @@ export function TradingChart() {
     };
   }, [symbol, setInitialBalance]);
 
-  // Asia Open Window Bias (7:30-8:00 北京)
+  // Asia Open Window Bias (7:30-8:00 北京) — 用 2 根 15m K-line 拼出
   useEffect(() => {
     let isCancelled = false;
 
     const calculateAsiaBias = async () => {
       try {
-        const hourlyData = await fetchKlines(symbol, '1h', 50).catch(() => []);
+        // 15m K-line: 200 根 = 50 小时 ≈ 2 天，覆盖 prev today 7.5h + buffer
+        const candles15m = await fetchKlines(symbol, '15m', 200).catch(() => []);
         if (isCancelled) return;
-        const bias = computeAsiaBias(hourlyData);
+        const bias = computeAsiaBias(candles15m);
         setAsiaBias(bias);
       } catch (error) {
         console.error('Failed to calculate Asia Bias:', error);
