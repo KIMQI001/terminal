@@ -2,13 +2,11 @@
  * Asia Open Window Bias — 亚洲开盘窗口方向
  *
  * 概念：
- * - 7:30-8:00 北京 (≈ 23:30-00:30 UTC 1h K 线) 是 Asia Session Open Window
- * - 如果这根 K 线的 high > 当日 0:00-7:30 北京 之前所有 K 线的最高价
+ * - 7:00-8:00 北京 (= 1h K-line at 23:00 UTC) 是 Asia Session Open Window
+ * - 用户原意是 7:30-8:00 这个 30min；用 1h K-line 近似（30min 误差可接受）
+ * - 如果这根 K 线的 high > 当日 0:00-7:00 北京 之前所有 K 线的最高价
  *   → 强势突破当日新高 → 看多
  * - 否则 → 看空
- *
- * 用 1h K 线近似（"7:30-8:30 北京" 这根 1h K 线），
- * 30min 误差可接受，与现有 IB 窗口（21:00-22:00 北京）逻辑一致。
  */
 
 import { Candle } from "@/types/chart";
@@ -17,25 +15,26 @@ export type AsiaBiasDirection = "long" | "short";
 
 export interface AsiaBiasData {
   direction: AsiaBiasDirection;
-  /** Asia Open Window 1h K 线的 high（用于看是否破前高） */
+  /** Asia Open Window 1h K 线的 high */
   asiaOpenHigh: number;
   /** Asia Open Window 1h K 线的 low */
   asiaOpenLow: number;
-  /** Asia Open Window K 线起始时间（UTC 秒） */
+  /** Asia Open Window K 线起始时间（UTC 秒，1h K-line 在整点） */
   asiaOpenTime: number;
-  /** 当日 0:00-7:30 北京 所有 K 线的最高 */
+  /** 当日 0:00-7:00 北京 所有 K 线的最高 */
   prevTodayHigh: number;
-  /** 当日 0:00-7:30 北京 所有 K 线的最低 */
+  /** 当日 0:00-7:00 北京 所有 K 线的最低 */
   prevTodayLow: number;
   /** 计算时间（毫秒） */
   computedAt: number;
 }
 
 /**
- * 把北京时间的日期转成当日 0:00 对应的 UTC 时间戳（秒）
+ * 把"现在"转成"当日北京 0:00"对应的 UTC 时间戳（秒）
+ *
+ * 0:00 北京 = 16:00 UTC of previous day
  */
 function beijingMidnightUtcSec(date: Date): number {
-  // "en-CA" 输出 YYYY-MM-DD
   const beijingDateStr = date.toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
   const [y, m, d] = beijingDateStr.split("-").map(Number);
   // Date.UTC(y, m-1, d) = y-m-d 00:00:00 UTC
@@ -60,25 +59,24 @@ export function computeAsiaBias(
   // 当日 0:00 北京 对应的 UTC 时间戳
   const beijingMidnightUtc = beijingMidnightUtcSec(now);
 
-  // Asia Open Window 起点：7:30 北京 = beijingMidnight + 7.5h
-  const asiaOpenStartUtc = beijingMidnightUtc + 7 * 3600 + 30 * 60; // 7.5h
-  const prevTodayStartUtc = beijingMidnightUtc; // 0:00 北京
-  const prevTodayEndUtc = asiaOpenStartUtc; // 7:30 北京（不含）
+  // Asia Open Window 起点（1h K-line 整点 UTC）
+  // 7:00-8:00 北京 = 1h K-line at 23:00 UTC（time 字段是 23:00:00）
+  // 起点：beijingMidnight + 7h
+  const asiaOpenStartUtc = beijingMidnightUtc + 7 * 3600; // 23:00 UTC of "today" (Beijing)
+  const prevTodayStartUtc = beijingMidnightUtc; // 0:00 北京 = 16:00 UTC
+  const prevTodayEndUtc = asiaOpenStartUtc; // 7:00 北京（不含）
 
-  // 当前时间还没到 8:00 北京 → Asia Open 窗口还没结束，K 线可能不完整
+  // 8:00 北京之前 → Asia Open 1h K 线还没结束
   const nowSec = Math.floor(nowMs / 1000);
   if (nowSec < asiaOpenStartUtc + 3600) {
-    // 8:00 北京之前的判断逻辑：
-    // 如果现在 >= 7:30 北京，已经能看到 1h K 线在形成（但不完全），暂不返回结果
-    // 等到 8:00 之后再返回
     return null;
   }
 
-  // 找 Asia Open 1h K 线（time === asiaOpenStartUtc）
+  // 找 Asia Open 1h K 线（time === 23:00 UTC）
   const asiaCandle = hourlyCandles.find((c) => c.time === asiaOpenStartUtc);
   if (!asiaCandle) return null;
 
-  // 当日 0:00-7:30 北京 之前的 K 线
+  // 当日 0:00-7:00 北京 之前的 K 线（16:00-22:59 UTC，共 7 根）
   const prevTodayCandles = hourlyCandles.filter(
     (c) => c.time >= prevTodayStartUtc && c.time < prevTodayEndUtc
   );
