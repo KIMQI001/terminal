@@ -1,11 +1,14 @@
 /**
  * Killzone Primitive for Lightweight Charts v4
  *
- * Draws vertical time-based regions for ICT Killzones:
- * - Asian Session: 20:00-00:00 UTC (8pm-12am)
- * - London Session: 02:00-05:00 UTC (2am-5am)
- * - NY AM: 12:00-15:00 UTC (12pm-3pm)
- * - NY PM: 18:00-21:00 UTC (6pm-9pm)
+ * Draws vertical time-based region for the CURRENT ICT session only:
+ * - Asian Session:  00:00-06:00 UTC (08:00-14:00 北京) — Tokyo
+ * - London Session: 07:00-12:00 UTC (15:00-20:00 北京) — London open to NY pre-open
+ * - NY AM Session: 12:00-15:00 UTC (20:00-23:00 北京) — NY morning
+ * - NY PM Session: 15:00-21:00 UTC (23:00-05:00 北京) — NY afternoon
+ *
+ * Only the session containing the current real time is drawn.
+ * 1h gap between Asian and London (14:00-15:00 北京) = no session.
  */
 
 import {
@@ -25,10 +28,10 @@ import { Killzone } from '@/types/indicator';
 
 // Default Killzones (times in UTC hours)
 const DEFAULT_KILLZONES: Killzone[] = [
-  { name: 'asian', startHour: 20, endHour: 24, color: 'rgba(147, 51, 234, 0.12)' }, // Purple - Asian Session
-  { name: 'london', startHour: 2, endHour: 5, color: 'rgba(59, 130, 246, 0.12)' }, // Blue - London Session
-  { name: 'ny-am', startHour: 12, endHour: 15, color: 'rgba(34, 197, 94, 0.12)' }, // Green - NY AM Session
-  { name: 'ny-pm', startHour: 18, endHour: 21, color: 'rgba(249, 115, 22, 0.12)' }, // Orange - NY PM Session
+  { name: 'asian', startHour: 0, endHour: 6, color: 'rgba(147, 51, 234, 0.12)' }, // Purple - Asian (Tokyo)
+  { name: 'london', startHour: 7, endHour: 12, color: 'rgba(59, 130, 246, 0.12)' }, // Blue - London
+  { name: 'ny-am', startHour: 12, endHour: 15, color: 'rgba(34, 197, 94, 0.12)' }, // Green - NY AM
+  { name: 'ny-pm', startHour: 15, endHour: 21, color: 'rgba(249, 115, 22, 0.12)' }, // Orange - NY PM
 ];
 
 interface KillzoneRendererData {
