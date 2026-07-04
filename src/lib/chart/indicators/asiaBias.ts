@@ -2,8 +2,8 @@
  * Asia Open Window Bias — 亚洲开盘窗口方向
  *
  * 概念：
- * - 7:30-8:00 北京 = 2 根 15m K-line（23:30 UTC + 23:45 UTC）
- * - 如果这 30min 的 high > 当日 0:00-7:30 北京 之前所有 K 线的最高价
+ * - 2 根 15m K-line（23:45 UTC + 00:00 UTC）覆盖 7:45-8:15 北京
+ * - 如果这 30min 的 high > 当日 0:00-7:45 北京 之前所有 K 线的最高价
  *   → 强势突破当日新高 → 看多
  * - 否则 → 看空
  *
@@ -22,9 +22,9 @@ export interface AsiaBiasData {
   asiaOpenLow: number;
   /** Asia Open Window 起始时间（UTC 秒） */
   asiaOpenTime: number;
-  /** 当日 0:00-7:30 北京 所有 K 线的最高 */
+  /** 当日 0:00-7:45 北京 所有 K 线的最高 */
   prevTodayHigh: number;
-  /** 当日 0:00-7:30 北京 所有 K 线的最低 */
+  /** 当日 0:00-7:45 北京 所有 K 线的最低 */
   prevTodayLow: number;
   /** 计算时间（毫秒） */
   computedAt: number;
@@ -57,15 +57,15 @@ export function computeAsiaBias(
   const now = new Date(nowMs);
   const beijingMidnightUtc = beijingMidnightUtcSec(now);
 
-  // Asia Open Window: 7:30-8:00 北京 = 2 根 15m K-line
-  //   - 7:30-7:45 北京 = 15m K-line at 23:30 UTC
-  //   - 7:45-8:00 北京 = 15m K-line at 23:45 UTC
-  const asiaOpenStartUtc1 = beijingMidnightUtc + 7 * 3600 + 30 * 60; // 23:30 UTC
-  const asiaOpenStartUtc2 = beijingMidnightUtc + 7 * 3600 + 45 * 60; // 23:45 UTC
+  // Asia Open Window: 7:45-8:15 北京 = 2 根 15m K-line
+  //   - 7:45-8:00 北京 = 15m K-line at 23:45 UTC（time 字段 = 23:45:00）
+  //   - 8:00-8:15 北京 = 15m K-line at 00:00 UTC（time 字段 = 00:00:00，次日）
+  const asiaOpenStartUtc1 = beijingMidnightUtc + 7 * 3600 + 45 * 60; // 23:45 UTC
+  const asiaOpenStartUtc2 = beijingMidnightUtc + 8 * 3600; // 00:00 UTC (次日的秒)
   const prevTodayStartUtc = beijingMidnightUtc; // 0:00 北京 = 16:00 UTC
-  const prevTodayEndUtc = asiaOpenStartUtc1; // 7:30 北京（不含）
+  const prevTodayEndUtc = asiaOpenStartUtc1; // 7:45 北京（不含）
 
-  // 8:00 北京之前 → 30min 窗口还没结束
+  // 8:15 北京之前 → 30min 窗口还没结束
   const nowSec = Math.floor(nowMs / 1000);
   if (nowSec < asiaOpenStartUtc2 + 15 * 60) {
     return null;
@@ -80,7 +80,7 @@ export function computeAsiaBias(
   const asiaOpenHigh = Math.max(c1.high, c2.high);
   const asiaOpenLow = Math.min(c1.low, c2.low);
 
-  // 当日 0:00-7:30 北京 之前的 15m K 线（每 15min 一根，共 30 根）
+  // 当日 0:00-7:45 北京 之前的 15m K 线（每 15min 一根，共 29 根）
   const prevTodayCandles = candles15m.filter(
     (c) => c.time >= prevTodayStartUtc && c.time < prevTodayEndUtc
   );
