@@ -36,6 +36,21 @@ function isSessionReady(readyHour: number, readyMinute: number = 0): boolean {
   return getBeijingTotalMinutes() >= readyHour * 60 + readyMinute;
 }
 
+type ActiveSession = 'AO' | 'EO' | 'AI';
+
+/**
+ * 当前北京时间应显示哪个 session 的 bias
+ *  - 0:00-5:00 / 22:00-24:00 → AI (NY session)
+ *  - 5:00-15:00                → AO (Asian session 前后)
+ *  - 15:00-22:00               → EO (Europe session 前后)
+ */
+function getActiveSession(): ActiveSession {
+  const min = getBeijingTotalMinutes();
+  if (min < 5 * 60 || min >= 22 * 60) return 'AI';
+  if (min < 15 * 60) return 'AO';
+  return 'EO';
+}
+
 function getConsensus(trend: Record<typeof TIMEFRAMES[number], TrendType>): Consensus {
   let bullish = 0;
   let bearish = 0;
@@ -114,12 +129,27 @@ export function MTFPanel() {
   // 整体 trend 用 consensus 决定（比简单多数更准）
   const overallTrend: TrendType = consensus.dir === 'neutral' ? 'neutral' : consensus.dir;
 
-  const consensusButtonClass = cn(
+  // 当前 session 的 bias 决定按钮灯颜色
+  // AI 的 "wait" 等同于 undefined（未就绪）
+  const activeSession = getActiveSession();
+  const activeBias: 'long' | 'short' | undefined = (() => {
+    if (activeSession === 'AO') return asiaBias?.direction;
+    if (activeSession === 'EO') return europeBias?.direction;
+    const aiDir = initialBalance?.direction;
+    return aiDir === 'wait' ? undefined : aiDir;
+  })();
+  const activeDotColor =
+    activeBias === 'long' ? 'bg-green-500' :
+    activeBias === 'short' ? 'bg-red-500' :
+    'bg-gray-400'; // null = WAIT
+
+  // 按钮边框：跟随 active session 方向 + 强度
+  // （active session 有数据时，按 strong/weak 染色；null 时灰）
+  const activeClass = cn(
     "px-2 h-7 text-xs gap-1",
-    consensus.strength === 'strong' && consensus.dir === 'bullish' && "border-green-600 text-green-700 font-bold",
-    consensus.strength === 'strong' && consensus.dir === 'bearish' && "border-red-600 text-red-700 font-bold",
-    consensus.strength === 'weak' && consensus.dir === 'bullish' && "border-green-400 text-green-500",
-    consensus.strength === 'weak' && consensus.dir === 'bearish' && "border-red-400 text-red-500"
+    activeBias === 'long' && "border-green-500 text-green-700",
+    activeBias === 'short' && "border-red-500 text-red-700",
+    !activeBias && "border-gray-300"
   );
 
   return (
@@ -128,9 +158,10 @@ export function MTFPanel() {
         variant="outline"
         size="sm"
         onClick={() => setIsExpanded(!isExpanded)}
-        className={consensusButtonClass}
+        className={activeClass}
+        title={`Current session: ${activeSession}`}
       >
-        <div className={cn("w-2 h-2 rounded-full", getTrendColor(overallTrend))} />
+        <div className={cn("w-2 h-2 rounded-full", activeDotColor)} />
         <span>MTF</span>
         <ChevronDown className={cn("w-3 h-3 transition-transform", isExpanded && "rotate-180")} />
       </Button>
