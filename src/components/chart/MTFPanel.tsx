@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,6 +21,20 @@ type Consensus = {
   strength: 'strong' | 'weak' | 'none';
   dir: TrendType;
 };
+
+/**
+ * 当前北京时间的"总分钟数"（0-1439）
+ * 用于判断某个 session 是否已经到 ready 时间
+ */
+function getBeijingTotalMinutes(): number {
+  const now = new Date();
+  const beijing = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
+  return beijing.getHours() * 60 + beijing.getMinutes();
+}
+
+function isSessionReady(readyHour: number, readyMinute: number = 0): boolean {
+  return getBeijingTotalMinutes() >= readyHour * 60 + readyMinute;
+}
 
 function getConsensus(trend: Record<typeof TIMEFRAMES[number], TrendType>): Consensus {
   let bullish = 0;
@@ -86,6 +100,13 @@ function getEuropeBiasColor(dir: EuropeBiasDirection | undefined) {
 
 export function MTFPanel() {
   const [isExpanded, setIsExpanded] = useState(false);
+  // 每 1 分钟 re-render，让 WAIT → 实际结果 在 session ready 时立即切换
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
+
   const { multiTimeframeTrend, multiTimeframeEquilibrium, initialBalance, asiaBias, europeBias } = useIndicatorStore();
 
   const consensus = getConsensus(multiTimeframeTrend);
@@ -188,10 +209,14 @@ export function MTFPanel() {
                 getAlwaysInColor(initialBalance?.direction)
               )}
             >
-              {initialBalance ? getAlwaysInLabel(initialBalance.direction) : '—'}
+              {!isSessionReady(22, 0)
+                ? 'WAIT'
+                : initialBalance
+                  ? getAlwaysInLabel(initialBalance.direction)
+                  : '—'}
             </span>
           </div>
-          {initialBalance && (
+          {initialBalance && isSessionReady(22, 0) && (
             <div className="text-[9px] text-gray-400 px-1 font-mono">
               IB {Math.round(initialBalance.ibLow)}–{Math.round(initialBalance.ibHigh)} · PD {Math.round(initialBalance.pdl)}–{Math.round(initialBalance.pdh)}
             </div>
@@ -206,11 +231,13 @@ export function MTFPanel() {
                 getAsiaBiasColor(asiaBias?.direction)
               )}
             >
-              {asiaBias
-                ? (asiaBias.direction === 'long' ? 'ASIA LONG' : 'ASIA SHORT')
-                : '—'}
+              {!isSessionReady(8, 15)
+                ? 'WAIT'
+                : asiaBias
+                  ? (asiaBias.direction === 'long' ? 'ASIA LONG' : 'ASIA SHORT')
+                  : '—'}
             </span>
-            {asiaBias && (
+            {asiaBias && isSessionReady(8, 15) && (
               <span
                 className={cn(
                   "text-[9px] font-semibold",
@@ -221,7 +248,7 @@ export function MTFPanel() {
               </span>
             )}
           </div>
-          {asiaBias && (
+          {asiaBias && isSessionReady(8, 15) && (
             <div className="text-[9px] text-gray-400 px-1 font-mono">
               AO {Math.round(asiaBias.asiaOpenLow)}–{Math.round(asiaBias.asiaOpenHigh)} · R {Math.round(asiaBias.rangeLow)}–{Math.round(asiaBias.rangeHigh)} (EQ {Math.round(asiaBias.rangeEQ)})
             </div>
@@ -236,11 +263,13 @@ export function MTFPanel() {
                 getEuropeBiasColor(europeBias?.direction)
               )}
             >
-              {europeBias
-                ? (europeBias.direction === 'long' ? 'EU LONG' : 'EU SHORT')
-                : '—'}
+              {!isSessionReady(16, 0)
+                ? 'WAIT'
+                : europeBias
+                  ? (europeBias.direction === 'long' ? 'EU LONG' : 'EU SHORT')
+                  : '—'}
             </span>
-            {europeBias && (
+            {europeBias && isSessionReady(16, 0) && (
               <span
                 className={cn(
                   "text-[9px] font-semibold",
@@ -251,7 +280,7 @@ export function MTFPanel() {
               </span>
             )}
           </div>
-          {europeBias && (
+          {europeBias && isSessionReady(16, 0) && (
             <div className="text-[9px] text-gray-400 px-1 font-mono">
               EO {Math.round(europeBias.europeOpenLow)}–{Math.round(europeBias.europeOpenHigh)} · R {Math.round(europeBias.rangeLow)}–{Math.round(europeBias.rangeHigh)} (EQ {Math.round(europeBias.rangeEQ)})
             </div>
