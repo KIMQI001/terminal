@@ -10,6 +10,7 @@ import {
 } from "@/stores/indicatorStore";
 import { ZoneSide } from "@/lib/chart/indicators/equilibrium";
 import { AlwaysInDirection } from "@/lib/chart/indicators/initialBalance";
+import { AsiaBiasDirection } from "@/lib/chart/indicators/asiaBias";
 import { cn } from "@/lib/utils";
 
 const TIMEFRAMES = ['1d', '4h', '1h', '15m', '5m'] as const;
@@ -70,9 +71,15 @@ function getAlwaysInColor(dir: AlwaysInDirection | undefined) {
   return 'text-gray-500';
 }
 
+function getAsiaBiasColor(dir: AsiaBiasDirection | undefined) {
+  if (dir === 'long') return 'text-green-700';
+  if (dir === 'short') return 'text-red-700';
+  return 'text-gray-500';
+}
+
 export function MTFPanel() {
   const [isExpanded, setIsExpanded] = useState(false);
-  const { multiTimeframeTrend, multiTimeframeEquilibrium, initialBalance } = useIndicatorStore();
+  const { multiTimeframeTrend, multiTimeframeEquilibrium, initialBalance, asiaBias } = useIndicatorStore();
 
   const consensus = getConsensus(multiTimeframeTrend);
 
@@ -180,6 +187,26 @@ export function MTFPanel() {
           {initialBalance && (
             <div className="text-[9px] text-gray-400 px-1 font-mono">
               IB {Math.round(initialBalance.ibLow)}–{Math.round(initialBalance.ibHigh)} · PD {Math.round(initialBalance.pdl)}–{Math.round(initialBalance.pdh)}
+            </div>
+          )}
+
+          {/* Asia Open Window Bias (7:30-8:00 北京 vs 当日 0-7:30 H/L) 行 */}
+          <div className="mt-1 flex items-center gap-2 px-1">
+            <span className="text-[10px] text-gray-500 font-medium">Asia Open</span>
+            <span
+              className={cn(
+                "text-[10px] font-bold ml-auto",
+                getAsiaBiasColor(asiaBias?.direction)
+              )}
+            >
+              {asiaBias
+                ? (asiaBias.direction === 'long' ? 'ASIA LONG' : 'ASIA SHORT')
+                : '—'}
+            </span>
+          </div>
+          {asiaBias && (
+            <div className="text-[9px] text-gray-400 px-1 font-mono">
+              AO {Math.round(asiaBias.asiaOpenLow)}–{Math.round(asiaBias.asiaOpenHigh)} · prev {Math.round(asiaBias.prevTodayLow)}–{Math.round(asiaBias.prevTodayHigh)}
             </div>
           )}
         </div>

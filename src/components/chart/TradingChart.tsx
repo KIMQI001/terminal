@@ -49,6 +49,7 @@ import { detectBreakerBlocks } from "@/lib/chart/indicators/breakerBlocks";
 import { detectInducements } from "@/lib/chart/indicators/inducement";
 import { detectEquilibriumZones } from "@/lib/chart/indicators/equilibrium";
 import { computeInitialBalance } from "@/lib/chart/indicators/initialBalance";
+import { computeAsiaBias } from "@/lib/chart/indicators/asiaBias";
 
 export function TradingChart() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -122,6 +123,7 @@ export function TradingChart() {
     setMultiTimeframeTrend,
     setMultiTimeframeEquilibrium,
     setInitialBalance,
+    setAsiaBias,
   } = useIndicatorStore();
 
   const {
@@ -915,6 +917,32 @@ export function TradingChart() {
       clearInterval(interval);
     };
   }, [symbol, setInitialBalance]);
+
+  // Asia Open Window Bias (7:30-8:00 北京)
+  useEffect(() => {
+    let isCancelled = false;
+
+    const calculateAsiaBias = async () => {
+      try {
+        const hourlyData = await fetchKlines(symbol, '1h', 50).catch(() => []);
+        if (isCancelled) return;
+        const bias = computeAsiaBias(hourlyData);
+        setAsiaBias(bias);
+      } catch (error) {
+        console.error('Failed to calculate Asia Bias:', error);
+        if (!isCancelled) setAsiaBias(null);
+      }
+    };
+
+    calculateAsiaBias();
+    // 30 分钟刷新一次（8:00 北京前后是关键时间窗）
+    const interval = setInterval(calculateAsiaBias, 30 * 60 * 1000);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
+  }, [symbol, setAsiaBias]);
 
   // Update ICT Primitives with data
   useEffect(() => {

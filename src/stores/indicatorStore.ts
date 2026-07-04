@@ -8,6 +8,7 @@ import { MissedPivot, GhostLevel } from "@/lib/chart/indicators/swingPoints";
 import { EngulfingPinbar } from "@/lib/chart/indicators/engulfingPinbar";
 import { EquilibriumLevel, ZoneSide } from "@/lib/chart/indicators/equilibrium";
 import { InitialBalanceData } from "@/lib/chart/indicators/initialBalance";
+import { AsiaBiasData } from "@/lib/chart/indicators/asiaBias";
 
 // 多周期 OTE 类型
 interface MultiTimeframeOTE {
@@ -89,6 +90,7 @@ interface IndicatorStoreState {
   multiTimeframeTrend: MultiTimeframeTrend;
   multiTimeframeEquilibrium: MultiTimeframeEquilibrium;
   initialBalance: InitialBalanceData | null;
+  asiaBias: AsiaBiasData | null;
 
   toggleIndicator: (key: keyof IndicatorState) => void;
   setSwingPoints: (points: SwingPoint[]) => void;
@@ -113,6 +115,7 @@ interface IndicatorStoreState {
     entry: MultiTimeframeEquilibriumEntry | null
   ) => void;
   setInitialBalance: (data: InitialBalanceData | null) => void;
+  setAsiaBias: (data: AsiaBiasData | null) => void;
   clearAll: () => void;
 }
 
@@ -183,6 +186,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
     '1w': null,
   },
   initialBalance: null,
+  asiaBias: null,
 
   toggleIndicator: (key) =>
     set((state) => ({
@@ -241,6 +245,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
       },
     })),
   setInitialBalance: (data) => set({ initialBalance: data }),
+  setAsiaBias: (data) => set({ asiaBias: data }),
   clearAll: () =>
     set({
       swingPoints: [],
