@@ -130,7 +130,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
     bos: false,
     choch: false,
     liquidityZones: false,
-    killzones: false,
+    killzones: true,
     ote: true,
     breakerBlocks: false,
     inducement: false,

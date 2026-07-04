@@ -69,21 +69,8 @@ class EquilibriumPaneRenderer implements ISeriesPrimitivePaneRenderer {
         const premiumAlpha = (currentInPremium ? 0.10 : 0.05) * baseAlpha;
         const discountAlpha = (currentInDiscount ? 0.10 : 0.05) * baseAlpha;
 
-        // 上半区 = Premium（淡红）
-        const premiumTop = Math.min(yEq, yHigh);
-        const premiumHeight = Math.abs(yHigh - yEq);
-        if (premiumHeight > 0) {
-          ctx.fillStyle = `rgba(239, 68, 68, ${premiumAlpha})`;
-          ctx.fillRect(startX, premiumTop, width, premiumHeight);
-        }
-
-        // 下半区 = Discount（淡绿）
-        const discountTop = Math.min(yEq, yLow);
-        const discountHeight = Math.abs(yEq - yLow);
-        if (discountHeight > 0) {
-          ctx.fillStyle = `rgba(34, 197, 94, ${discountAlpha})`;
-          ctx.fillRect(startX, discountTop, width, discountHeight);
-        }
+        // 注：Premium/Discount 区域背景已关闭（用户反馈参考价值低）
+        // 只保留 EQ 中线 + 标签
 
         // EQ 中线（金色虚线）
         const eqLineAlpha = isPrimary ? 0.7 : 0.35;
