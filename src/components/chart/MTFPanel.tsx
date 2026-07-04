@@ -313,7 +313,7 @@ export function MTFPanel() {
           </div>
           {europeBias && isSessionReady(16, 0) && (
             <div className="text-[9px] text-gray-400 px-1 font-mono">
-              EO {Math.round(europeBias.europeOpenLow)}–{Math.round(europeBias.europeOpenHigh)} · R {Math.round(europeBias.rangeLow)}–{Math.round(europeBias.rangeHigh)} (EQ {Math.round(europeBias.rangeEQ)})
+              EO {Math.round(europeBias.europeOpenLow)}–{Math.round(europeBias.europeOpenHigh)} · Asia {Math.round(europeBias.asiaLow)}–{Math.round(europeBias.asiaHigh)} (EQ {Math.round(europeBias.asiaEQ)})
             </div>
           )}
         </div>

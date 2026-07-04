@@ -1,13 +1,17 @@
 /**
  * Europe Open Window Bias — Premium/Discount 判定
  *
- * 算法（与 Asia Open 完全对称）：
- * 1. 范围 = 当日 0:00 北京 到 15:30 北京 的 K 线（EO 窗口前）
- * 2. 算 range H, L, EQ
- * 3. 判定当前价（EO 第 2 根 K 线 close）在 Premium 还是 Discount
- * 4. 应用规则：
- *    - Premium: EO H 破 range H → LONG，否则 SHORT
- *    - Discount: EO L 破 range L → SHORT，否则 LONG
+ * 改用 Asia 时段（8:00-14:00 北京）的 H/L 作为参考：
+ *
+ * 1. Asia Zone = 8:00-14:00 北京 = 00:00-06:00 UTC of "today" (Beijing)
+ *    - asiaHigh, asiaLow, asiaEQ = 范围内的 H/L/中点
+ * 2. EO 2 根 15m K-line (15:30-16:00 北京) close 决定当前价位置
+ * 3. 应用规则：
+ *    - Premium (close >= asiaEQ): EO H 破 asia H → LONG，否则 SHORT
+ *    - Discount (close < asiaEQ): EO L 破 asia L → SHORT，否则 LONG
+ *
+ * 不用 0:00-15:30 全日范围的原因：全日范围夹杂 pre-Asian 和 gap，
+ * 用 Asia session 的 H/L 更聚焦、Premium/Discount 概念更有意义。
  */
 
 import { Candle } from "@/types/chart";
@@ -22,15 +26,15 @@ export interface EuropeBiasData {
   europeOpenLow: number;
   /** EO 起始时间（UTC 秒） */
   europeOpenTime: number;
-  /** 当日 0:00-15:30 北京 范围 H */
-  rangeHigh: number;
-  /** 当日 0:00-15:30 北京 范围 L */
-  rangeLow: number;
-  /** 范围 EQ = (rangeHigh + rangeLow) / 2 */
-  rangeEQ: number;
+  /** Asia Zone 范围 H (8:00-14:00 北京) */
+  asiaHigh: number;
+  /** Asia Zone 范围 L */
+  asiaLow: number;
+  /** Asia Zone 范围 EQ = (asiaHigh + asiaLow) / 2 */
+  asiaEQ: number;
   /** EO 第 2 根 K 线的 close */
   currentPrice: number;
-  /** currentPrice >= rangeEQ */
+  /** currentPrice >= asiaEQ */
   inPremium: boolean;
   /** 计算时间（毫秒） */
   computedAt: number;
@@ -51,13 +55,13 @@ export function computeEuropeBias(
   const now = new Date(nowMs);
   const beijingMidnightUtc = beijingMidnightUtcSec(now);
 
-  // 范围 = 0:00-15:30 北京
-  const rangeStartUtc = beijingMidnightUtc;
-  const rangeEndUtc = beijingMidnightUtc + 15 * 3600 + 30 * 60; // 15:30 北京
+  // Asia Zone: 8:00-14:00 北京 = 00:00-06:00 UTC of "today" (Beijing)
+  const asiaStartUtc = beijingMidnightUtc; // 0:00 UTC (= 8:00 北京)
+  const asiaEndUtc = beijingMidnightUtc + 6 * 3600; // 6:00 UTC (= 14:00 北京)
 
-  // EO 2 根 15m K-line: 15:30-15:45 + 15:45-16:00
-  const eoStart1Utc = rangeEndUtc; // 15:30 北京 = 7:30 UTC
-  const eoStart2Utc = rangeEndUtc + 15 * 60; // 15:45 北京 = 7:45 UTC
+  // EO 2 根 15m K-line: 15:30-15:45 + 15:45-16:00 北京
+  const eoStart1Utc = beijingMidnightUtc + 7 * 3600 + 30 * 60; // 7:30 UTC = 15:30 北京
+  const eoStart2Utc = beijingMidnightUtc + 7 * 3600 + 45 * 60; // 7:45 UTC = 15:45 北京
 
   // 16:00 北京之前 → EO 窗口未完成
   const nowSec = Math.floor(nowMs / 1000);
@@ -74,26 +78,26 @@ export function computeEuropeBias(
   const europeOpenLow = Math.min(c1.low, c2.low);
   const currentPrice = c2.close;
 
-  // 范围 K 线（0:00-15:30 北京）
-  const rangeCandles = candles15m.filter(
-    (c) => c.time >= rangeStartUtc && c.time < rangeEndUtc
+  // Asia Zone K 线（8:00-14:00 北京 = 00:00-06:00 UTC）
+  const asiaCandles = candles15m.filter(
+    (c) => c.time >= asiaStartUtc && c.time < asiaEndUtc
   );
-  if (rangeCandles.length === 0) return null;
+  if (asiaCandles.length === 0) return null;
 
-  const rangeHigh = Math.max(...rangeCandles.map((c) => c.high));
-  const rangeLow = Math.min(...rangeCandles.map((c) => c.low));
-  const rangeEQ = (rangeHigh + rangeLow) / 2;
+  const asiaHigh = Math.max(...asiaCandles.map((c) => c.high));
+  const asiaLow = Math.min(...asiaCandles.map((c) => c.low));
+  const asiaEQ = (asiaHigh + asiaLow) / 2;
 
   // 判定
-  const inPremium = currentPrice >= rangeEQ;
+  const inPremium = currentPrice >= asiaEQ;
   let direction: EuropeBiasDirection;
 
   if (inPremium) {
-    // Premium: 期望 EO 向上破 H；破 = LONG，未破 = SHORT
-    direction = europeOpenHigh > rangeHigh ? "long" : "short";
+    // Premium: 期望 EO 向上破 Asia H；破 = LONG，未破 = SHORT
+    direction = europeOpenHigh > asiaHigh ? "long" : "short";
   } else {
-    // Discount: 期望 EO 向下破 L；破 = SHORT，未破 = LONG
-    direction = europeOpenLow < rangeLow ? "short" : "long";
+    // Discount: 期望 EO 向下破 Asia L；破 = SHORT，未破 = LONG
+    direction = europeOpenLow < asiaLow ? "short" : "long";
   }
 
   return {
@@ -101,9 +105,9 @@ export function computeEuropeBias(
     europeOpenHigh,
     europeOpenLow,
     europeOpenTime: eoStart1Utc,
-    rangeHigh,
-    rangeLow,
-    rangeEQ,
+    asiaHigh,
+    asiaLow,
+    asiaEQ,
     currentPrice,
     inPremium,
     computedAt: nowMs,
