@@ -50,6 +50,7 @@ import { detectInducements } from "@/lib/chart/indicators/inducement";
 import { detectEquilibriumZones } from "@/lib/chart/indicators/equilibrium";
 import { computeInitialBalance } from "@/lib/chart/indicators/initialBalance";
 import { computeAsiaBias } from "@/lib/chart/indicators/asiaBias";
+import { computeEuropeBias } from "@/lib/chart/indicators/europeBias";
 
 export function TradingChart() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -124,6 +125,7 @@ export function TradingChart() {
     setMultiTimeframeEquilibrium,
     setInitialBalance,
     setAsiaBias,
+    setEuropeBias,
   } = useIndicatorStore();
 
   const {
@@ -929,21 +931,27 @@ export function TradingChart() {
         if (isCancelled) return;
         const bias = computeAsiaBias(candles15m);
         setAsiaBias(bias);
+        // Europe Bias 依赖 Asia Bias，一起算
+        const europe = computeEuropeBias(candles15m, bias);
+        setEuropeBias(europe);
       } catch (error) {
         console.error('Failed to calculate Asia Bias:', error);
-        if (!isCancelled) setAsiaBias(null);
+        if (!isCancelled) {
+          setAsiaBias(null);
+          setEuropeBias(null);
+        }
       }
     };
 
     calculateAsiaBias();
-    // 30 分钟刷新一次（8:00 北京前后是关键时间窗）
+    // 30 分钟刷新一次（8:00 / 16:00 北京前后是关键时间窗）
     const interval = setInterval(calculateAsiaBias, 30 * 60 * 1000);
 
     return () => {
       isCancelled = true;
       clearInterval(interval);
     };
-  }, [symbol, setAsiaBias]);
+  }, [symbol, setAsiaBias, setEuropeBias]);
 
   // Update ICT Primitives with data
   useEffect(() => {

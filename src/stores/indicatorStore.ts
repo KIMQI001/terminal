@@ -9,6 +9,7 @@ import { EngulfingPinbar } from "@/lib/chart/indicators/engulfingPinbar";
 import { EquilibriumLevel, ZoneSide } from "@/lib/chart/indicators/equilibrium";
 import { InitialBalanceData } from "@/lib/chart/indicators/initialBalance";
 import { AsiaBiasData } from "@/lib/chart/indicators/asiaBias";
+import { EuropeBiasData } from "@/lib/chart/indicators/europeBias";
 
 // 多周期 OTE 类型
 interface MultiTimeframeOTE {
@@ -91,6 +92,7 @@ interface IndicatorStoreState {
   multiTimeframeEquilibrium: MultiTimeframeEquilibrium;
   initialBalance: InitialBalanceData | null;
   asiaBias: AsiaBiasData | null;
+  europeBias: EuropeBiasData | null;
 
   toggleIndicator: (key: keyof IndicatorState) => void;
   setSwingPoints: (points: SwingPoint[]) => void;
@@ -116,6 +118,7 @@ interface IndicatorStoreState {
   ) => void;
   setInitialBalance: (data: InitialBalanceData | null) => void;
   setAsiaBias: (data: AsiaBiasData | null) => void;
+  setEuropeBias: (data: EuropeBiasData | null) => void;
   clearAll: () => void;
 }
 
@@ -187,6 +190,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
   },
   initialBalance: null,
   asiaBias: null,
+  europeBias: null,
 
   toggleIndicator: (key) =>
     set((state) => ({
@@ -246,6 +250,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
     })),
   setInitialBalance: (data) => set({ initialBalance: data }),
   setAsiaBias: (data) => set({ asiaBias: data }),
+  setEuropeBias: (data) => set({ europeBias: data }),
   clearAll: () =>
     set({
       swingPoints: [],
