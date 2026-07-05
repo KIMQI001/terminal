@@ -123,7 +123,7 @@ export async function fetchTowerBlocks(symbol: string): Promise<TowerBlocksResul
             timeframe: tf,
             high: ote.type === 'bullish' ? ote.fib618 : ote.fib786,
             low: ote.type === 'bullish' ? ote.fib786 : ote.fib618,
-            entry: ote.fib675,
+            entry: ote.fib618,
             fillPercent,
           });
         }
