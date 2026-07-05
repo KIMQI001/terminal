@@ -76,7 +76,6 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
       firstVisibleTime,
       lastVisibleTime,
       chartHeight,
-      chartWidth,
       candleInterval,
       logicalToCoordinate,
       visibleRange,
@@ -90,24 +89,10 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
 
     const { kz, startSec, endSec } = session;
 
+    // session 在可见范围之外则不画（避免突兀的边缘指示）
+    if (endSec < firstVisibleTime || startSec > lastVisibleTime) return;
+
     target.useMediaCoordinateSpace(({ context: ctx }) => {
-      // case 1: session 完全在可见范围之前（用户看了太早的历史）→ 右边缘画 100px 指示
-      if (endSec < firstVisibleTime) {
-        const rightEdgeX = chartWidth;
-        ctx.fillStyle = kz.color;
-        ctx.fillRect(rightEdgeX - 100, 0, 100, chartHeight);
-        return;
-      }
-
-      // case 2: session 完全在可见范围之后（用户看不到 session 起点）→ 右边缘画 100px 指示
-      if (startSec > lastVisibleTime) {
-        const rightEdgeX = chartWidth;
-        ctx.fillStyle = kz.color;
-        ctx.fillRect(rightEdgeX - 100, 0, 100, chartHeight);
-        return;
-      }
-
-      // case 3: session 在可见范围内 → 正常画
       const startLogical = Math.max(
         (startSec - firstVisibleTime) / candleInterval + visibleRange.from,
         visibleRange.from
