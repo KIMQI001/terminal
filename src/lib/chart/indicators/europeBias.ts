@@ -55,9 +55,11 @@ export function computeEuropeBias(
   const now = new Date(nowMs);
   const beijingMidnightUtc = beijingMidnightUtcSec(now);
 
-  // Asia Zone: 8:00-14:00 北京 = 00:00-06:00 UTC of "today" (Beijing)
-  const asiaStartUtc = beijingMidnightUtc; // 0:00 UTC (= 8:00 北京)
-  const asiaEndUtc = beijingMidnightUtc + 6 * 3600; // 6:00 UTC (= 14:00 北京)
+  // Asia Zone: 8:00-14:00 北京 = 0:00-6:00 UTC of "today" (Beijing)
+  // beijingMidnightUtc = 0:00 北京 = 16:00 UTC 前一天
+  // 0:00 UTC 当天 = 8:00 北京 = beijingMidnightUtc + 8h
+  const asiaStartUtc = beijingMidnightUtc + 8 * 3600;  // 8:00 北京
+  const asiaEndUtc   = beijingMidnightUtc + 14 * 3600; // 14:00 北京
 
   // EO 2 根 15m K-line: 15:30-15:45 + 15:45-16:00 北京
   const eoStart1Utc = beijingMidnightUtc + 7 * 3600 + 30 * 60; // 7:30 UTC = 15:30 北京
