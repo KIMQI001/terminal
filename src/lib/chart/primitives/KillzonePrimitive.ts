@@ -28,10 +28,10 @@ import { Killzone } from '@/types/indicator';
 
 // Default Killzones (times in UTC hours)
 const DEFAULT_KILLZONES: Killzone[] = [
-  { name: 'asian', startHour: 0, endHour: 6, color: 'rgba(147, 51, 234, 0.12)' }, // Purple - Asian (Tokyo)
-  { name: 'london', startHour: 7, endHour: 12, color: 'rgba(59, 130, 246, 0.12)' }, // Blue - London
-  { name: 'ny-am', startHour: 12, endHour: 15, color: 'rgba(34, 197, 94, 0.12)' }, // Green - NY AM
-  { name: 'ny-pm', startHour: 15, endHour: 21, color: 'rgba(249, 115, 22, 0.12)' }, // Orange - NY PM
+  { name: 'asian', startHour: 0, endHour: 6, color: 'rgba(147, 51, 234, 0.18)' }, // Purple - Asian (Tokyo)
+  { name: 'london', startHour: 7, endHour: 12, color: 'rgba(59, 130, 246, 0.18)' }, // Blue - London
+  { name: 'ny-am', startHour: 12, endHour: 15, color: 'rgba(34, 197, 94, 0.18)' }, // Green - NY AM
+  { name: 'ny-pm', startHour: 15, endHour: 21, color: 'rgba(249, 115, 22, 0.18)' }, // Orange - NY PM
 ];
 
 interface KillzoneRendererData {
@@ -84,12 +84,21 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
     // 只画当前 session，不画全部
     const nowSec = Math.floor(Date.now() / 1000);
     const session = this.getCurrentSession(nowSec);
-    if (!session) return; // 当前不在任何 session，不画
+
+    if (!session) {
+      // 当前不在任何 session（如 gap 14:00-15:00 北京）— 不画
+      return;
+    }
 
     const { kz, startSec, endSec } = session;
 
     // 不可见则不画
-    if (endSec < firstVisibleTime || startSec > lastVisibleTime) return;
+    if (endSec < firstVisibleTime || startSec > lastVisibleTime) {
+      console.log(`[Killzone] ${kz.name} ${new Date(startSec*1000).toISOString()}-${new Date(endSec*1000).toISOString()} not in visible range`);
+      return;
+    }
+
+    console.log(`[Killzone] drawing ${kz.name} ${new Date(startSec*1000).toISOString()}-${new Date(endSec*1000).toISOString()}`);
 
     target.useMediaCoordinateSpace(({ context: ctx }) => {
       const startLogical = (startSec - firstVisibleTime) / candleInterval + visibleRange.from;
@@ -98,13 +107,20 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
       const x1 = logicalToCoordinate(startLogical as Logical);
       const x2 = logicalToCoordinate(endLogical as Logical);
 
-      if (x1 === null || x2 === null) return;
+      if (x1 === null || x2 === null) {
+        console.log(`[Killzone] coordinate conversion failed: x1=${x1} x2=${x2}`);
+        return;
+      }
 
       const width = Math.abs(x2 - x1);
-      if (width <= 0) return;
+      if (width <= 0) {
+        console.log(`[Killzone] width <= 0: ${width}`);
+        return;
+      }
 
       ctx.fillStyle = kz.color;
       ctx.fillRect(Math.min(x1, x2), 0, width, chartHeight);
+      console.log(`[Killzone] drawn: x=${Math.min(x1, x2)} width=${width} color=${kz.color}`);
     });
   }
 
