@@ -121,7 +121,6 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
       const eqPrice = (high + low) / 2;
       const yEq = priceToCoordinate(eqPrice);
       if (yEq !== null) {
-        // 用更深一点的 session 色（背景 + 50% alpha）做虚线
         const lineColor = kz.color.replace(/[\d.]+\)$/, '0.55)');
         ctx.strokeStyle = lineColor;
         ctx.lineWidth = 1;
@@ -131,17 +130,6 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
         ctx.lineTo(xDrawEnd, yEq);
         ctx.stroke();
         ctx.setLineDash([]);
-
-        // EQ 价格标签（右边）
-        ctx.font = 'bold 9px monospace';
-        ctx.fillStyle = lineColor;
-        const eqText = `EQ ${eqPrice.toFixed(2)}`;
-        const textWidth = ctx.measureText(eqText).width;
-        const labelX = xDrawEnd - textWidth - 6;
-        const labelY = yEq - 3;
-        ctx.fillRect(labelX - 3, labelY - 9, textWidth + 6, 12);
-        ctx.fillStyle = '#1a1a1a';
-        ctx.fillText(eqText, labelX, labelY);
       }
     });
   }
