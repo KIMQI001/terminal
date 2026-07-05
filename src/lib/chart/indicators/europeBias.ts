@@ -61,9 +61,9 @@ export function computeEuropeBias(
   const asiaStartUtc = beijingMidnightUtc + 8 * 3600;  // 8:00 北京
   const asiaEndUtc   = beijingMidnightUtc + 14 * 3600; // 14:00 北京
 
-  // EO 2 根 15m K-line: 15:30-15:45 + 15:45-16:00 北京
-  const eoStart1Utc = beijingMidnightUtc + 7 * 3600 + 30 * 60; // 7:30 UTC = 15:30 北京
-  const eoStart2Utc = beijingMidnightUtc + 7 * 3600 + 45 * 60; // 7:45 UTC = 15:45 北京
+  // EO 2 根 15m K-line: 15:45-16:00 + 16:00-16:15 北京
+  const eoStart1Utc = beijingMidnightUtc + 7 * 3600 + 45 * 60; // 7:45 UTC = 15:45 北京
+  const eoStart2Utc = beijingMidnightUtc + 8 * 3600;            // 8:00 UTC = 16:00 北京
 
   // 16:00 北京之前 → EO 窗口未完成
   const nowSec = Math.floor(nowMs / 1000);
