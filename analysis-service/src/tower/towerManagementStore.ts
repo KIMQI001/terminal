@@ -16,7 +16,8 @@ export interface TowerManagementConfig {
   exchange: ExchangeType;        // 交易所 (binance/aster)
   isActive: boolean;             // 是否启用
   intervalMinutes: number;       // 托管间隔（分钟）
-  baseMargin: number;            // 基础保证金
+  baseMargin: number;            // 基础保证金（USD 固定金额，marginPercent=0 时用）
+  marginPercent: number;          // 账户百分比保证金（0/10/25/33），>0 时按 balance 算
   marginIncrement: number;       // 保证金递增
   towerLayers: number;           // 塔层数
   bullishStartLayer: number;     // 多塔起始层
@@ -58,6 +59,7 @@ interface ManagementRow {
   is_active: number;
   interval_minutes: number;
   base_margin: number;
+  margin_percent: number;
   margin_increment: number;
   tower_layers: number;
   bullish_start_layer: number;
@@ -187,6 +189,12 @@ export function initTowerManagementTables(): void {
     console.log('[TowerManagement] 添加 bias_filter 字段');
   } catch { /* 列已存在 */ }
 
+  // 迁移：添加 margin_percent 字段
+  try {
+    db.exec(`ALTER TABLE tower_management ADD COLUMN margin_percent INTEGER NOT NULL DEFAULT 0`);
+    console.log('[TowerManagement] 添加 margin_percent 字段');
+  } catch { /* 列已存在 */ }
+
   console.log('[TowerManagement] 表初始化完成');
 }
 
@@ -239,6 +247,7 @@ export function upsertManagement(config: {
   bearishHighFilter?: number;
   useHLPDFilter?: boolean;
   biasFilter?: number;
+  marginPercent?: number;
   monitorTimeframe?: string;
 }): TowerManagementConfig {
   const exchange = config.exchange || 'binance';
@@ -262,6 +271,7 @@ export function upsertManagement(config: {
         is_active = ?,
         interval_minutes = ?,
         base_margin = ?,
+        margin_percent = ?,
         margin_increment = ?,
         tower_layers = ?,
         bullish_start_layer = ?,
@@ -283,6 +293,7 @@ export function upsertManagement(config: {
       config.isActive ? 1 : 0,
       config.intervalMinutes,
       config.baseMargin,
+      config.marginPercent ?? 0,
       config.marginIncrement,
       config.towerLayers,
       config.bullishStartLayer,
@@ -307,7 +318,7 @@ export function upsertManagement(config: {
     // 创建
     db.prepare(`
       INSERT INTO tower_management (
-        user_id, symbol, exchange, is_active, interval_minutes, base_margin, margin_increment,
+        user_id, symbol, exchange, is_active, interval_minutes, base_margin, margin_percent, margin_increment,
         tower_layers, bullish_start_layer, bearish_start_layer, min_spacing_ratio, min_entry_distance,
         trailing_activation_ratio, trailing_callback_rate, bullish_low_filter, bearish_high_filter,
         use_hlpd_filter, bias_filter, monitor_timeframe, next_run_at, created_at, updated_at
@@ -319,6 +330,7 @@ export function upsertManagement(config: {
       config.isActive ? 1 : 0,
       config.intervalMinutes,
       config.baseMargin,
+      config.marginPercent ?? 0,
       config.marginIncrement,
       config.towerLayers,
       config.bullishStartLayer,
@@ -536,6 +548,7 @@ function rowToConfig(row: ManagementRow): TowerManagementConfig {
     isActive: row.is_active === 1,
     intervalMinutes: row.interval_minutes,
     baseMargin: row.base_margin,
+    marginPercent: (row as any).margin_percent ?? 0,
     marginIncrement: row.margin_increment,
     towerLayers: row.tower_layers,
     bullishStartLayer: row.bullish_start_layer,

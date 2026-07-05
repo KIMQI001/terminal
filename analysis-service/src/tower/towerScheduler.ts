@@ -401,21 +401,38 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     // 5. 获取杠杆
     const leverage = await getLeverage(exchange, exchangeConfig, management.symbol);
 
-    // 6. 处理自动模式：如果 baseMargin 为 0，则使用账户余额/10
+    // 6. 计算 effectiveBaseMargin
+    // 优先级：marginPercent > 0 → balance × percent/100
+    //          baseMargin > 0 → 固定 USD
+    //          都为 0 → 报错（不挂单）
     let effectiveBaseMargin = management.baseMargin;
-    if (effectiveBaseMargin === 0) {
+    if (management.marginPercent && management.marginPercent > 0) {
       const balanceResult = await exchangeAdapter.getFuturesBalance(exchange, exchangeConfig);
       if (balanceResult.success && balanceResult.balance) {
-        effectiveBaseMargin = Math.floor(balanceResult.balance / 10);
-        // 确保至少 10U
+        effectiveBaseMargin = Math.floor((balanceResult.balance * management.marginPercent) / 100);
+        // 至少 10U
         effectiveBaseMargin = Math.max(10, effectiveBaseMargin);
-        // 向下取整到最近的 10
+        // 向下取整到 10
         effectiveBaseMargin = Math.floor(effectiveBaseMargin / 10) * 10;
-        console.log(`[TowerScheduler] 自动模式: 账户余额=${balanceResult.balance.toFixed(2)}, 计算保证金=${effectiveBaseMargin}`);
+        console.log(`[TowerScheduler] 账户百分比模式: 余额=${balanceResult.balance.toFixed(2)}, ${management.marginPercent}% = ${effectiveBaseMargin}U`);
       } else {
-        console.warn('[TowerScheduler] 自动模式获取余额失败，使用默认 100U');
-        effectiveBaseMargin = 100;
+        console.warn('[TowerScheduler] 获取余额失败，回退到 baseMargin');
+        effectiveBaseMargin = management.baseMargin;
       }
+    }
+    if (effectiveBaseMargin === 0) {
+      console.warn('[TowerScheduler] 保证金为 0（marginPercent=0 且 baseMargin=0），跳过本次执行');
+      addRecord({
+        managementId: management.id,
+        bullishCount: 0,
+        bearishCount: 0,
+        totalMargin: 0,
+        success: false,
+        skipped: true,
+        errorMessage: '保证金为 0',
+      });
+      updateRunTime(management.id);
+      return;
     }
 
     // 创建临时的 management 配置（使用计算后的 baseMargin）

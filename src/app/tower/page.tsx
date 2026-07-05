@@ -54,6 +54,7 @@ interface TowerManagementConfig {
   isActive: boolean;
   intervalMinutes: number;
   baseMargin: number;
+  marginPercent: number;            // 0=用 baseMargin 固定金额, 10/25/33=账户百分比
   marginIncrement: number;
   towerLayers: number;
   bullishStartLayer: number;
@@ -182,6 +183,7 @@ export default function TowerPage() {
 
   // 设置状态
   const [baseMargin, setBaseMargin] = useState(100);
+  const [marginPercent, setMarginPercent] = useState<0 | 10 | 25 | 33>(0); // 0=固定, 10/25/33=账户百分比
   const [marginIncrement, setMarginIncrement] = useState(0);
   const [towerLayers, setTowerLayers] = useState(3);
   const [bullishStartLayer, setBullishStartLayer] = useState(1);
@@ -290,6 +292,7 @@ export default function TowerPage() {
           symbol: symbolFormatted,
           intervalMinutes: autoInterval,
           baseMargin,
+          marginPercent,
           marginIncrement,
           towerLayers,
           bullishStartLayer,
@@ -338,6 +341,7 @@ export default function TowerPage() {
       // 后端有配置，使用后端的参数
       const config = managementData.management;
       setBaseMargin(config.baseMargin);
+      setMarginPercent((config.marginPercent ?? 0) as 0 | 10 | 25 | 33);
       setMarginIncrement(config.marginIncrement);
       setTowerLayers(config.towerLayers);
       setBullishStartLayer(config.bullishStartLayer);
@@ -1044,23 +1048,39 @@ export default function TowerPage() {
             {/* 第一行：保证金和层数设置 */}
             <div className="flex items-center gap-2 flex-wrap">
               <div className="flex items-center gap-1">
-                <span className="text-xs text-[var(--text-tertiary)]" title="设为0启用自动模式：账户资金/10">保证金</span>
-                <input
-                  type="number"
-                  value={baseMargin}
-                  onChange={(e) => handleMarginChange(Number(e.target.value))}
-                  className={`w-14 px-1.5 py-1 text-xs border rounded text-center focus:outline-none focus:border-blue-500 ${
-                    baseMargin === 0 
-                      ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' 
+                <span className="text-xs text-[var(--text-tertiary)]" title="保证金模式: 固定金额=baseMargin, 账户%=marginPercent">保证金</span>
+                {/* 账户百分比选择器（0=固定, 10/25/33=%） */}
+                <select
+                  value={marginPercent}
+                  onChange={(e) => setMarginPercent(Number(e.target.value) as 0 | 10 | 25 | 33)}
+                  className={`w-14 px-1 py-1.5 text-xs border rounded text-center focus:outline-none focus:border-blue-500 ${
+                    marginPercent > 0
+                      ? 'bg-blue-500/20 border-blue-500/50 text-blue-400'
                       : 'bg-[var(--bg-tertiary)] border-[var(--border)] text-[var(--text-primary)]'
                   }`}
-                  min={0}
-                  max={10000}
-                  step={10}
-                  title="设为0启用自动模式：使用账户总资金/10"
-                />
-                {baseMargin === 0 && (
-                  <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">自动</span>
+                  title="选择保证金模式：0=固定金额(U), 10/25/33=账户余额百分比"
+                >
+                  <option value={0}>固定</option>
+                  <option value={10}>10%</option>
+                  <option value={25}>25%</option>
+                  <option value={33}>33%</option>
+                </select>
+                {/* 固定金额输入（marginPercent=0 时有效） */}
+                {marginPercent === 0 && (
+                  <input
+                    type="number"
+                    value={baseMargin}
+                    onChange={(e) => handleMarginChange(Number(e.target.value))}
+                    className={`w-14 px-1.5 py-1 text-xs border rounded text-center focus:outline-none focus:border-blue-500 ${
+                      baseMargin === 0
+                        ? 'bg-blue-500/20 border-blue-500/50 text-blue-400'
+                        : 'bg-[var(--bg-tertiary)] border-[var(--border)] text-[var(--text-primary)]'
+                    }`}
+                    min={0}
+                    max={10000}
+                    step={10}
+                    title="固定保证金 USD"
+                  />
                 )}
                 <span className="text-xs text-[var(--text-tertiary)]">+</span>
                 <input
