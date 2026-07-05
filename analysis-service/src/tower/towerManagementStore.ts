@@ -28,6 +28,7 @@ export interface TowerManagementConfig {
   bullishLowFilter: number;       // 多单过滤：1=只下L以下的多单，0=不限制
   bearishHighFilter: number;      // 空单过滤：1=只下H以上的空单，0=不限制
   useHLPDFilter: boolean;         // 是否启用HLPD区域过滤（多单<=D, 空单>=P），默认 true
+  biasFilter: number;              // MTF bias 过滤：1=只下同向单，0=不限
   monitorTimeframe: string;       // 周期过滤：0=所有周期, 15m/1h/4h/1d 只下指定周期
   lastRunAt: string | null;      // 上次执行时间
   nextRunAt: string | null;      // 下次执行时间
@@ -68,6 +69,7 @@ interface ManagementRow {
   bullish_low_filter: number;
   bearish_high_filter: number;
   use_hlpd_filter: number;
+  bias_filter: number;
   monitor_timeframe: string;
   last_run_at: string | null;
   next_run_at: string | null;
@@ -179,6 +181,12 @@ export function initTowerManagementTables(): void {
     console.log('[TowerManagement] 添加 use_hlpd_filter 字段');
   } catch { /* 列已存在 */ }
 
+  // 迁移：添加 MTF bias 过滤开关字段
+  try {
+    db.exec(`ALTER TABLE tower_management ADD COLUMN bias_filter INTEGER NOT NULL DEFAULT 0`);
+    console.log('[TowerManagement] 添加 bias_filter 字段');
+  } catch { /* 列已存在 */ }
+
   console.log('[TowerManagement] 表初始化完成');
 }
 
@@ -230,6 +238,7 @@ export function upsertManagement(config: {
   bullishLowFilter?: number;
   bearishHighFilter?: number;
   useHLPDFilter?: boolean;
+  biasFilter?: number;
   monitorTimeframe?: string;
 }): TowerManagementConfig {
   const exchange = config.exchange || 'binance';
@@ -264,6 +273,7 @@ export function upsertManagement(config: {
         bullish_low_filter = ?,
         bearish_high_filter = ?,
         use_hlpd_filter = ?,
+        bias_filter = ?,
         monitor_timeframe = ?,
         next_run_at = ?,
         updated_at = ?
@@ -284,6 +294,7 @@ export function upsertManagement(config: {
       config.bullishLowFilter ?? 0,
       config.bearishHighFilter ?? 0,
       useHLPDFilter ? 1 : 0,
+      config.biasFilter ?? 0,
       monitorTimeframe,
       nextRunAt,
       now,
@@ -299,8 +310,8 @@ export function upsertManagement(config: {
         user_id, symbol, exchange, is_active, interval_minutes, base_margin, margin_increment,
         tower_layers, bullish_start_layer, bearish_start_layer, min_spacing_ratio, min_entry_distance,
         trailing_activation_ratio, trailing_callback_rate, bullish_low_filter, bearish_high_filter,
-        use_hlpd_filter, monitor_timeframe, next_run_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        use_hlpd_filter, bias_filter, monitor_timeframe, next_run_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       config.userId,
       config.symbol,
@@ -319,13 +330,14 @@ export function upsertManagement(config: {
       config.bullishLowFilter ?? 0,
       config.bearishHighFilter ?? 0,
       useHLPDFilter ? 1 : 0,
+      config.biasFilter ?? 0,
       monitorTimeframe,
       nextRunAt,
       now,
       now
     );
 
-    console.log(`[TowerManagement] 创建托管配置: userId=${config.userId}, symbol=${config.symbol}, exchange=${exchange}, monitorTimeframe=${monitorTimeframe}, useHLPDFilter=${useHLPDFilter}`);
+    console.log(`[TowerManagement] 创建托管配置: userId=${config.userId}, symbol=${config.symbol}, exchange=${exchange}, monitorTimeframe=${monitorTimeframe}, useHLPDFilter=${useHLPDFilter}, biasFilter=${config.biasFilter ?? 0}`);
   }
 
   return getManagement(config.userId, config.symbol)!;
@@ -535,6 +547,7 @@ function rowToConfig(row: ManagementRow): TowerManagementConfig {
     bullishLowFilter: (row as any).bullish_low_filter ?? 0,
     bearishHighFilter: (row as any).bearish_high_filter ?? 0,
     useHLPDFilter: ((row as any).use_hlpd_filter ?? 1) === 1,
+    biasFilter: (row as any).bias_filter ?? 0,
     monitorTimeframe: (row as any).monitor_timeframe ?? '0',
     lastRunAt: row.last_run_at,
     nextRunAt: row.next_run_at,

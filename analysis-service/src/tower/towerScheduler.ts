@@ -16,6 +16,8 @@ import { fetchTowerBlocks } from './towerBlocksFetcher';
 import { sendDingtalkMarkdownToUser } from '../notification/dingtalk';
 import * as exchangeAdapter from '../order/exchangeAdapter';
 import { config } from '../config';
+import { fetchKlines } from '../data/klineClient';
+import { computeAllSessionBiases, BiasDirection } from './sessionBias';
 
 // 调度器状态
 let schedulerInterval: NodeJS.Timeout | null = null;
@@ -290,6 +292,42 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     // 3. 检查当前订单数量和位置
     const orderCheck = await checkOrdersCount(exchange, exchangeConfig, management.symbol, management.towerLayers);
 
+    // 3.5 计算 active bias (如果开启了 biasFilter)
+    let activeBias: BiasDirection | 'wait' = 'wait';
+    let activeBiasSession: 'AO' | 'EO' | 'AI' | null = null;
+    if (management.biasFilter === 1) {
+      try {
+        const [hourlyCandles, fifteenMinCandles] = await Promise.all([
+          fetchKlines(management.symbol, '1h', 200).catch(() => []),
+          fetchKlines(management.symbol, '15m', 200).catch(() => []),
+        ]);
+        const biases = computeAllSessionBiases(hourlyCandles, fifteenMinCandles);
+        activeBias = biases.active;
+        activeBiasSession = biases.activeSession;
+        console.log(`[TowerScheduler] ${management.symbol} biasFilter=1, active=${activeBiasSession} bias=${activeBias}`);
+      } catch (e) {
+        console.error(`[TowerScheduler] 计算 bias 失败:`, e);
+        activeBias = 'wait';
+      }
+
+      if (activeBias === 'wait') {
+        // bias 未就绪 → 取消所有 tower 单，等待明确 bias
+        console.log(`[TowerScheduler] bias=wait, 取消所有 tower 单`);
+        await cancelAllTowerOrders(exchange, exchangeConfig, management.symbol);
+        addRecord({
+          managementId: management.id,
+          bullishCount: 0,
+          bearishCount: 0,
+          totalMargin: 0,
+          success: true,
+          skipped: true,
+          errorMessage: 'bias=wait, no orders',
+        });
+        updateRunTime(management.id);
+        return;
+      }
+    }
+
     // 如果有订单在 P/D 中性区域，强制重新排列
     if (orderCheck.hasOrderInNeutralZone) {
       console.log(`[TowerScheduler] 中性区域有订单，强制重新排列`);
@@ -393,7 +431,16 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     const cgData = USE_CG_DATA ? await fetchCGLiqData(management.symbol) : null;
 
     // 9. 计算要下的订单
-    const orders = calculateOrders(towerData, effectiveManagement, leverage, dailyHL, cgData);
+    let orders = calculateOrders(towerData, effectiveManagement, leverage, dailyHL, cgData);
+
+    // 9.5 bias filter: 只保留与 activeBias 同向的订单
+    if (management.biasFilter === 1 && activeBias !== 'wait') {
+      const before = orders.length;
+      const targetSide = activeBias === 'long' ? 'BUY' : 'SELL';
+      orders = orders.filter(o => o.side === targetSide);
+      console.log(`[TowerScheduler] bias filter (${activeBias}=${targetSide}): ${before} -> ${orders.length} orders`);
+    }
+
     if (orders.length === 0) {
       console.log('[TowerScheduler] 没有符合条件的塔块');
       addRecord({
@@ -435,7 +482,8 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
 
     const duration = Date.now() - startTime;
     const autoModeInfo = management.baseMargin === 0 ? `(自动模式:${effectiveBaseMargin}U) ` : '';
-    console.log(`[TowerScheduler] 执行完成: ${orders.length}单(入场+止盈止损), 杠杆=${leverage}x, ${autoModeInfo}总保证金=${totalMargin} USDT, ${result.errors.length}错误, 耗时${duration}ms`);
+    const biasInfo = management.biasFilter === 1 ? `, bias=${activeBiasSession}:${activeBias}` : '';
+    console.log(`[TowerScheduler] 执行完成: ${orders.length}单(入场+止盈止损), 杠杆=${leverage}x, ${autoModeInfo}总保证金=${totalMargin} USDT, ${result.errors.length}错误, 耗时${duration}ms${biasInfo}`);
 
     // 发送钉钉通知（如果有错误）
     if (result.errors.length > 0) {
