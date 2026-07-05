@@ -1163,19 +1163,19 @@ function calculateOrders(
 
   // 计算止损止盈
   for (const block of [...allBearish, ...allBullish]) {
-    // 止损 = 边界与入场价*千分之3取最大值（紧贴结构但留有空间）
+    // 止损 = 紧贴结构边界（block.high/low），但 cap 在 MAX_SL_DISTANCE (200 点)
+    // 用 MIN：取更紧的，但不能超过 cap
     const boundary = block.type === 'bearish' ? block.high : block.low;
-    const slByRatio = block.entry * SL_RATIO;
-    const slDistance = Math.abs(block.entry - boundary);
+    const cap = block.type === 'bearish'
+      ? block.entry + MAX_SL_DISTANCE   // 空单 SL 之上
+      : block.entry - MAX_SL_DISTANCE;  // 多单 SL 之下
 
-    if (slDistance > slByRatio) {
-      // 边界更远，用边界止损（更保守）
-      block.stopLoss = boundary;
+    if (block.type === 'bearish') {
+      // 空单：SL 在 entry 之上，取 MIN（更紧，但不能超过 cap）
+      block.stopLoss = Math.min(boundary, cap);
     } else {
-      // 入场价*千分之3 更远，用它（紧贴结构）
-      block.stopLoss = block.type === 'bearish'
-        ? block.entry + slByRatio
-        : block.entry - slByRatio;
+      // 多单：SL 在 entry 之下，取 MAX（更紧，但不能低于 cap）
+      block.stopLoss = Math.max(boundary, cap);
     }
 
     // 止盈 = max(固定止盈 2.5%, P/D 距离)
