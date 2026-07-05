@@ -29,10 +29,10 @@ import { Killzone } from '@/types/indicator';
 import { Candle } from '@/types/chart';
 
 const DEFAULT_KILLZONES: Killzone[] = [
-  { name: 'asian', startHour: 0, endHour: 6, color: 'rgba(147, 51, 234, 0.28)' },
-  { name: 'london', startHour: 7, endHour: 12, color: 'rgba(59, 130, 246, 0.28)' },
-  { name: 'ny-am', startHour: 12, endHour: 15, color: 'rgba(34, 197, 94, 0.28)' },
-  { name: 'ny-pm', startHour: 15, endHour: 21, color: 'rgba(249, 115, 22, 0.28)' },
+  { name: 'asian', startHour: 0, endHour: 6, color: 'rgba(147, 51, 234, 0.12)' },
+  { name: 'london', startHour: 7, endHour: 12, color: 'rgba(59, 130, 246, 0.12)' },
+  { name: 'ny-am', startHour: 12, endHour: 15, color: 'rgba(34, 197, 94, 0.12)' },
+  { name: 'ny-pm', startHour: 15, endHour: 21, color: 'rgba(249, 115, 22, 0.12)' },
 ];
 
 interface KillzoneRendererData {
@@ -107,14 +107,42 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
     const xDrawStart = Math.max(0, xStart);
     const xDrawEnd = Math.min(chartWidth, xEnd);
 
-    // 6. 画矩形填充
+    // 6. 画矩形填充 + EQ 虚线
     target.useMediaCoordinateSpace(({ context: ctx }) => {
       const width = xDrawEnd - xDrawStart;
       const height = yLow - yHigh;
       if (width <= 0 || height <= 0) return;
 
+      // 矩形背景
       ctx.fillStyle = kz.color;
       ctx.fillRect(xDrawStart, yHigh, width, height);
+
+      // EQ 虚线（横穿矩形中部）
+      const eqPrice = (high + low) / 2;
+      const yEq = priceToCoordinate(eqPrice);
+      if (yEq !== null) {
+        // 用更深一点的 session 色（背景 + 50% alpha）做虚线
+        const lineColor = kz.color.replace(/[\d.]+\)$/, '0.55)');
+        ctx.strokeStyle = lineColor;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(xDrawStart, yEq);
+        ctx.lineTo(xDrawEnd, yEq);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // EQ 价格标签（右边）
+        ctx.font = 'bold 9px monospace';
+        ctx.fillStyle = lineColor;
+        const eqText = `EQ ${eqPrice.toFixed(2)}`;
+        const textWidth = ctx.measureText(eqText).width;
+        const labelX = xDrawEnd - textWidth - 6;
+        const labelY = yEq - 3;
+        ctx.fillRect(labelX - 3, labelY - 9, textWidth + 6, 12);
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillText(eqText, labelX, labelY);
+      }
     });
   }
 
