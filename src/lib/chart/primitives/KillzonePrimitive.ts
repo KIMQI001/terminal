@@ -54,6 +54,7 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
 
   /**
    * 根据"现在"找当前所处的 killzone（如果不在任何 session 内返回 null）
+   * endSec = min(session_end, now)：session 进行中时只画到当前（live 模式）
    */
   private getCurrentSession(nowSec: number): { kz: Killzone; startSec: number; endSec: number } | null {
     const todayMidnight = Math.floor(nowSec / 86400) * 86400;
@@ -62,7 +63,8 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
       let endSec = todayMidnight + kz.endHour * 3600;
       if (kz.endHour === 24) endSec = todayMidnight + 86400;
       if (nowSec >= startSec && nowSec < endSec) {
-        return { kz, startSec, endSec };
+        // live 模式：endSec = 当前时间（session 还没结束就到这里）
+        return { kz, startSec, endSec: Math.min(endSec, nowSec) };
       }
     }
     return null;
@@ -74,6 +76,7 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
       firstVisibleTime,
       lastVisibleTime,
       chartHeight,
+      chartWidth,
       candleInterval,
       logicalToCoordinate,
       visibleRange,
@@ -81,46 +84,49 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
 
     if (!firstVisibleTime || !lastVisibleTime || !visibleRange) return;
 
-    // 只画当前 session，不画全部
     const nowSec = Math.floor(Date.now() / 1000);
     const session = this.getCurrentSession(nowSec);
-
-    if (!session) {
-      // 当前不在任何 session（如 gap 14:00-15:00 北京）— 不画
-      return;
-    }
+    if (!session) return;
 
     const { kz, startSec, endSec } = session;
 
-    // 不可见则不画
-    if (endSec < firstVisibleTime || startSec > lastVisibleTime) {
-      console.log(`[Killzone] ${kz.name} ${new Date(startSec*1000).toISOString()}-${new Date(endSec*1000).toISOString()} not in visible range`);
-      return;
-    }
-
-    console.log(`[Killzone] drawing ${kz.name} ${new Date(startSec*1000).toISOString()}-${new Date(endSec*1000).toISOString()}`);
-
     target.useMediaCoordinateSpace(({ context: ctx }) => {
-      const startLogical = (startSec - firstVisibleTime) / candleInterval + visibleRange.from;
-      const endLogical = (endSec - firstVisibleTime) / candleInterval + visibleRange.from;
+      // case 1: session 完全在可见范围之前（用户看了太早的历史）→ 右边缘画 100px 指示
+      if (endSec < firstVisibleTime) {
+        const rightEdgeX = chartWidth;
+        ctx.fillStyle = kz.color;
+        ctx.fillRect(rightEdgeX - 100, 0, 100, chartHeight);
+        return;
+      }
+
+      // case 2: session 完全在可见范围之后（用户看不到 session 起点）→ 右边缘画 100px 指示
+      if (startSec > lastVisibleTime) {
+        const rightEdgeX = chartWidth;
+        ctx.fillStyle = kz.color;
+        ctx.fillRect(rightEdgeX - 100, 0, 100, chartHeight);
+        return;
+      }
+
+      // case 3: session 在可见范围内 → 正常画
+      const startLogical = Math.max(
+        (startSec - firstVisibleTime) / candleInterval + visibleRange.from,
+        visibleRange.from
+      );
+      const endLogical = Math.min(
+        (endSec - firstVisibleTime) / candleInterval + visibleRange.from,
+        visibleRange.to
+      );
 
       const x1 = logicalToCoordinate(startLogical as Logical);
       const x2 = logicalToCoordinate(endLogical as Logical);
 
-      if (x1 === null || x2 === null) {
-        console.log(`[Killzone] coordinate conversion failed: x1=${x1} x2=${x2}`);
-        return;
-      }
+      if (x1 === null || x2 === null) return;
 
       const width = Math.abs(x2 - x1);
-      if (width <= 0) {
-        console.log(`[Killzone] width <= 0: ${width}`);
-        return;
-      }
+      if (width <= 0) return;
 
       ctx.fillStyle = kz.color;
       ctx.fillRect(Math.min(x1, x2), 0, width, chartHeight);
-      console.log(`[Killzone] drawn: x=${Math.min(x1, x2)} width=${width} color=${kz.color}`);
     });
   }
 
