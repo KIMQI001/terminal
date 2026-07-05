@@ -1,14 +1,17 @@
 /**
  * Killzone Primitive for Lightweight Charts v4
  *
- * Draws vertical time-based region for the CURRENT ICT session only:
- * - Asian Session:  00:00-06:00 UTC (08:00-14:00 北京) — Tokyo
- * - London Session: 07:00-12:00 UTC (15:00-20:00 北京) — London open to NY pre-open
- * - NY AM Session: 12:00-15:00 UTC (20:00-23:00 北京) — NY morning
- * - NY PM Session: 15:00-21:00 UTC (23:00-05:00 北京) — NY afternoon
+ * 画法（OTE 块风格）：
+ * 1. 找当前 session（如 London 15:00-20:00 北京）
+ * 2. 找 session 内的 K 线
+ * 3. 算 high/low 极值
+ * 4. 框起来填充（从 first K 线到 last K 线，high 到 low）
  *
- * Only the session containing the current real time is drawn.
- * 1h gap between Asian and London (14:00-15:00 北京) = no session.
+ * 4 个 session：
+ * - Asian:  00:00-06:00 UTC (08:00-14:00 北京)
+ * - London: 07:00-12:00 UTC (15:00-20:00 北京)
+ * - NY AM:  12:00-15:00 UTC (20:00-23:00 北京)
+ * - NY PM:  15:00-21:00 UTC (23:00-05:00 北京)
  */
 
 import {
@@ -19,31 +22,25 @@ import {
   Time,
   Coordinate,
   SeriesAttachedParameter,
-  LogicalRange,
-  Logical,
 } from 'lightweight-charts';
 import type { IChartApiBase } from 'lightweight-charts';
 import { CanvasRenderingTarget2D } from 'fancy-canvas';
 import { Killzone } from '@/types/indicator';
+import { Candle } from '@/types/chart';
 
-// Default Killzones (times in UTC hours)
 const DEFAULT_KILLZONES: Killzone[] = [
-  { name: 'asian', startHour: 0, endHour: 6, color: 'rgba(147, 51, 234, 0.28)' }, // Purple - Asian (Tokyo)
-  { name: 'london', startHour: 7, endHour: 12, color: 'rgba(59, 130, 246, 0.28)' }, // Blue - London
-  { name: 'ny-am', startHour: 12, endHour: 15, color: 'rgba(34, 197, 94, 0.28)' }, // Green - NY AM
-  { name: 'ny-pm', startHour: 15, endHour: 21, color: 'rgba(249, 115, 22, 0.28)' }, // Orange - NY PM
+  { name: 'asian', startHour: 0, endHour: 6, color: 'rgba(147, 51, 234, 0.28)' },
+  { name: 'london', startHour: 7, endHour: 12, color: 'rgba(59, 130, 246, 0.28)' },
+  { name: 'ny-am', startHour: 12, endHour: 15, color: 'rgba(34, 197, 94, 0.28)' },
+  { name: 'ny-pm', startHour: 15, endHour: 21, color: 'rgba(249, 115, 22, 0.28)' },
 ];
 
 interface KillzoneRendererData {
-  killzones: Killzone[];
-  visibleRange: LogicalRange | null;
-  logicalToCoordinate: (logical: Logical) => Coordinate | null;
+  candles: Candle[];              // 当前 chart 周期所有 K 线
+  timeToCoordinate: (time: Time) => Coordinate | null;
+  priceToCoordinate: (price: number) => Coordinate | null;
   chartHeight: number;
   chartWidth: number;
-  firstVisibleTime: number | null;
-  lastVisibleTime: number | null;
-  lastCandleTime: number | null;  // 最后一根 K 线的时间（用于 cap 防止画到"未来"区域）
-  candleInterval: number; // Time interval between candles in seconds
 }
 
 class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
@@ -53,18 +50,14 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
     this._data = data;
   }
 
-  /**
-   * 根据"现在"找当前所处的 killzone（如果不在任何 session 内返回 null）
-   * endSec = min(session_end, now)：session 进行中时只画到当前（live 模式）
-   */
+  /** 找当前 session；endSec = MIN(session_end, now) live */
   private getCurrentSession(nowSec: number): { kz: Killzone; startSec: number; endSec: number } | null {
     const todayMidnight = Math.floor(nowSec / 86400) * 86400;
     for (const kz of DEFAULT_KILLZONES) {
-      let startSec = todayMidnight + kz.startHour * 3600;
+      const startSec = todayMidnight + kz.startHour * 3600;
       let endSec = todayMidnight + kz.endHour * 3600;
       if (kz.endHour === 24) endSec = todayMidnight + 86400;
       if (nowSec >= startSec && nowSec < endSec) {
-        // live 模式：endSec = 当前时间（session 还没结束就到这里）
         return { kz, startSec, endSec: Math.min(endSec, nowSec) };
       }
     }
@@ -73,17 +66,8 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
 
   drawBackground(target: CanvasRenderingTarget2D): void {
     if (!this._data) return;
-    const {
-      firstVisibleTime,
-      lastVisibleTime,
-      lastCandleTime,
-      chartHeight,
-      candleInterval,
-      logicalToCoordinate,
-      visibleRange,
-    } = this._data;
-
-    if (!firstVisibleTime || !lastVisibleTime || !visibleRange) return;
+    const { candles, timeToCoordinate, priceToCoordinate, chartHeight, chartWidth } = this._data;
+    if (candles.length === 0) return;
 
     const nowSec = Math.floor(Date.now() / 1000);
     const session = this.getCurrentSession(nowSec);
@@ -91,40 +75,51 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
 
     const { kz, startSec, endSec } = session;
 
-    // session 在可见范围之外则不画
-    if (endSec < firstVisibleTime || startSec > lastVisibleTime) return;
+    // 1. 找 session 时间范围内的 K 线
+    const sessionCandles = candles.filter(
+      (c) => c.time >= startSec && c.time <= endSec
+    );
+    if (sessionCandles.length === 0) return;
 
-    // endSec cap 到 lastCandleTime（防止画到最后一根 K 线右侧的"未来"区域）
-    const effectiveEndSec = lastCandleTime
-      ? Math.min(endSec, lastCandleTime)
-      : endSec;
-    if (effectiveEndSec <= startSec) return; // 区间无效
+    // 2. 算 high/low 极值
+    let high = -Infinity;
+    let low = Infinity;
+    for (const c of sessionCandles) {
+      if (c.high > high) high = c.high;
+      if (c.low < low) low = c.low;
+    }
+    if (high === -Infinity || low === Infinity) return;
 
+    // 3. 找 first/last K 线的 time（用 visible 区域 clip）
+    const firstTime = sessionCandles[0].time;
+    const lastTime = sessionCandles[sessionCandles.length - 1].time;
+
+    // 4. 转成坐标
+    const xStart = timeToCoordinate(firstTime as Time);
+    const xEnd = timeToCoordinate(lastTime as Time);
+    const yHigh = priceToCoordinate(high);
+    const yLow = priceToCoordinate(low);
+
+    if (xStart === null || xEnd === null || yHigh === null || yLow === null) return;
+    if (xEnd <= xStart) return;
+
+    // 5. Clip 到 chart 范围内（防止画到"未来"区域）
+    const xDrawStart = Math.max(0, xStart);
+    const xDrawEnd = Math.min(chartWidth, xEnd);
+
+    // 6. 画矩形填充
     target.useMediaCoordinateSpace(({ context: ctx }) => {
-      const startLogical = Math.max(
-        (startSec - firstVisibleTime) / candleInterval + visibleRange.from,
-        visibleRange.from
-      );
-      const endLogical = Math.min(
-        (effectiveEndSec - firstVisibleTime) / candleInterval + visibleRange.from,
-        visibleRange.to
-      );
-
-      const x1 = logicalToCoordinate(startLogical as Logical);
-      const x2 = logicalToCoordinate(endLogical as Logical);
-
-      if (x1 === null || x2 === null) return;
-
-      const width = Math.abs(x2 - x1);
-      if (width <= 0) return;
+      const width = xDrawEnd - xDrawStart;
+      const height = yLow - yHigh;
+      if (width <= 0 || height <= 0) return;
 
       ctx.fillStyle = kz.color;
-      ctx.fillRect(Math.min(x1, x2), 0, width, chartHeight);
+      ctx.fillRect(xDrawStart, yHigh, width, height);
     });
   }
 
   draw(): void {
-    // Main drawing is done in drawBackground
+    // 主绘制在 drawBackground
   }
 }
 
@@ -156,8 +151,7 @@ export class KillzonePrimitive implements ISeriesPrimitive<Time> {
   private _chart: IChartApiBase<Time> | null = null;
   private _series: SeriesAttachedParameter<Time>['series'] | null = null;
   private _requestUpdate?: () => void;
-  private _candleInterval: number = 3600; // Default 1h
-  private _lastCandleTime: number | null = null;  // 最后一根 K 线时间（防止画到"未来"区域）
+  private _candles: Candle[] = [];
 
   constructor() {
     this._paneView = new KillzonePaneView();
@@ -179,40 +173,13 @@ export class KillzonePrimitive implements ISeriesPrimitive<Time> {
     if (!this._chart || !this._series) return;
 
     const timeScale = this._chart.timeScale();
-    const visibleRange = timeScale.getVisibleLogicalRange();
-
-    // Get first and last visible times
-    let firstVisibleTime: number | null = null;
-    let lastVisibleTime: number | null = null;
-
-    if (visibleRange) {
-      const fromCoord = timeScale.logicalToCoordinate(visibleRange.from);
-      const toCoord = timeScale.logicalToCoordinate(visibleRange.to);
-
-      if (fromCoord !== null) {
-        const fromTime = timeScale.coordinateToTime(fromCoord);
-        if (fromTime !== null && typeof fromTime === 'number') {
-          firstVisibleTime = fromTime;
-        }
-      }
-      if (toCoord !== null) {
-        const toTime = timeScale.coordinateToTime(toCoord);
-        if (toTime !== null && typeof toTime === 'number') {
-          lastVisibleTime = toTime;
-        }
-      }
-    }
 
     const data: KillzoneRendererData = {
-      killzones: this._killzones,
-      visibleRange,
-      logicalToCoordinate: (logical: Logical) => timeScale.logicalToCoordinate(logical),
+      candles: this._candles,
+      timeToCoordinate: (time: Time) => timeScale.timeToCoordinate(time),
+      priceToCoordinate: (price: number) => this._series!.priceToCoordinate(price),
       chartHeight: this._chart.chartElement().clientHeight,
       chartWidth: timeScale.width(),
-      firstVisibleTime,
-      lastVisibleTime,
-      lastCandleTime: this._lastCandleTime,
-      candleInterval: this._candleInterval,
     };
 
     this._paneView.update(data);
@@ -222,19 +189,14 @@ export class KillzonePrimitive implements ISeriesPrimitive<Time> {
     return [this._paneView];
   }
 
-  /**
-   * Set candle interval in seconds (needed to calculate time positions)
-   */
-  setCandleInterval(interval: number): void {
-    this._candleInterval = interval;
+  /** TradingChart 调用：传入当前周期所有 K 线 */
+  setCandles(candles: Candle[]): void {
+    this._candles = candles;
     if (this._requestUpdate) {
       this._requestUpdate();
     }
   }
 
-  /**
-   * Update Killzones configuration
-   */
   setData(killzones: Killzone[]): void {
     this._killzones = killzones.length > 0 ? killzones : DEFAULT_KILLZONES;
     if (this._requestUpdate) {
@@ -242,19 +204,6 @@ export class KillzonePrimitive implements ISeriesPrimitive<Time> {
     }
   }
 
-  /**
-   * 设置最后一根 K 线的时间（用于 cap killzone 范围）
-   */
-  setLastCandleTime(time: number | null): void {
-    this._lastCandleTime = time;
-    if (this._requestUpdate) {
-      this._requestUpdate();
-    }
-  }
-
-  /**
-   * Enable or disable the killzones display
-   */
   setEnabled(enabled: boolean): void {
     if (enabled) {
       this._killzones = DEFAULT_KILLZONES;
@@ -266,9 +215,6 @@ export class KillzonePrimitive implements ISeriesPrimitive<Time> {
     }
   }
 
-  /**
-   * Get current Killzones
-   */
   getData(): Killzone[] {
     return this._killzones;
   }
