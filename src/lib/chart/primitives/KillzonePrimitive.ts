@@ -42,6 +42,7 @@ interface KillzoneRendererData {
   chartWidth: number;
   firstVisibleTime: number | null;
   lastVisibleTime: number | null;
+  lastCandleTime: number | null;  // 最后一根 K 线的时间（用于 cap 防止画到"未来"区域）
   candleInterval: number; // Time interval between candles in seconds
 }
 
@@ -75,6 +76,7 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
     const {
       firstVisibleTime,
       lastVisibleTime,
+      lastCandleTime,
       chartHeight,
       candleInterval,
       logicalToCoordinate,
@@ -89,8 +91,14 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
 
     const { kz, startSec, endSec } = session;
 
-    // session 在可见范围之外则不画（避免突兀的边缘指示）
+    // session 在可见范围之外则不画
     if (endSec < firstVisibleTime || startSec > lastVisibleTime) return;
+
+    // endSec cap 到 lastCandleTime（防止画到最后一根 K 线右侧的"未来"区域）
+    const effectiveEndSec = lastCandleTime
+      ? Math.min(endSec, lastCandleTime)
+      : endSec;
+    if (effectiveEndSec <= startSec) return; // 区间无效
 
     target.useMediaCoordinateSpace(({ context: ctx }) => {
       const startLogical = Math.max(
@@ -98,7 +106,7 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
         visibleRange.from
       );
       const endLogical = Math.min(
-        (endSec - firstVisibleTime) / candleInterval + visibleRange.from,
+        (effectiveEndSec - firstVisibleTime) / candleInterval + visibleRange.from,
         visibleRange.to
       );
 
@@ -149,6 +157,7 @@ export class KillzonePrimitive implements ISeriesPrimitive<Time> {
   private _series: SeriesAttachedParameter<Time>['series'] | null = null;
   private _requestUpdate?: () => void;
   private _candleInterval: number = 3600; // Default 1h
+  private _lastCandleTime: number | null = null;  // 最后一根 K 线时间（防止画到"未来"区域）
 
   constructor() {
     this._paneView = new KillzonePaneView();
@@ -202,6 +211,7 @@ export class KillzonePrimitive implements ISeriesPrimitive<Time> {
       chartWidth: timeScale.width(),
       firstVisibleTime,
       lastVisibleTime,
+      lastCandleTime: this._lastCandleTime,
       candleInterval: this._candleInterval,
     };
 
@@ -227,6 +237,16 @@ export class KillzonePrimitive implements ISeriesPrimitive<Time> {
    */
   setData(killzones: Killzone[]): void {
     this._killzones = killzones.length > 0 ? killzones : DEFAULT_KILLZONES;
+    if (this._requestUpdate) {
+      this._requestUpdate();
+    }
+  }
+
+  /**
+   * 设置最后一根 K 线的时间（用于 cap killzone 范围）
+   */
+  setLastCandleTime(time: number | null): void {
+    this._lastCandleTime = time;
     if (this._requestUpdate) {
       this._requestUpdate();
     }

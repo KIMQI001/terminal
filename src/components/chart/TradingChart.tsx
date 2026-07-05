@@ -988,8 +988,10 @@ export function TradingChart() {
         '1h': 3600, '2h': 7200, '4h': 14400, '6h': 21600, '8h': 28800,
         '12h': 43200, '1d': 86400, '1w': 604800,
       };
+      const lastCandle = candles.length > 0 ? candles[candles.length - 1] : null;
       killzonePrimitiveRef.current.setEnabled(enabled.killzones && timeframe === '15m');
       killzonePrimitiveRef.current.setCandleInterval(intervalMap[timeframe] || 3600);
+      killzonePrimitiveRef.current.setLastCandleTime(lastCandle?.time ?? null);
     }
 
     // Update OTE Primitive
