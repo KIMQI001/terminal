@@ -981,7 +981,7 @@ export function TradingChart() {
       }
     }
 
-    // Update Killzone Primitive（只在 15m 周期启用）
+    // Update Killzone Primitive（所有周期都画，由 store 开关控制）
     if (killzonePrimitiveRef.current) {
       const intervalMap: Record<string, number> = {
         '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800,
@@ -989,7 +989,7 @@ export function TradingChart() {
         '12h': 43200, '1d': 86400, '1w': 604800,
       };
       const lastCandle = candles.length > 0 ? candles[candles.length - 1] : null;
-      killzonePrimitiveRef.current.setEnabled(enabled.killzones && timeframe === '15m');
+      killzonePrimitiveRef.current.setEnabled(enabled.killzones);
       killzonePrimitiveRef.current.setCandleInterval(intervalMap[timeframe] || 3600);
       killzonePrimitiveRef.current.setLastCandleTime(lastCandle?.time ?? null);
     }
