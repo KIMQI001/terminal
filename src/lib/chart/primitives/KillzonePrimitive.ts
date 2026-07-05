@@ -28,11 +28,15 @@ import { CanvasRenderingTarget2D } from 'fancy-canvas';
 import { Killzone } from '@/types/indicator';
 import { Candle } from '@/types/chart';
 
+// 用户定义时段（避免 14:00-15:00 / 05:00-08:00 北京的 gap）
+// - Asian: 0:00-15:15 北京 = 16:00-7:15 UTC（跨 00:00）
+// - London: 15:15-20:15 北京 = 7:15-12:15 UTC
+// - NY: 20:15-08:15 北京 = 12:15-0:15 UTC（跨 00:00，AM+PM 合并）
+// endHourUtc > 24 表示跨日
 const DEFAULT_KILLZONES: Killzone[] = [
-  { name: 'asian', startHour: 0, endHour: 6, color: 'rgba(147, 51, 234, 0.12)' },
-  { name: 'london', startHour: 7, endHour: 12, color: 'rgba(59, 130, 246, 0.12)' },
-  { name: 'ny-am', startHour: 12, endHour: 15, color: 'rgba(34, 197, 94, 0.12)' },
-  { name: 'ny-pm', startHour: 15, endHour: 21, color: 'rgba(249, 115, 22, 0.12)' },
+  { name: 'asian', startHour: 16, endHour: 31.25, color: 'rgba(147, 51, 234, 0.12)' },
+  { name: 'london', startHour: 7.25, endHour: 12.25, color: 'rgba(59, 130, 246, 0.12)' },
+  { name: 'ny', startHour: 12.25, endHour: 24.25, color: 'rgba(34, 197, 94, 0.12)' },
 ];
 
 interface KillzoneRendererData {
@@ -50,15 +54,16 @@ class KillzonePaneRenderer implements ISeriesPrimitivePaneRenderer {
     this._data = data;
   }
 
-  /** 找当前 session；endSec = MIN(session_end, now) live */
+  /** 找当前 session
+   * endHourUtc > 24 表示跨日（endSec 会比 todayMidnight + 86400 大）
+   */
   private getCurrentSession(nowSec: number): { kz: Killzone; startSec: number; endSec: number } | null {
     const todayMidnight = Math.floor(nowSec / 86400) * 86400;
     for (const kz of DEFAULT_KILLZONES) {
       const startSec = todayMidnight + kz.startHour * 3600;
-      let endSec = todayMidnight + kz.endHour * 3600;
-      if (kz.endHour === 24) endSec = todayMidnight + 86400;
+      const endSec = todayMidnight + kz.endHour * 3600;
       if (nowSec >= startSec && nowSec < endSec) {
-        return { kz, startSec, endSec: Math.min(endSec, nowSec) };
+        return { kz, startSec, endSec };
       }
     }
     return null;

@@ -46,8 +46,8 @@ export interface LiquidityZone {
 }
 
 export interface Killzone {
-  name: "asian" | "london" | "ny-am" | "ny-pm";
-  startHour: number;
+  name: string;
+  startHour: number;  // UTC hour from today's UTC midnight, endHour > 24 means cross-midnight
   endHour: number;
   color: string;
 }
