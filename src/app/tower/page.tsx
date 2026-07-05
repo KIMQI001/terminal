@@ -65,6 +65,7 @@ interface TowerManagementConfig {
   bullishLowFilter: number;         // 多L过滤：1=只下L以下的多单，0=不限制
   bearishHighFilter: number;        // 空H过滤：1=只下H以上的空单，0=不限制
   useHLPDFilter: boolean;           // HLPD区域过滤：true=多单<=D/空单>=P, false=不限
+  biasFilter: number;                // MTF bias 过滤：1=只下同向单，0=不限
   monitorTimeframe: string;         // 周期过滤：0=所有周期, 15m/1h/4h/1d 只下指定周期
   lastRunAt: string | null;
   nextRunAt: string | null;
@@ -193,6 +194,7 @@ export default function TowerPage() {
   const [bullishLowFilter, setBullishLowFilter] = useState(0); // 多L过滤：1=只下L以下的多单
   const [bearishHighFilter, setBearishHighFilter] = useState(0); // 空H过滤：1=只下H以上的空单
   const [useHLPDFilter, setUseHLPDFilter] = useState(true); // HLPD区域过滤：true=多<=D/空>=P, false=不限
+  const [biasFilter, setBiasFilter] = useState(0); // MTF bias 过滤：1=只下同向单，0=不限
   const [monitorTimeframe, setMonitorTimeframe] = useState<string>("0"); // 周期过滤：0=所有，15m/1h/4h/1d 只下指定周期
   const [isAutoOrdering, setIsAutoOrdering] = useState(false);
   const [orderProgress, setOrderProgress] = useState<{
@@ -299,6 +301,7 @@ export default function TowerPage() {
           bullishLowFilter,
           bearishHighFilter,
           useHLPDFilter,
+          biasFilter,
           monitorTimeframe,
         }),
       });
@@ -347,6 +350,7 @@ export default function TowerPage() {
       setBullishLowFilter(config.bullishLowFilter ?? 0);
       setBearishHighFilter(config.bearishHighFilter ?? 0);
       setUseHLPDFilter(config.useHLPDFilter ?? true);
+      setBiasFilter(config.biasFilter ?? 0);
       setMonitorTimeframe(config.monitorTimeframe ?? "0");
       // 同步到 localStorage
       localStorage.setItem(STORAGE_KEYS.BASE_MARGIN, String(config.baseMargin));
@@ -1243,6 +1247,20 @@ export default function TowerPage() {
                     disabled={isAutoManaged}
                     className="w-4 h-4 cursor-pointer disabled:opacity-60"
                   />
+                </div>
+
+                {/* MTF Bias 过滤：0=关, 1=开（开启后只下当前 session bias 同向单） */}
+                <div className="flex items-center gap-1" title="MTF Bias 过滤: 0=关(无脑两边都开), 1=开(只下当前 session bias 同向单)">
+                  <span className="text-xs text-[var(--text-tertiary)]">Bias</span>
+                  <select
+                    value={biasFilter}
+                    onChange={(e) => setBiasFilter(Number(e.target.value))}
+                    disabled={isAutoManaged}
+                    className="w-12 px-1 py-1.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500 disabled:opacity-60"
+                  >
+                    <option value={0}>OFF</option>
+                    <option value={1}>ON</option>
+                  </select>
                 </div>
 
                 {/* 周期过滤 */}
