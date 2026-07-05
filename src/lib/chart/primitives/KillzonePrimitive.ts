@@ -28,10 +28,10 @@ import { Killzone } from '@/types/indicator';
 
 // Default Killzones (times in UTC hours)
 const DEFAULT_KILLZONES: Killzone[] = [
-  { name: 'asian', startHour: 0, endHour: 6, color: 'rgba(147, 51, 234, 0.18)' }, // Purple - Asian (Tokyo)
-  { name: 'london', startHour: 7, endHour: 12, color: 'rgba(59, 130, 246, 0.18)' }, // Blue - London
-  { name: 'ny-am', startHour: 12, endHour: 15, color: 'rgba(34, 197, 94, 0.18)' }, // Green - NY AM
-  { name: 'ny-pm', startHour: 15, endHour: 21, color: 'rgba(249, 115, 22, 0.18)' }, // Orange - NY PM
+  { name: 'asian', startHour: 0, endHour: 6, color: 'rgba(147, 51, 234, 0.28)' }, // Purple - Asian (Tokyo)
+  { name: 'london', startHour: 7, endHour: 12, color: 'rgba(59, 130, 246, 0.28)' }, // Blue - London
+  { name: 'ny-am', startHour: 12, endHour: 15, color: 'rgba(34, 197, 94, 0.28)' }, // Green - NY AM
+  { name: 'ny-pm', startHour: 15, endHour: 21, color: 'rgba(249, 115, 22, 0.28)' }, // Orange - NY PM
 ];
 
 interface KillzoneRendererData {
