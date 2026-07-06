@@ -78,8 +78,12 @@ export function Header() {
   };
 
   return (
-    <header className="flex items-center justify-between h-12 px-4 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
-      <div className="flex items-center gap-4">
+    <header
+      className="h-12 border-b border-[var(--border)] bg-[var(--bg-secondary)] overflow-x-auto overflow-y-hidden [&::-webkit-scrollbar]:hidden"
+      style={{ scrollbarWidth: 'none' }}
+    >
+      <div className="flex items-center justify-between min-w-max h-full px-4 gap-6">
+        <div className="flex items-center gap-4">
         {/* Logo */}
         <div className="flex items-center gap-2">
           <Activity className="w-5 h-5 text-[var(--accent)]" />
@@ -297,6 +301,7 @@ export function Header() {
             </>
           )}
         </Button>
+      </div>
       </div>
     </header>
   );
