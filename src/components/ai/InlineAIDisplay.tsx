@@ -548,29 +548,35 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                   <div className="text-[9px] text-gray-400 text-center py-2">暂无</div>
                 ) : (
                   <div className="space-y-0.5">
-                    {[...liquidityPoints.aboveH].sort((a, b) => (a.price - (currentPrice || 0)) - (b.price - (currentPrice || 0))).slice(0, 7).map((point, idx) => {
-                      const distance = point.price - (currentPrice || 0);
-                      const isNearest = idx === 0;
-                      return (
-                        <div
-                          key={idx}
-                          onClick={() => handleLiquidityClick(point, true)}
-                          onDoubleClick={() => handleLiquidityPendingClick(point, true)}
-                          className={`grid grid-cols-3 gap-1 px-1 py-0.5 rounded cursor-pointer hover:bg-green-100 transition-colors ${isNearest ? 'border border-dashed border-green-500 bg-green-50' : ''}`}
-                        >
-                          <div className="flex items-center gap-1">
-                            <span className={isNearest ? 'text-green-600' : 'text-green-500/60'}>▲</span>
-                            <span className={`font-bold ${isNearest ? 'text-green-600 text-[10px]' : 'text-green-500/60 text-[10px]'}`}>{point.classification}</span>
+                    {(() => {
+                      // 找"前一个"HH（按时间排序倒数第二）
+                      const sortedByTime = [...liquidityPoints.aboveH].sort((a, b) => b.time - a.time);
+                      const prevHPrice = sortedByTime.length >= 2 ? sortedByTime[1].price : null;
+                      return [...liquidityPoints.aboveH].sort((a, b) => (a.price - (currentPrice || 0)) - (b.price - (currentPrice || 0))).slice(0, 7).map((point, idx) => {
+                        const distance = point.price - (currentPrice || 0);
+                        // 高亮"前一个"HH（按时间排序倒数第二）
+                        const isPrevious = prevHPrice !== null && Math.abs(point.price - prevHPrice) < 0.5;
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => handleLiquidityClick(point, true)}
+                            onDoubleClick={() => handleLiquidityPendingClick(point, true)}
+                            className={`grid grid-cols-3 gap-1 px-1 py-0.5 rounded cursor-pointer hover:bg-green-100 transition-colors ${isPrevious ? 'border border-dashed border-green-500 bg-green-50' : ''}`}
+                          >
+                            <div className="flex items-center gap-1">
+                              <span className={isPrevious ? 'text-green-600' : 'text-green-500/60'}>▲</span>
+                              <span className={`font-bold ${isPrevious ? 'text-green-600 text-[10px]' : 'text-green-500/60 text-[10px]'}`}>{point.classification}</span>
+                            </div>
+                            <div className={`font-mono text-right ${isPrevious ? 'text-gray-700 text-[10px]' : 'text-gray-500 text-[10px]'}`}>
+                              {formatPrice(point.price)}
+                            </div>
+                            <div className={`text-right ${isPrevious ? 'text-gray-600 text-[10px]' : 'text-gray-400 text-[10px]'}`}>
+                              +{distance.toFixed(0)}
+                            </div>
                           </div>
-                          <div className={`font-mono text-right ${isNearest ? 'text-gray-700 text-[10px]' : 'text-gray-500 text-[10px]'}`}>
-                            {formatPrice(point.price)}
-                          </div>
-                          <div className={`text-right ${isNearest ? 'text-gray-600 text-[10px]' : 'text-gray-400 text-[10px]'}`}>
-                            +{distance.toFixed(0)}
-                          </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      });
+                    })()}
                   </div>
                 )}
               </div>
@@ -585,29 +591,35 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
                   <div className="text-[9px] text-gray-400 text-center py-2">暂无</div>
                 ) : (
                   <div className="space-y-0.5">
-                    {[...liquidityPoints.belowL].sort((a, b) => ((currentPrice || 0) - a.price) - ((currentPrice || 0) - b.price)).slice(0, 7).map((point, idx) => {
-                      const distance = (currentPrice || 0) - point.price;
-                      const isNearest = idx === 0;
-                      return (
-                        <div
-                          key={idx}
-                          onClick={() => handleLiquidityClick(point, false)}
-                          onDoubleClick={() => handleLiquidityPendingClick(point, false)}
-                          className={`grid grid-cols-3 gap-1 px-1 py-0.5 rounded cursor-pointer hover:bg-red-100 transition-colors ${isNearest ? 'border border-dashed border-red-500 bg-red-50' : ''}`}
-                        >
-                          <div className="flex items-center gap-1">
-                            <span className={isNearest ? 'text-red-500' : 'text-red-500/60'}>▼</span>
-                            <span className={`font-bold ${isNearest ? 'text-red-500 text-[10px]' : 'text-red-500/60 text-[10px]'}`}>{point.classification}</span>
+                    {(() => {
+                      // 找"前一个"LL（按时间排序倒数第二）
+                      const sortedByTime = [...liquidityPoints.belowL].sort((a, b) => b.time - a.time);
+                      const prevLPrice = sortedByTime.length >= 2 ? sortedByTime[1].price : null;
+                      return [...liquidityPoints.belowL].sort((a, b) => ((currentPrice || 0) - a.price) - ((currentPrice || 0) - b.price)).slice(0, 7).map((point, idx) => {
+                        const distance = (currentPrice || 0) - point.price;
+                        // 高亮"前一个"LL（按时间排序倒数第二）
+                        const isPrevious = prevLPrice !== null && Math.abs(point.price - prevLPrice) < 0.5;
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => handleLiquidityClick(point, false)}
+                            onDoubleClick={() => handleLiquidityPendingClick(point, false)}
+                            className={`grid grid-cols-3 gap-1 px-1 py-0.5 rounded cursor-pointer hover:bg-red-100 transition-colors ${isPrevious ? 'border border-dashed border-red-500 bg-red-50' : ''}`}
+                          >
+                            <div className="flex items-center gap-1">
+                              <span className={isPrevious ? 'text-red-500' : 'text-red-500/60'}>▼</span>
+                              <span className={`font-bold ${isPrevious ? 'text-red-500 text-[10px]' : 'text-red-500/60 text-[10px]'}`}>{point.classification}</span>
+                            </div>
+                            <div className={`font-mono text-right ${isPrevious ? 'text-gray-700 text-[10px]' : 'text-gray-500 text-[10px]'}`}>
+                              {formatPrice(point.price)}
+                            </div>
+                            <div className={`text-right ${isPrevious ? 'text-gray-600 text-[10px]' : 'text-gray-400 text-[10px]'}`}>
+                              -{distance.toFixed(0)}
+                            </div>
                           </div>
-                          <div className={`font-mono text-right ${isNearest ? 'text-gray-700 text-[10px]' : 'text-gray-500 text-[10px]'}`}>
-                            {formatPrice(point.price)}
-                          </div>
-                          <div className={`text-right ${isNearest ? 'text-gray-600 text-[10px]' : 'text-gray-400 text-[10px]'}`}>
-                            -{distance.toFixed(0)}
-                          </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      });
+                    })()}
                   </div>
                 )}
               </div>
