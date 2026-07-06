@@ -33,6 +33,7 @@ export interface TowerManagementConfig {
   monitorTimeframe: string;       // 周期过滤：0=所有周期, 15m/1h/4h/1d 只下指定周期
   lastRunAt: string | null;      // 上次执行时间
   nextRunAt: string | null;      // 下次执行时间
+  lastBias: 'long' | 'short' | 'wait'; // 上次确认的 MTF bias（用于检测翻转）
   createdAt: string;
   updatedAt: string;
 }
@@ -75,6 +76,7 @@ interface ManagementRow {
   monitor_timeframe: string;
   last_run_at: string | null;
   next_run_at: string | null;
+  last_bias: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -193,6 +195,12 @@ export function initTowerManagementTables(): void {
   try {
     db.exec(`ALTER TABLE tower_management ADD COLUMN margin_percent INTEGER NOT NULL DEFAULT 0`);
     console.log('[TowerManagement] 添加 margin_percent 字段');
+  } catch { /* 列已存在 */ }
+
+  // 迁移：添加 last_bias 字段（记录上次确认的 MTF bias，用于检测翻转）
+  try {
+    db.exec(`ALTER TABLE tower_management ADD COLUMN last_bias TEXT NOT NULL DEFAULT 'wait'`);
+    console.log('[TowerManagement] 添加 last_bias 字段');
   } catch { /* 列已存在 */ }
 
   console.log('[TowerManagement] 表初始化完成');
@@ -428,6 +436,23 @@ export function updateRunTime(managementId: number): void {
 }
 
 /**
+ * 更新上次确认的 MTF bias
+ * - 'wait' 不写入（保留 last real bias，避免误判翻转）
+ * - 'long' / 'short' 覆盖写入
+ */
+export function updateLastBias(managementId: number, bias: 'long' | 'short' | 'wait'): void {
+  if (bias === 'wait') return;
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  db.prepare(`
+    UPDATE tower_management SET
+      last_bias = ?,
+      updated_at = ?
+    WHERE id = ?
+  `).run(bias, now, managementId);
+}
+
+/**
  * 添加执行记录
  */
 export function addRecord(record: {
@@ -564,6 +589,7 @@ function rowToConfig(row: ManagementRow): TowerManagementConfig {
     monitorTimeframe: (row as any).monitor_timeframe ?? '0',
     lastRunAt: row.last_run_at,
     nextRunAt: row.next_run_at,
+    lastBias: ((row as any).last_bias ?? 'wait') as 'long' | 'short' | 'wait',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
