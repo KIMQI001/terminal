@@ -286,20 +286,20 @@ export function InlineAIDisplay({ symbol = 'BTC' }: InlineAIDisplayProps) {
     setMultiTimeframePivots(allPivots);
   };
 
-  // 计算流动性点
-  const calculateLiquidityPoints = async () => {
+  // 计算流动性点（用图表的 candles 数据，不是单独 FAPI）
+  const calculateLiquidityPoints = () => {
     try {
-      const candles = await fetchFapiKlines('BTCUSDC', '1h', 500);
-      if (candles.length > 0) {
-        const currentP = candles[candles.length - 1].close;
+      const chartCandles = useChartStore.getState().candles;
+      if (chartCandles.length > 0) {
+        const currentP = chartCandles[chartCandles.length - 1].close;
         setFapiPrice(currentP);
         setCurrentPrice(currentP);
-        const liq = getLiquidityPoints(candles, currentP);
+        const liq = getLiquidityPoints(chartCandles, currentP);
         setLiquidityPoints(liq);
         setLastUpdate(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
       }
     } catch (e) {
-      console.error('Failed to fetch liquidity points:', e);
+      console.error('Failed to compute liquidity points:', e);
     }
   };
 
