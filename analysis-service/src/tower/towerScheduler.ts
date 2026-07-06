@@ -313,35 +313,27 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
       }
 
       if (activeBias === 'wait') {
-        // bias 未就绪 → 取消所有 tower 单，等待明确 bias
-        console.log(`[TowerScheduler] bias=wait, 取消所有 tower 单`);
-        await cancelAllTowerOrders(exchange, exchangeConfig, management.symbol);
-        addRecord({
-          managementId: management.id,
-          bullishCount: 0,
-          bearishCount: 0,
-          totalMargin: 0,
-          success: true,
-          skipped: true,
-          errorMessage: 'bias=wait, no orders',
-        });
-        updateRunTime(management.id);
-        return;
-      }
-
-      // 3.6 MTF 翻向检测：上次 long↔short 时，撤旧 bias 同向的未成交入场单
-      // 持仓保留（SL/TP 不动），只撤"旧 bias 同向"的入场单
-      const prevBias = management.lastBias;
-      if (prevBias !== 'wait' && prevBias !== activeBias) {
-        console.log(`[TowerScheduler] MTF 翻向: ${prevBias} → ${activeBias}, 撤旧 bias 入场单`);
-        const flipResult = await cancelEntriesByOldBias(
-          exchange,
-          exchangeConfig,
-          management.symbol,
-          activeBias  // 新 bias；old bias 同向 = new bias 的反向
-        );
-        if (flipResult.canceledCount > 0) {
-          console.log(`[TowerScheduler] 翻向撤单完成: ${flipResult.canceledCount} 个`);
+        // bias 不明确（wait 是中性），不撤单、不过滤新单，继续走正常流程
+        // 旧挂单保留，新订单也无 bias filter（line 477 的 filter 条件包含 activeBias !== 'wait'）
+        console.log(`[TowerScheduler] bias=wait（中性），保留旧单，不应用 bias filter`);
+      } else {
+        // 3.6 MTF 翻向检测：只有 long↔short 明确反向才撤旧 bias 入场单
+        // - prevBias=wait → 不算翻向（中性切换）
+        // - prevBias==activeBias → 不算翻向
+        // - wait↔wait → 不算翻向
+        // 持仓保留（SL/TP 不动），只撤"旧 bias 同向"的入场单
+        const prevBias = management.lastBias;
+        if (prevBias !== 'wait' && prevBias !== activeBias) {
+          console.log(`[TowerScheduler] MTF 翻向: ${prevBias} → ${activeBias}, 撤旧 bias 入场单`);
+          const flipResult = await cancelEntriesByOldBias(
+            exchange,
+            exchangeConfig,
+            management.symbol,
+            activeBias  // 新 bias；old bias 同向 = new bias 的反向
+          );
+          if (flipResult.canceledCount > 0) {
+            console.log(`[TowerScheduler] 翻向撤单完成: ${flipResult.canceledCount} 个`);
+          }
         }
       }
     }
