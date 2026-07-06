@@ -62,15 +62,16 @@ function getPrecision(symbol: string) {
 }
 
 /**
- * 按交易所 tick size 把价格取整
- * - price=61964.044, precision=1 → 61964.0
- * - price=3000.456, precision=2 → 3000.46
- * - price=100.123456, precision=3 → 100.123
+ * 按 OB/FVG 面板风格取整：BUY 向上，SELL 向下，到 5 的倍数（尾数 0 或 5）
+ * - price=61964.044, BUY → 61965
+ * - price=61964.044, SELL → 61960
+ * - price=3000.456, BUY → 3005
+ * - price=100.123, BUY → 105
  */
-export function roundToTickSize(symbol: string, price: number): number {
-  const precision = getPrecision(symbol).price;
-  const factor = Math.pow(10, precision);
-  return Math.round(price * factor) / factor;
+export function roundToOBEntry(price: number, side: 'BUY' | 'SELL'): number {
+  return side === 'BUY'
+    ? Math.ceil(price / 5) * 5
+    : Math.floor(price / 5) * 5;
 }
 
 function generateSignature(queryString: string, apiSecret: string): string {
