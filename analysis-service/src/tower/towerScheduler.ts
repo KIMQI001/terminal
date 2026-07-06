@@ -324,12 +324,12 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
         // 持仓保留（SL/TP 不动），只撤"旧 bias 同向"的入场单
         const prevBias = management.lastBias;
         if (prevBias !== 'wait' && prevBias !== activeBias) {
-          console.log(`[TowerScheduler] MTF 翻向: ${prevBias} → ${activeBias}, 撤旧 bias 入场单`);
+          console.log(`[TowerScheduler] MTF 翻向: ${prevBias} → ${activeBias}, 撤旧 bias (${prevBias}) 入场单`);
           const flipResult = await cancelEntriesByOldBias(
             exchange,
             exchangeConfig,
             management.symbol,
-            activeBias  // 新 bias；old bias 同向 = new bias 的反向
+            prevBias  // 旧 bias，决定要撤哪一边的单
           );
           if (flipResult.canceledCount > 0) {
             console.log(`[TowerScheduler] 翻向撤单完成: ${flipResult.canceledCount} 个`);
@@ -905,18 +905,18 @@ async function cancelOppositeOrders(
  * - 只撤入场单（带 ict_tower 前缀，不带 _sl/_tp）
  * - 保留止损 (_sl)、止盈 (_tp)、保护单 (ict_protect_)
  * - 不动持仓
- * - newBias='long' → 撤 BUY 入场单；newBias='short' → 撤 SELL 入场单
+ * - oldBias='long' → 撤 BUY 入场单（旧 long bias 时下的）
+ * - oldBias='short' → 撤 SELL 入场单（旧 short bias 时下的）
  */
 async function cancelEntriesByOldBias(
   exchange: ExchangeType,
   exchangeConfig: exchangeAdapter.ExchangeApiConfig,
   symbol: string,
-  newBias: 'long' | 'short'
+  oldBias: 'long' | 'short'
 ): Promise<{ success: boolean; canceledCount: number; error?: string }> {
   try {
-    // newBias 同向 = 旧 bias 同向
-    // 翻转 long→short 时，旧 bias=long，未成交的 BUY 入场单是"旧 bias 同向"，需要撤
-    const oldBiasSide = newBias === 'long' ? 'BUY' : 'SELL';
+    // 旧 bias=long 时下的是 BUY 单，short 时下的是 SELL 单
+    const oldBiasSide = oldBias === 'long' ? 'BUY' : 'SELL';
 
     const ordersResult = await exchangeAdapter.getOpenOrders(exchange, exchangeConfig, symbol);
     if (!ordersResult.success || !ordersResult.orders) {
@@ -936,7 +936,7 @@ async function cancelEntriesByOldBias(
       return { success: true, canceledCount: 0 };
     }
 
-    console.log(`[TowerScheduler] MTF 翻向 → 撤旧 bias (${oldBiasSide}) 入场单: ${toCancel.map(o => `${o.side}@${o.price}`).join(', ')}`);
+    console.log(`[TowerScheduler] MTF 翻向 → 撤旧 bias (${oldBias}=${oldBiasSide}) 入场单: ${toCancel.map(o => `${o.side}@${o.price}`).join(', ')}`);
 
     let canceledCount = 0;
     for (const order of toCancel) {
