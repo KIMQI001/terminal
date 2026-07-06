@@ -39,6 +39,7 @@ import {
   FVGPrimitive,
   LiquidityPrimitive,
   KillzonePrimitive,
+  KeyLevelsPrimitive,
   OTEPrimitive,
   BreakerBlockPrimitive,
   LiquidationHillPrimitive,
@@ -68,6 +69,7 @@ export function TradingChart() {
   const fvgPrimitiveRef = useRef<FVGPrimitive | null>(null);
   const liquidityPrimitiveRef = useRef<LiquidityPrimitive | null>(null);
   const killzonePrimitiveRef = useRef<KillzonePrimitive | null>(null);
+  const keyLevelsPrimitiveRef = useRef<KeyLevelsPrimitive | null>(null);
   const otePrimitiveRef = useRef<OTEPrimitive | null>(null);
   const breakerBlockPrimitiveRef = useRef<BreakerBlockPrimitive | null>(null);
   const liquidationHillPrimitiveRef = useRef<LiquidationHillPrimitive | null>(null);
@@ -427,6 +429,9 @@ export function TradingChart() {
     candleSeries.attachPrimitive(fvgPrimitive);
     candleSeries.attachPrimitive(liquidityPrimitive);
     candleSeries.attachPrimitive(liquidationHillPrimitive);
+    // KeyLevelsPrimitive (金框) 挂最上层，在所有 ICT 块之上
+    const keyLevelsPrimitive = new KeyLevelsPrimitive();
+    candleSeries.attachPrimitive(keyLevelsPrimitive);
 
     orderBlockPrimitiveRef.current = obPrimitive;
     fvgPrimitiveRef.current = fvgPrimitive;
@@ -436,6 +441,7 @@ export function TradingChart() {
     breakerBlockPrimitiveRef.current = breakerBlockPrimitive;
     liquidationHillPrimitiveRef.current = liquidationHillPrimitive;
     equilibriumPrimitiveRef.current = equilibriumPrimitive;
+    keyLevelsPrimitiveRef.current = keyLevelsPrimitive;
 
     // Handle resize
     const handleResize = () => {
@@ -1035,6 +1041,58 @@ export function TradingChart() {
       candleSeriesRef.current.setMarkers([]);
     }
   }, [swingPoints, enabled.swingPoints]);
+
+  // Update KeyLevels（金框：标记上一根 HH 和 LL）
+  useEffect(() => {
+    if (!keyLevelsPrimitiveRef.current) return;
+
+    if (!enabled.swingPoints || swingPoints.length < 2) {
+      keyLevelsPrimitiveRef.current.setLevels([]);
+      return;
+    }
+
+    const candleData = useChartStore.getState().candles;
+    if (candleData.length === 0) {
+      keyLevelsPrimitiveRef.current.setLevels([]);
+      return;
+    }
+
+    // swingPoints 按 time 升序，找出"前一个"（倒数第二个）HH 和 LL
+    const allHH = swingPoints.filter((sp) => sp.type === "high");
+    const allLL = swingPoints.filter((sp) => sp.type === "low");
+
+    const levels: KeyLevel[] = [];
+
+    // 前一个 HH
+    if (allHH.length >= 2) {
+      const prevHH = allHH[allHH.length - 2];
+      const kline = candleData.find((c) => c.time === prevHH.time);
+      if (kline) {
+        levels.push({
+          time: kline.time,
+          high: kline.high,
+          low: kline.low,
+          label: `前 HH (${kline.high.toFixed(0)})`,
+        });
+      }
+    }
+
+    // 前一个 LL
+    if (allLL.length >= 2) {
+      const prevLL = allLL[allLL.length - 2];
+      const kline = candleData.find((c) => c.time === prevLL.time);
+      if (kline) {
+        levels.push({
+          time: kline.time,
+          high: kline.high,
+          low: kline.low,
+          label: `前 LL (${kline.low.toFixed(0)})`,
+        });
+      }
+    }
+
+    keyLevelsPrimitiveRef.current.setLevels(levels);
+  }, [swingPoints, enabled.swingPoints, candles]);
 
   // Update Swing Points Markers (折线图模式) - 使用 detectAllPivots 标记所有波峰波谷
   useEffect(() => {
