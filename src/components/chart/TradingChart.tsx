@@ -44,6 +44,7 @@ import {
   BreakerBlockPrimitive,
   LiquidationHillPrimitive,
   EquilibriumPrimitive,
+  type KeyLevel,
 } from "@/lib/chart/primitives";
 import { detectOTEZones } from "@/lib/chart/indicators/ote";
 import { detectBreakerBlocks } from "@/lib/chart/indicators/breakerBlocks";
