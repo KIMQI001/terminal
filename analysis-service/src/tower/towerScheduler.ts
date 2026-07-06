@@ -27,6 +27,7 @@ let isRunning = false;
 const SL_RATIO = 0.003;        // 止损比例：入场价 * 0.003（千分之3）
 const MAX_SL_DISTANCE = 200;    // 最大止损点数（备用）
 const MIN_TP_RATIO = 0.025;  // 止盈最小 2.5%
+const ENTRY_OFFSET = 30;        // 入场"让点位"幅度（与 OTE/FVG 面板手点一致：BUY +30，SELL -30）
 
 // 日K前高前低接口
 interface DailyHL {
@@ -1544,7 +1545,9 @@ async function placeOrders(
   for (const order of orders) {
     try {
       // 按 OB 面板风格取整（尾数 0/5，BUY 向上，SELL 向下）
-      const entryPrice = exchangeAdapter.roundToOBEntry(order.price, order.side);
+      // 先"让点位"：BUY +30（出价更高），SELL -30（要价更低），更快成交
+      const adjustedEntry = order.side === 'BUY' ? order.price + ENTRY_OFFSET : order.price - ENTRY_OFFSET;
+      const entryPrice = exchangeAdapter.roundToOBEntry(adjustedEntry, order.side);
       const slPrice = exchangeAdapter.roundToOBEntry(order.stopLoss, order.side);
       const tpPrice = exchangeAdapter.roundToOBEntry(order.takeProfit, order.side);
 
