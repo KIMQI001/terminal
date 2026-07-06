@@ -305,13 +305,6 @@ export function OrderForm() {
           ))}
         </div>
 
-        <Input
-          type="number"
-          placeholder="百分比"
-          value={amountPercent}
-          onChange={(e) => setAmountPercent(e.target.value)}
-          suffix="%"
-        />
         <div className="text-xs text-[var(--text-secondary)] space-y-0.5">
           <div>≈ {actualUSD.toLocaleString(undefined, { maximumFractionDigits: 2 })} {quoteAsset}</div>
           <div>≈ {coinQuantity.toLocaleString(undefined, { maximumFractionDigits: 6 })} {baseAsset}</div>
