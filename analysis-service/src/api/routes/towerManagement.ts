@@ -99,6 +99,7 @@ towerManagementRoutes.post('/', (req: Request, res: Response) => {
       bearishHighFilter = 0,
       useHLPDFilter = true,
       biasFilter = 0,
+      lhHlOrders = 0,
       monitorTimeframe = '0',
     } = req.body;
 
@@ -130,10 +131,11 @@ towerManagementRoutes.post('/', (req: Request, res: Response) => {
       bearishHighFilter,
       useHLPDFilter,
       biasFilter,
+      lhHlOrders,
       monitorTimeframe,
     });
 
-    console.log(`[TowerManagement API] 更新配置: userId=${userId}, symbol=${symbol}, exchange=${exchange || 'binance'}, active=${isActive}, monitorTimeframe=${monitorTimeframe}, useHLPDFilter=${useHLPDFilter}, biasFilter=${biasFilter}`);
+    console.log(`[TowerManagement API] 更新配置: userId=${userId}, symbol=${symbol}, exchange=${exchange || 'binance'}, active=${isActive}, monitorTimeframe=${monitorTimeframe}, useHLPDFilter=${useHLPDFilter}, biasFilter=${biasFilter}, lhHlOrders=${lhHlOrders}`);
 
     res.json({
       success: true,
@@ -174,6 +176,7 @@ towerManagementRoutes.post('/start', (req: Request, res: Response) => {
       bearishHighFilter = 0,
       useHLPDFilter = true,
       biasFilter = 0,
+      lhHlOrders = 0,
       monitorTimeframe = '0',
     } = req.body;
 
@@ -206,10 +209,11 @@ towerManagementRoutes.post('/start', (req: Request, res: Response) => {
       bearishHighFilter,
       useHLPDFilter,
       biasFilter,
+      lhHlOrders,
       monitorTimeframe,
     });
 
-    console.log(`[TowerManagement API] 启动托管: userId=${userId}, symbol=${symbol}, exchange=${exchange || 'binance'}, baseMargin=${baseMargin}, layers=${towerLayers}, 启动间距=${minEntryDistance}‰, monitorTimeframe=${monitorTimeframe}, useHLPDFilter=${useHLPDFilter}, biasFilter=${biasFilter}`);
+    console.log(`[TowerManagement API] 启动托管: userId=${userId}, symbol=${symbol}, exchange=${exchange || 'binance'}, baseMargin=${baseMargin}, layers=${towerLayers}, 启动间距=${minEntryDistance}‰, monitorTimeframe=${monitorTimeframe}, useHLPDFilter=${useHLPDFilter}, biasFilter=${biasFilter}, lhHlOrders=${lhHlOrders}`);
 
     res.json({
       success: true,
