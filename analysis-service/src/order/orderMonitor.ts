@@ -615,6 +615,11 @@ async function handleNormalOrderFilled(event: OrderTradeUpdateEvent): Promise<vo
     return;
   }
 
+  // 跳过守塔策略订单：守塔单在 placeOrders 时已经下过 200 点 SL，这里再下 2% SL 会覆盖它
+  if (clientOrderId?.startsWith('ict_tower')) {
+    return;
+  }
+
   const filledPrice = parseFloat(order.averagePrice);
   const quantity = parseFloat(order.originalQuantity);
   const side = order.side;
