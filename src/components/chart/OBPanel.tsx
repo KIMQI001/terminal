@@ -5,7 +5,7 @@ import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useChartStore } from "@/stores/chartStore";
 import { useOrderStore, OTEPrefillData, TradingLine } from "@/stores/orderStore";
 import { OrderBlock } from "@/types/indicator";
-import { hasOverlapWithLists, getSameOrHigherTFs, ALL_TFS } from "@/lib/chart/indicators/overlap";
+// (overlap helpers 暂时未使用，保留供未来使用)
 
 const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d'] as const;
 
@@ -180,21 +180,11 @@ export function OBPanel() {
 
                 // 重叠高亮：当前 OB 与 same+HTF 周期 OTE/FVG 是否同向 + 价格重叠
                 // 跨周期规则：HTF item 不会因 LTF 重叠而高亮（HTF 不传 LTF 给它检查）
-                const sameOrHigher = getSameOrHigherTFs(tf, [...ALL_TFS]);
-                const oteList = sameOrHigher
-                  .map(t => multiTimeframeOTE[t as keyof typeof multiTimeframeOTE])
-                  .filter(Boolean);
-                const fvgList = sameOrHigher
-                  .map(t => multiTimeframeFVG[t as keyof typeof multiTimeframeFVG])
-                  .filter(Boolean);
-                const isHighlighted = hasOverlapWithLists(ob, oteList, fvgList);
-                const highlightClass = isHighlighted ? 'ring-2 ring-amber-400' : '';
-
                 return (
                   <div
                     key={tf}
                     onClick={() => handleOBClick(ob)}
-                    className={`relative grid grid-cols-4 gap-1 text-[9px] py-0.5 items-center rounded border border-dashed ${borderColor} overflow-hidden cursor-pointer hover:bg-gray-100 transition-colors ${highlightClass}`}
+                    className={`relative grid grid-cols-4 gap-1 text-[9px] py-0.5 items-center rounded border border-dashed ${borderColor} overflow-hidden cursor-pointer hover:bg-gray-100 transition-colors`}
                   >
                     {/* 填充背景 - 从左到右填充（所有周期都显示） */}
                     {displayFillPercent > 0 && (
@@ -241,22 +231,11 @@ export function OBPanel() {
                   // 计算填充百分比
                   const fillPercent = calculateFillPercent(ob);
 
-                  // 重叠高亮：当前 OB 与 same+HTF 周期 OTE/FVG 是否同向 + 价格重叠
-                  const sameOrHigher = getSameOrHigherTFs(timeframe, [...ALL_TFS]);
-                  const oteList = sameOrHigher
-                    .map(t => multiTimeframeOTE[t as keyof typeof multiTimeframeOTE])
-                    .filter(Boolean);
-                  const fvgList = sameOrHigher
-                    .map(t => multiTimeframeFVG[t as keyof typeof multiTimeframeFVG])
-                    .filter(Boolean);
-                  const isHighlighted = hasOverlapWithLists(ob, oteList, fvgList);
-                  const highlightClass = isHighlighted ? 'ring-2 ring-amber-400' : '';
-
                   return (
                     <div
                       key={index}
                       onClick={() => handleOBClick(ob)}
-                      className={`relative ${hoverColor} rounded p-1 text-[9px] cursor-pointer transition-colors overflow-hidden ${highlightClass}`}
+                      className={`relative ${hoverColor} rounded p-1 text-[9px] cursor-pointer transition-colors overflow-hidden`}
                     >
                       {/* 底色 */}
                       <div className={`absolute inset-0 ${bgColor}`} />
