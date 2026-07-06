@@ -1613,7 +1613,12 @@ async function placeOrders(
       // 先"让点位"：BUY +30（出价更高），SELL -30（要价更低），更快成交
       const adjustedEntry = order.side === 'BUY' ? order.price + ENTRY_OFFSET : order.price - ENTRY_OFFSET;
       const entryPrice = exchangeAdapter.roundToOBEntry(adjustedEntry, order.side);
-      const slPrice = exchangeAdapter.roundToOBEntry(order.stopLoss, order.side);
+
+      // SL 直接从 entryPrice 算 ± 200 点（不再用 block.entry ± 200，避免 offset/rounding 让距离飘到 230+）
+      // 同步重新取整保持尾数 0/5
+      const adjustedSL = order.side === 'BUY' ? entryPrice - MAX_SL_DISTANCE : entryPrice + MAX_SL_DISTANCE;
+      const slPrice = exchangeAdapter.roundToOBEntry(adjustedSL, order.side);
+
       const tpPrice = exchangeAdapter.roundToOBEntry(order.takeProfit, order.side);
 
       // 格式: ict_tower_{级别}_{ICT种类}_{点位}
@@ -1658,8 +1663,8 @@ async function placeOrders(
 
         // 用一个 10 点的紧贴止损（避免千分之3 对高价币 > 200 的问题）
         const rawProtectiveSL = order.side === 'BUY'
-          ? order.price - 10
-          : order.price + 10;
+          ? entryPrice - 10
+          : entryPrice + 10;
         const protectiveStopLoss = exchangeAdapter.roundToOBEntry(rawProtectiveSL, order.side);
 
         slResult = await exchangeAdapter.placeStopLossOrder(exchange, exchangeConfig, {
