@@ -67,6 +67,7 @@ interface TowerManagementConfig {
   bearishHighFilter: number;        // 空H过滤：1=只下H以上的空单，0=不限制
   useHLPDFilter: boolean;           // HLPD区域过滤：true=多单<=D/空单>=P, false=不限
   biasFilter: number;                // MTF bias 过滤：1=只下同向单，0=不限
+  lhHlOrders: number;                // LH/HL 不破单：1=在最新 HH 附近的 LH 下 SELL、在最新 LL 附近的 HL 下 BUY，0=不开启
   monitorTimeframe: string;         // 周期过滤：0=所有周期, 15m/1h/4h/1d 只下指定周期
   lastRunAt: string | null;
   nextRunAt: string | null;
@@ -197,6 +198,7 @@ export default function TowerPage() {
   const [bearishHighFilter, setBearishHighFilter] = useState(0); // 空H过滤：1=只下H以上的空单
   const [useHLPDFilter, setUseHLPDFilter] = useState(true); // HLPD区域过滤：true=多<=D/空>=P, false=不限
   const [biasFilter, setBiasFilter] = useState(0); // MTF bias 过滤：1=只下同向单，0=不限
+  const [lhHlOrders, setLhHlOrders] = useState(0); // LH/HL 不破单：0=关, 1=开
   const [monitorTimeframe, setMonitorTimeframe] = useState<string>("0"); // 周期过滤：0=所有，15m/1h/4h/1d 只下指定周期
   const [isAutoOrdering, setIsAutoOrdering] = useState(false);
   const [orderProgress, setOrderProgress] = useState<{
@@ -305,6 +307,7 @@ export default function TowerPage() {
           bearishHighFilter,
           useHLPDFilter,
           biasFilter,
+          lhHlOrders,
           monitorTimeframe,
         }),
       });
@@ -355,6 +358,7 @@ export default function TowerPage() {
       setBearishHighFilter(config.bearishHighFilter ?? 0);
       setUseHLPDFilter(config.useHLPDFilter ?? true);
       setBiasFilter(config.biasFilter ?? 0);
+      setLhHlOrders(config.lhHlOrders ?? 0);
       setMonitorTimeframe(config.monitorTimeframe ?? "0");
       // 同步到 localStorage
       localStorage.setItem(STORAGE_KEYS.BASE_MARGIN, String(config.baseMargin));
@@ -1275,6 +1279,20 @@ export default function TowerPage() {
                   <select
                     value={biasFilter}
                     onChange={(e) => setBiasFilter(Number(e.target.value))}
+                    disabled={isAutoManaged}
+                    className="w-12 px-1 py-1.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500 disabled:opacity-60"
+                  >
+                    <option value={0}>OFF</option>
+                    <option value={1}>ON</option>
+                  </select>
+                </div>
+
+                {/* LH/HL 不破单：0=关, 1=开（在 HH 附近 LH 下 SELL、LL 附近 HL 下 BUY） */}
+                <div className="flex items-center gap-1" title="LH/HL 不破单: 0=关, 1=开(在最新 HH 附近的 LH 下 SELL，LL 附近的 HL 下 BUY；受 Bias 过滤)">
+                  <span className="text-xs text-[var(--text-tertiary)]">LH/HL</span>
+                  <select
+                    value={lhHlOrders}
+                    onChange={(e) => setLhHlOrders(Number(e.target.value))}
                     disabled={isAutoManaged}
                     className="w-12 px-1 py-1.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500 disabled:opacity-60"
                   >

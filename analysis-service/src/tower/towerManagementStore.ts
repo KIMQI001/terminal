@@ -30,6 +30,7 @@ export interface TowerManagementConfig {
   bearishHighFilter: number;      // 空单过滤：1=只下H以上的空单，0=不限制
   useHLPDFilter: boolean;         // 是否启用HLPD区域过滤（多单<=D, 空单>=P），默认 true
   biasFilter: number;              // MTF bias 过滤：1=只下同向单，0=不限
+  lhHlOrders: number;              // LH/HL 不破单：1=在最新 HH 附近的 LH 下 SELL、在最新 LL 附近的 HL 下 BUY，0=不开启
   monitorTimeframe: string;       // 周期过滤：0=所有周期, 15m/1h/4h/1d 只下指定周期
   lastRunAt: string | null;      // 上次执行时间
   nextRunAt: string | null;      // 下次执行时间
@@ -73,6 +74,7 @@ interface ManagementRow {
   bearish_high_filter: number;
   use_hlpd_filter: number;
   bias_filter: number;
+  lh_hl_orders: number;
   monitor_timeframe: string;
   last_run_at: string | null;
   next_run_at: string | null;
@@ -203,6 +205,12 @@ export function initTowerManagementTables(): void {
     console.log('[TowerManagement] 添加 last_bias 字段');
   } catch { /* 列已存在 */ }
 
+  // 迁移：添加 lh_hl_orders 字段（不破单开关）
+  try {
+    db.exec(`ALTER TABLE tower_management ADD COLUMN lh_hl_orders INTEGER NOT NULL DEFAULT 0`);
+    console.log('[TowerManagement] 添加 lh_hl_orders 字段');
+  } catch { /* 列已存在 */ }
+
   console.log('[TowerManagement] 表初始化完成');
 }
 
@@ -255,6 +263,7 @@ export function upsertManagement(config: {
   bearishHighFilter?: number;
   useHLPDFilter?: boolean;
   biasFilter?: number;
+  lhHlOrders?: number;
   marginPercent?: number;
   monitorTimeframe?: string;
 }): TowerManagementConfig {
@@ -292,6 +301,7 @@ export function upsertManagement(config: {
         bearish_high_filter = ?,
         use_hlpd_filter = ?,
         bias_filter = ?,
+        lh_hl_orders = ?,
         monitor_timeframe = ?,
         next_run_at = ?,
         updated_at = ?
@@ -314,6 +324,7 @@ export function upsertManagement(config: {
       config.bearishHighFilter ?? 0,
       useHLPDFilter ? 1 : 0,
       config.biasFilter ?? 0,
+      config.lhHlOrders ?? 0,
       monitorTimeframe,
       nextRunAt,
       now,
@@ -329,8 +340,8 @@ export function upsertManagement(config: {
         user_id, symbol, exchange, is_active, interval_minutes, base_margin, margin_percent, margin_increment,
         tower_layers, bullish_start_layer, bearish_start_layer, min_spacing_ratio, min_entry_distance,
         trailing_activation_ratio, trailing_callback_rate, bullish_low_filter, bearish_high_filter,
-        use_hlpd_filter, bias_filter, monitor_timeframe, next_run_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        use_hlpd_filter, bias_filter, lh_hl_orders, monitor_timeframe, next_run_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       config.userId,
       config.symbol,
@@ -351,6 +362,7 @@ export function upsertManagement(config: {
       config.bearishHighFilter ?? 0,
       useHLPDFilter ? 1 : 0,
       config.biasFilter ?? 0,
+      config.lhHlOrders ?? 0,
       monitorTimeframe,
       nextRunAt,
       now,
@@ -586,6 +598,7 @@ function rowToConfig(row: ManagementRow): TowerManagementConfig {
     bearishHighFilter: (row as any).bearish_high_filter ?? 0,
     useHLPDFilter: ((row as any).use_hlpd_filter ?? 1) === 1,
     biasFilter: (row as any).bias_filter ?? 0,
+    lhHlOrders: (row as any).lh_hl_orders ?? 0,
     monitorTimeframe: (row as any).monitor_timeframe ?? '0',
     lastRunAt: row.last_run_at,
     nextRunAt: row.next_run_at,

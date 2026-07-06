@@ -19,6 +19,7 @@ import * as exchangeAdapter from '../order/exchangeAdapter';
 import { config } from '../config';
 import { fetchKlines } from '../data/klineClient';
 import { computeAllSessionBiases, BiasDirection } from './sessionBias';
+import { calculateNearbyPivots } from './nearbyPivots';
 
 // 调度器状态
 let schedulerInterval: NodeJS.Timeout | null = null;
@@ -458,7 +459,7 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     const cgData = USE_CG_DATA ? await fetchCGLiqData(management.symbol) : null;
 
     // 9. 计算要下的订单
-    let orders = calculateOrders(towerData, effectiveManagement, leverage, dailyHL, cgData);
+    let orders = await calculateOrders(towerData, effectiveManagement, leverage, dailyHL, cgData);
 
     // 9.5 bias filter: 只保留与 activeBias 同向的订单
     if (management.biasFilter === 1 && activeBias !== 'wait') {
@@ -1148,13 +1149,13 @@ interface TowerOrder {
   source: string;     // ICT 种类: OB, FVG, BB 等
 }
 
-function calculateOrders(
+async function calculateOrders(
   towerData: { currentPrice: number; blocks: Array<{ type: string; entry: number; high: number; low: number; source: string; timeframe: string }> },
   management: TowerManagementConfig,
   leverage: number,
   dailyHL: DailyHL | null,
   cgData: CGLiqData | null
-): TowerOrder[] {
+): Promise<TowerOrder[]> {
   const { currentPrice, blocks: rawBlocks } = towerData;
   const { baseMargin, marginIncrement, towerLayers, bullishStartLayer, bearishStartLayer, minSpacingRatio, bullishLowFilter, bearishHighFilter, useHLPDFilter, monitorTimeframe } = management;
 
@@ -1589,6 +1590,61 @@ function calculateOrders(
       source: 'LIQ',
     });
     console.log(`[TowerScheduler] CG额外空单: 入场=${cgFirstShort.entry.toFixed(0)}, 止损=${cgFirstShort.stopLoss.toFixed(0)}, 止盈=${cgFirstShort.takeProfit.toFixed(0)}`);
+  }
+
+  // ===== LH/HL 不破单（独立于 ICT，不占层数）=====
+  // LH（SELL）：在最新 HH 附近的 Lower High，bet on rejection
+  // HL（BUY）：在最新 LL 附近的 Higher Low，bet on bounce
+  // 使用 1h TF + lookback=5，与「实时通道监控」算法一致
+  if (management.lhHlOrders === 1) {
+    try {
+      const lhHlCandles = await fetchKlines(management.symbol, '1h', 300);
+      const pivots = calculateNearbyPivots(lhHlCandles, currentPrice, 5);
+
+      if (pivots.lh && pivots.lh.price > currentPrice) {
+        // LH 在当前价之上 → SELL（不破 LH）
+        const lhEntry = pivots.lh.price;
+        const lhTp = lhEntry * (1 - MIN_TP_RATIO);
+        const lhMargin = baseMargin;
+        const lhPositionValue = lhMargin * leverage;
+        const lhQuantity = Math.floor((lhPositionValue / lhEntry) * 1000) / 1000;
+        orders.push({
+          side: 'SELL',
+          positionSide: 'SHORT',
+          price: lhEntry,
+          quantity: lhQuantity,
+          stopLoss: 0,  // 由 placeOrders 用 entryPrice ± 200 重算
+          takeProfit: lhTp,
+          margin: lhMargin,
+          timeframe: '1h',
+          source: 'LH',
+        });
+        console.log(`[TowerScheduler] LH不破单: SELL @ ${lhEntry.toFixed(0)}, TP=${lhTp.toFixed(0)}`);
+      }
+
+      if (pivots.hl && pivots.hl.price < currentPrice) {
+        // HL 在当前价之下 → BUY（不破 HL）
+        const hlEntry = pivots.hl.price;
+        const hlTp = hlEntry * (1 + MIN_TP_RATIO);
+        const hlMargin = baseMargin;
+        const hlPositionValue = hlMargin * leverage;
+        const hlQuantity = Math.floor((hlPositionValue / hlEntry) * 1000) / 1000;
+        orders.push({
+          side: 'BUY',
+          positionSide: 'LONG',
+          price: hlEntry,
+          quantity: hlQuantity,
+          stopLoss: 0,  // 由 placeOrders 用 entryPrice ± 200 重算
+          takeProfit: hlTp,
+          margin: hlMargin,
+          timeframe: '1h',
+          source: 'HL',
+        });
+        console.log(`[TowerScheduler] HL不破单: BUY @ ${hlEntry.toFixed(0)}, TP=${hlTp.toFixed(0)}`);
+      }
+    } catch (e) {
+      console.error(`[TowerScheduler] LH/HL 计算失败:`, e);
+    }
   }
 
   return orders;
