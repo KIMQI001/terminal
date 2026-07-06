@@ -1543,9 +1543,14 @@ async function placeOrders(
 
   for (const order of orders) {
     try {
+      // 按交易所 tick size 取整（与手点下单一致）
+      const entryPrice = exchangeAdapter.roundToTickSize(symbol, order.price);
+      const slPrice = exchangeAdapter.roundToTickSize(symbol, order.stopLoss);
+      const tpPrice = exchangeAdapter.roundToTickSize(symbol, order.takeProfit);
+
       // 格式: ict_tower_{级别}_{ICT种类}_{点位}
       // 例如: ict_tower_4h_OB_95000 (21字符,Binance限制<36)
-      const priceStr = Math.round(order.price).toString();
+      const priceStr = entryPrice.toString();
       const clientOrderId = `ict_tower_${order.timeframe}_${order.source}_${priceStr}`;
 
       // 1. 下入场单（限价单）
@@ -1554,16 +1559,16 @@ async function placeOrders(
         side: order.side,
         positionSide: order.positionSide,
         quantity: order.quantity,
-        price: order.price,
+        price: entryPrice,
         clientOrderId,
       });
 
       if (!entryResult.success) {
-        errors.push(`入场 ${order.side} @ ${order.price}: ${entryResult.error}`);
+        errors.push(`入场 ${order.side} @ ${entryPrice}: ${entryResult.error}`);
         continue;
       }
 
-      console.log(`[TowerScheduler] 入场单: ${order.side} @ ${order.price}, 保证金=${order.margin}, 数量=${order.quantity.toFixed(3)}, SL=${order.stopLoss.toFixed(1)}, TP=${order.takeProfit.toFixed(1)}`);
+      console.log(`[TowerScheduler] 入场单: ${order.side} @ ${entryPrice}, 保证金=${order.margin}, 数量=${order.quantity.toFixed(3)}, SL=${slPrice.toFixed(1)}, TP=${tpPrice.toFixed(1)}`);
 
       // 平仓方向
       const closeSide = order.side === 'BUY' ? 'SELL' : 'BUY';
@@ -1575,7 +1580,7 @@ async function placeOrders(
         side: closeSide,
         positionSide: order.positionSide,
         quantity: order.quantity,
-        stopPrice: order.stopLoss,
+        stopPrice: slPrice,
         clientOrderId: `${clientOrderId}_sl`,
       });
 
@@ -1583,10 +1588,11 @@ async function placeOrders(
       if (!slResult.success && slResult.error?.includes('would immediately trigger')) {
         console.warn(`[TowerScheduler] 原始止损单失败（${order.stopLoss.toFixed(1)}会立即触发），改用保护性止损`);
 
-        // 使用入场价 * 千分之3 作为保护性止损
-        const protectiveStopLoss = order.side === 'BUY'
+        // 使用入场价 * 千分之3 作为保护性止损（也按 tick size 取整）
+        const rawProtectiveSL = order.side === 'BUY'
           ? order.price * (1 - SL_RATIO)
           : order.price * (1 + SL_RATIO);
+        const protectiveStopLoss = exchangeAdapter.roundToTickSize(symbol, rawProtectiveSL);
 
         slResult = await exchangeAdapter.placeStopLossOrder(exchange, exchangeConfig, {
           symbol,

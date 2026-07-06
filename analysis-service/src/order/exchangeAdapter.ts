@@ -61,6 +61,18 @@ function getPrecision(symbol: string) {
   return SYMBOL_PRECISION[symbol] || { quantity: 3, price: 2 };
 }
 
+/**
+ * 按交易所 tick size 把价格取整
+ * - price=61964.044, precision=1 → 61964.0
+ * - price=3000.456, precision=2 → 3000.46
+ * - price=100.123456, precision=3 → 100.123
+ */
+export function roundToTickSize(symbol: string, price: number): number {
+  const precision = getPrecision(symbol).price;
+  const factor = Math.pow(10, precision);
+  return Math.round(price * factor) / factor;
+}
+
 function generateSignature(queryString: string, apiSecret: string): string {
   return crypto.createHmac('sha256', apiSecret).update(queryString).digest('hex');
 }
