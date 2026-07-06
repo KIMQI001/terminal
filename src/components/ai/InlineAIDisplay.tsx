@@ -71,30 +71,30 @@ function calculateNearbyPivots(candles: Candle[], currentPrice: number): PivotSe
   const highs = swings.filter(s => s.type === 'high').sort((a, b) => b.time - a.time);
   const lows = swings.filter(s => s.type === 'low').sort((a, b) => b.time - a.time);
 
-  // 找上方最近的两个高点
+  // 找上方最近的三个高点（取倒数第二=前一个作为 HH）
   const higherHighs = highs.filter(h => h.price > currentPrice);
-  // HH = 最近的高点（上方最近的）
-  // LH = 第二近的高点
+  // HH = 前一个高点（上方第二近的）
+  // LH = 前前个高点（上方第三近的）
   let hh: PivotPoint | null = null;
   let lh: PivotPoint | null = null;
 
   if (higherHighs.length >= 2) {
-    hh = { price: higherHighs[0].price, time: higherHighs[0].time };
-    lh = { price: higherHighs[1].price, time: higherHighs[1].time };
+    hh = { price: higherHighs[1].price, time: higherHighs[1].time };
+    lh = { price: higherHighs[0].price, time: higherHighs[0].time };
   } else if (higherHighs.length === 1) {
     hh = { price: higherHighs[0].price, time: higherHighs[0].time };
   }
 
-  // 找下方最近的两个低点
+  // 找下方最近的三个低点（取倒数第二=前一个作为 LL）
   const lowerLows = lows.filter(l => l.price < currentPrice);
-  // LL = 最近的最低点
-  // HL = 第二近的低点（相对更高的低点）
+  // LL = 前一个低点（下方第二近的）
+  // HL = 前前个低点（下方第三近的）
   let ll: PivotPoint | null = null;
   let hl: PivotPoint | null = null;
 
   if (lowerLows.length >= 2) {
-    ll = { price: lowerLows[0].price, time: lowerLows[0].time };
-    hl = { price: lowerLows[1].price, time: lowerLows[1].time };
+    ll = { price: lowerLows[1].price, time: lowerLows[1].time };
+    hl = { price: lowerLows[0].price, time: lowerLows[0].time };
   } else if (lowerLows.length === 1) {
     ll = { price: lowerLows[0].price, time: lowerLows[0].time };
   }
