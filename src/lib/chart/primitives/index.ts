@@ -13,6 +13,4 @@ export { OTEPrimitive } from './OTEPrimitive';
 export { BreakerBlockPrimitive } from './BreakerBlockPrimitive';
 export { LiquidationHillPrimitive } from './LiquidationHillPrimitive';
 export { EquilibriumPrimitive } from './EquilibriumPrimitive';
-export { KeyLevelsPrimitive } from './KeyLevelsPrimitive';
-export type { KeyLevel } from './KeyLevelsPrimitive';
 export type { LiquidationBar, LiquidationHillData } from './LiquidationHillPrimitive';
