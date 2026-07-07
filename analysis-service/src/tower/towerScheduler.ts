@@ -1602,8 +1602,8 @@ async function calculateOrders(
       const lhHlCandles = await fetchKlines(management.symbol, '1h', 300);
       const pivots = calculateNearbyPivots(lhHlCandles, currentPrice, 5);
 
-      // 最近的高点 = pivots.lh（pivots.hh 是更早的）
-      const recentHigh = pivots.lh?.price;
+      // 最近的高点 = pivots.lh（pivots.hh 是更早的；只有 1 个高点时 lh 为 null，fallback 到 hh）
+      const recentHigh = pivots.lh?.price ?? pivots.hh?.price;
       if (recentHigh && recentHigh > currentPrice) {
         // HH - 100 → SELL（不破 HH）
         const lhEntry = recentHigh - LH_HL_OFFSET;
@@ -1627,8 +1627,8 @@ async function calculateOrders(
         }
       }
 
-      // 最近的低点 = pivots.hl（pivots.ll 是更早的）
-      const recentLow = pivots.hl?.price;
+      // 最近的低点 = pivots.hl（pivots.ll 是更早的；只有 1 个低点时 hl 为 null，fallback 到 ll）
+      const recentLow = pivots.hl?.price ?? pivots.ll?.price;
       if (recentLow && recentLow < currentPrice) {
         // LL + 100 → BUY（不破 LL）
         const hlEntry = recentLow + LH_HL_OFFSET;
