@@ -19,6 +19,16 @@ export interface DailyHLLines {
   L: boolean;  // 前低
 }
 
+// 日K锚点 OHLC（用于在图上画 4 条线）
+export interface DailyKAnchor {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  time: number;
+  visible: { O: boolean; H: boolean; L: boolean; C: boolean };
+}
+
 interface ChartState {
   symbol: string;
   timeframe: Timeframe;
@@ -30,6 +40,7 @@ interface ChartState {
   liquidationData: LiquidationHillData | null;
   dailyHL: DailyHL | null;  // 日K前高前低
   dailyHLLines: DailyHLLines;  // 价格线选中状态
+  dailyKAnchors: { '1D': DailyKAnchor | null; '4D': DailyKAnchor | null };  // 日K/4D 锚点 OHLC
 
   setSymbol: (symbol: string) => void;
   setTimeframe: (timeframe: Timeframe) => void;
@@ -42,6 +53,8 @@ interface ChartState {
   setLiquidationData: (data: LiquidationHillData | null) => void;
   setDailyHL: (data: DailyHL | null) => void;
   toggleDailyHLLine: (line: keyof DailyHLLines) => void;
+  setDailyKAnchor: (tf: '1D' | '4D', anchor: DailyKAnchor | null) => void;
+  toggleDailyKLine: (tf: '1D' | '4D', line: 'O' | 'H' | 'L' | 'C') => void;
 }
 
 export const useChartStore = create<ChartState>((set) => ({
@@ -85,4 +98,18 @@ export const useChartStore = create<ChartState>((set) => ({
       [line]: !state.dailyHLLines[line],
     },
   })),
+  dailyKAnchors: { '1D': null, '4D': null },
+  setDailyKAnchor: (tf, anchor) => set((state) => ({
+    dailyKAnchors: { ...state.dailyKAnchors, [tf]: anchor },
+  })),
+  toggleDailyKLine: (tf, line) => set((state) => {
+    const current = state.dailyKAnchors[tf];
+    if (!current) return state;
+    return {
+      dailyKAnchors: {
+        ...state.dailyKAnchors,
+        [tf]: { ...current, visible: { ...current.visible, [line]: !current.visible[line] } },
+      },
+    };
+  }),
 }));

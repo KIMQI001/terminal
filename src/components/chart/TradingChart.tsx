@@ -88,6 +88,7 @@ export function TradingChart() {
     chartType,
     candles,
     liquidationData,
+    dailyKAnchors,
     setCandles,
     setChartType,
     updateCandle,
@@ -1096,6 +1097,44 @@ export function TradingChart() {
       lowLineSeriesRef.current.setMarkers([]);
     }
   }, [swingPoints, enabled.swingPoints, chartType]);
+
+  // 日K锚点 OHLC 价格线（1D 实线 / 4D 虚线）
+  const dailyKLineIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!candleSeriesRef.current) return;
+
+    // 清除旧的日K锚点线
+    const toRemove = priceLinesRef.current.filter((l) => dailyKLineIdsRef.current.has((l as any)._tag));
+    toRemove.forEach((l) => candleSeriesRef.current?.removePriceLine(l));
+    priceLinesRef.current = priceLinesRef.current.filter((l) => !dailyKLineIdsRef.current.has((l as any)._tag));
+    dailyKLineIdsRef.current.clear();
+
+    const LINE_COLORS: Record<'O' | 'H' | 'L' | 'C', string> = {
+      O: '#3b82f6',  // 蓝
+      H: '#ef4444',  // 红
+      L: '#22c55e',  // 绿
+      C: '#f97316',  // 橙
+    };
+    (['1D', '4D'] as const).forEach((tf) => {
+      const anchor = dailyKAnchors[tf];
+      if (!anchor || !candleSeriesRef.current) return;
+      const isDashed = tf === '4D';
+      (['O', 'H', 'L', 'C'] as const).forEach((line) => {
+        if (!anchor.visible[line]) return;
+        const pl = candleSeriesRef.current!.createPriceLine({
+          price: anchor[line.toLowerCase() as 'open' | 'high' | 'low' | 'close'],
+          color: LINE_COLORS[line],
+          lineWidth: 1,
+          lineStyle: isDashed ? 2 : 0,
+          axisLabelVisible: true,
+          title: `${tf} ${line}`,
+        });
+        (pl as any)._tag = `dk-${tf}-${line}`;
+        dailyKLineIdsRef.current.add(`dk-${tf}-${line}`);
+        priceLinesRef.current.push(pl);
+      });
+    });
+  }, [dailyKAnchors]);
 
   // Update Trading Lines (Entry, Stop Loss, Take Profit, Orders, Positions)
   useEffect(() => {

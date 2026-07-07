@@ -76,11 +76,9 @@ function aggregateNDaily(dailyKlines: AnchorCandle[], n: number): AnchorCandle[]
 }
 
 export function DailyKPanel() {
-  const { symbol, candles } = useChartStore();
+  const { symbol, candles, dailyKAnchors, setDailyKAnchor, toggleDailyKLine } = useChartStore();
   const { setPrefillData, openModal } = useOrderStore();
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [dailyAnchor, setDailyAnchor] = useState<AnchorResult | null>(null);
-  const [fourDayAnchor, setFourDayAnchor] = useState<AnchorResult | null>(null);
 
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
 
@@ -97,27 +95,24 @@ export function DailyKPanel() {
         // 1D 锚点
         const dCandle = findAnchor(dailyData, currentPrice);
         if (dCandle) {
-          const range = dCandle.high - dCandle.low;
-          const pos = range > 0
-            ? Math.max(0, Math.min(100, ((currentPrice - dCandle.low) / range) * 100))
-            : 0;
-          setDailyAnchor({ candle: dCandle, positionPercent: pos });
+          // 保留已有的 visible 状态（避免每次重算时重置用户选择）
+          const existing = dailyKAnchors['1D'];
+          const visible = existing?.visible ?? { O: true, H: true, L: true, C: true };
+          setDailyKAnchor('1D', { ...dCandle, visible });
         } else {
-          setDailyAnchor(null);
+          setDailyKAnchor('1D', null);
         }
 
-        // 4D 锚点（参考）—— 从日K聚合成 4D
+        // 4D 锚点
         const fourDKlines = aggregateNDaily(dailyData, 4);
         const fCandle = findAnchor(fourDKlines, currentPrice);
         if (!cancelled) {
           if (fCandle) {
-            const range = fCandle.high - fCandle.low;
-            const pos = range > 0
-              ? Math.max(0, Math.min(100, ((currentPrice - fCandle.low) / range) * 100))
-              : 0;
-            setFourDayAnchor({ candle: fCandle, positionPercent: pos });
+            const existing = dailyKAnchors['4D'];
+            const visible = existing?.visible ?? { O: true, H: true, L: true, C: true };
+            setDailyKAnchor('4D', { ...fCandle, visible });
           } else {
-            setFourDayAnchor(null);
+            setDailyKAnchor('4D', null);
           }
         }
       } catch {
@@ -127,7 +122,30 @@ export function DailyKPanel() {
 
     load();
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, currentPrice]);
+
+  const dailyAnchor: AnchorResult | null = dailyKAnchors['1D']
+    ? (() => {
+        const c = dailyKAnchors['1D']!;
+        const range = c.high - c.low;
+        const pos = range > 0
+          ? Math.max(0, Math.min(100, ((currentPrice - c.low) / range) * 100))
+          : 0;
+        return { candle: c, positionPercent: pos };
+      })()
+    : null;
+
+  const fourDayAnchor: AnchorResult | null = dailyKAnchors['4D']
+    ? (() => {
+        const c = dailyKAnchors['4D']!;
+        const range = c.high - c.low;
+        const pos = range > 0
+          ? Math.max(0, Math.min(100, ((currentPrice - c.low) / range) * 100))
+          : 0;
+        return { candle: c, positionPercent: pos };
+      })()
+    : null;
 
   // 点击 H/L 只预填表单（跟 OTE 面板一样），不直接下单
   const handleClickPrice = (
