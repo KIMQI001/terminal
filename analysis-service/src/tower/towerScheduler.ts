@@ -29,6 +29,7 @@ let isRunning = false;
 // 止损统一固定 200 点（MAX_SL_DISTANCE），不再用 SL_RATIO 百分比
 const MAX_SL_DISTANCE = 200;    // 固定止损点数
 const MIN_TP_RATIO = 0.025;  // 止盈最小 2.5%
+const LH_HL_OFFSET = 100;     // LH/HL 不破单偏移：HH-100 / LL+100
 const ENTRY_OFFSET = 30;        // 入场"让点位"幅度（与 OTE/FVG 面板手点一致：BUY +30，SELL -30）
 
 // 日K前高前低接口
@@ -1593,54 +1594,62 @@ async function calculateOrders(
   }
 
   // ===== LH/HL 不破单（独立于 ICT，不占层数）=====
-  // LH（SELL）：在最新 HH 附近的 Lower High，bet on rejection
-  // HL（BUY）：在最新 LL 附近的 Higher Low，bet on bounce
+  // SELL：在最近的高点（HH）下方 100 点，bet on rejection
+  // BUY：在最近的低点（LL）上方 100 点，bet on bounce
   // 使用 1h TF + lookback=5，与「实时通道监控」算法一致
   if (management.lhHlOrders === 1) {
     try {
       const lhHlCandles = await fetchKlines(management.symbol, '1h', 300);
       const pivots = calculateNearbyPivots(lhHlCandles, currentPrice, 5);
 
-      if (pivots.lh && pivots.lh.price > currentPrice) {
-        // LH 在当前价之上 → SELL（不破 LH）
-        const lhEntry = pivots.lh.price;
-        const lhTp = lhEntry * (1 - MIN_TP_RATIO);
-        const lhMargin = baseMargin;
-        const lhPositionValue = lhMargin * leverage;
-        const lhQuantity = Math.floor((lhPositionValue / lhEntry) * 1000) / 1000;
-        orders.push({
-          side: 'SELL',
-          positionSide: 'SHORT',
-          price: lhEntry,
-          quantity: lhQuantity,
-          stopLoss: 0,  // 由 placeOrders 用 entryPrice ± 200 重算
-          takeProfit: lhTp,
-          margin: lhMargin,
-          timeframe: '1h',
-          source: 'LH',
-        });
-        console.log(`[TowerScheduler] LH不破单: SELL @ ${lhEntry.toFixed(0)}, TP=${lhTp.toFixed(0)}`);
+      // 最近的高点 = pivots.lh（pivots.hh 是更早的）
+      const recentHigh = pivots.lh?.price;
+      if (recentHigh && recentHigh > currentPrice) {
+        // HH - 100 → SELL（不破 HH）
+        const lhEntry = recentHigh - LH_HL_OFFSET;
+        if (lhEntry > currentPrice) {
+          const lhTp = lhEntry * (1 - MIN_TP_RATIO);
+          const lhMargin = baseMargin;
+          const lhPositionValue = lhMargin * leverage;
+          const lhQuantity = Math.floor((lhPositionValue / lhEntry) * 1000) / 1000;
+          orders.push({
+            side: 'SELL',
+            positionSide: 'SHORT',
+            price: lhEntry,
+            quantity: lhQuantity,
+            stopLoss: 0,  // 由 placeOrders 用 entryPrice ± 200 重算
+            takeProfit: lhTp,
+            margin: lhMargin,
+            timeframe: '1h',
+            source: 'LH',
+          });
+          console.log(`[TowerScheduler] LH不破单: SELL @ ${lhEntry.toFixed(0)} (最近HH=${recentHigh.toFixed(0)} - ${LH_HL_OFFSET}), TP=${lhTp.toFixed(0)}`);
+        }
       }
 
-      if (pivots.hl && pivots.hl.price < currentPrice) {
-        // HL 在当前价之下 → BUY（不破 HL）
-        const hlEntry = pivots.hl.price;
-        const hlTp = hlEntry * (1 + MIN_TP_RATIO);
-        const hlMargin = baseMargin;
-        const hlPositionValue = hlMargin * leverage;
-        const hlQuantity = Math.floor((hlPositionValue / hlEntry) * 1000) / 1000;
-        orders.push({
-          side: 'BUY',
-          positionSide: 'LONG',
-          price: hlEntry,
-          quantity: hlQuantity,
-          stopLoss: 0,  // 由 placeOrders 用 entryPrice ± 200 重算
-          takeProfit: hlTp,
-          margin: hlMargin,
-          timeframe: '1h',
-          source: 'HL',
-        });
-        console.log(`[TowerScheduler] HL不破单: BUY @ ${hlEntry.toFixed(0)}, TP=${hlTp.toFixed(0)}`);
+      // 最近的低点 = pivots.hl（pivots.ll 是更早的）
+      const recentLow = pivots.hl?.price;
+      if (recentLow && recentLow < currentPrice) {
+        // LL + 100 → BUY（不破 LL）
+        const hlEntry = recentLow + LH_HL_OFFSET;
+        if (hlEntry < currentPrice) {
+          const hlTp = hlEntry * (1 + MIN_TP_RATIO);
+          const hlMargin = baseMargin;
+          const hlPositionValue = hlMargin * leverage;
+          const hlQuantity = Math.floor((hlPositionValue / hlEntry) * 1000) / 1000;
+          orders.push({
+            side: 'BUY',
+            positionSide: 'LONG',
+            price: hlEntry,
+            quantity: hlQuantity,
+            stopLoss: 0,  // 由 placeOrders 用 entryPrice ± 200 重算
+            takeProfit: hlTp,
+            margin: hlMargin,
+            timeframe: '1h',
+            source: 'HL',
+          });
+          console.log(`[TowerScheduler] HL不破单: BUY @ ${hlEntry.toFixed(0)} (最近LL=${recentLow.toFixed(0)} + ${LH_HL_OFFSET}), TP=${hlTp.toFixed(0)}`);
+        }
       }
     } catch (e) {
       console.error(`[TowerScheduler] LH/HL 计算失败:`, e);
