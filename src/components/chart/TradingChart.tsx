@@ -1115,25 +1115,24 @@ export function TradingChart() {
       L: '#22c55e',  // 绿
       C: '#f97316',  // 橙
     };
-    (['1D', '4D'] as const).forEach((tf) => {
-      const anchor = dailyKAnchors[tf];
-      if (!anchor || !candleSeriesRef.current) return;
-      const isDashed = tf === '4D';
+    // 只画 1D（4D 聚合数据有时异常）
+    const anchor = dailyKAnchors['1D'];
+    if (anchor && candleSeriesRef.current) {
       (['O', 'H', 'L', 'C'] as const).forEach((line) => {
         if (!anchor.visible[line]) return;
         const pl = candleSeriesRef.current!.createPriceLine({
           price: anchor[line.toLowerCase() as 'open' | 'high' | 'low' | 'close'],
           color: LINE_COLORS[line],
           lineWidth: 1,
-          lineStyle: isDashed ? 2 : 0,
+          lineStyle: 0,
           axisLabelVisible: true,
-          title: `${tf} ${line}`,
+          title: `1D ${line}`,
         });
-        (pl as any)._tag = `dk-${tf}-${line}`;
-        dailyKLineIdsRef.current.add(`dk-${tf}-${line}`);
+        (pl as any)._tag = `dk-1D-${line}`;
+        dailyKLineIdsRef.current.add(`dk-1D-${line}`);
         priceLinesRef.current.push(pl);
       });
-    });
+    }
   }, [dailyKAnchors]);
 
   // Update Trading Lines (Entry, Stop Loss, Take Profit, Orders, Positions)
