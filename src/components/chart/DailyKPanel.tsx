@@ -37,18 +37,22 @@ function formatTime(ts: number): string {
 }
 
 /**
- * 从 K 线序列中，从右向左找到第一根 currentPrice ∈ [low, high] 的K线
+ * 从 K 线序列中找到 currentPrice 所在的锚点K线
+ * 1. 优先找 currentPrice ∈ [low, high] 的K线（从右往左）
+ * 2. 找不到时（如突破），返回最近的完整K线（length-2）
+ * 3. 都没有则返回 null
  */
 function findAnchor(klines: AnchorCandle[], currentPrice: number): AnchorCandle | null {
   if (klines.length < 2) return null;
-  // 倒数第二根开始向左扫
+  // 1. 找包含当前价的K线（从右往左）
   for (let i = klines.length - 2; i >= 0; i--) {
     const c = klines[i];
     if (currentPrice >= c.low && currentPrice <= c.high) {
       return c;
     }
   }
-  return null;
+  // 2. 找不到（突破场景）→ 返回最近的完整K线作为参考
+  return klines[klines.length - 2] || null;
 }
 
 /**
