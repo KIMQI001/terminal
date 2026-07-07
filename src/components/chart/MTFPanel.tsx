@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -125,12 +125,38 @@ function getEuropeBiasColor(dir: EuropeBiasDirection | undefined) {
 
 export function MTFPanel() {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   // 每 1 分钟 re-render，让 WAIT → 实际结果 在 session ready 时立即切换
   const [, setTick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setTick((n) => n + 1), 60 * 1000);
     return () => clearInterval(t);
   }, []);
+
+  // 点击外部关闭下拉框
+  useEffect(() => {
+    if (!isExpanded) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (buttonRef.current && !buttonRef.current.contains(target)) {
+        const dropdown = document.querySelector('[data-mtf-dropdown]');
+        if (dropdown && !dropdown.contains(target)) {
+          setIsExpanded(false);
+        }
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isExpanded]);
+
+  const handleToggle = () => {
+    if (!isExpanded && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setDropdownPos({ top: rect.bottom + 4, left: rect.left });
+    }
+    setIsExpanded(!isExpanded);
+  };
 
   const { multiTimeframeTrend, multiTimeframeEquilibrium, initialBalance, asiaBias, europeBias } = useIndicatorStore();
 
@@ -163,9 +189,10 @@ export function MTFPanel() {
   return (
     <div className="relative">
       <Button
+        ref={buttonRef}
         variant="outline"
         size="sm"
-        onClick={() => setIsExpanded(!isExpanded)}
+        onClick={handleToggle}
         className={activeClass}
         title={`Current session: ${activeSession}`}
       >
@@ -174,8 +201,12 @@ export function MTFPanel() {
         <ChevronDown className={cn("w-3 h-3 transition-transform", isExpanded && "rotate-180")} />
       </Button>
 
-      {isExpanded && (
-        <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-50 min-w-[200px]">
+      {isExpanded && dropdownPos && (
+        <div
+          data-mtf-dropdown
+          className="fixed bg-white border border-gray-200 rounded-lg shadow-lg p-2 z-[100] min-w-[200px]"
+          style={{ top: dropdownPos.top, left: dropdownPos.left }}
+        >
           <div className="text-[10px] text-gray-500 font-medium mb-1 px-1">Multi-TF Trend + EQ</div>
 
           {TIMEFRAMES.map((tf) => {
