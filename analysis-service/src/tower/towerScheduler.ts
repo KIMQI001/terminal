@@ -424,8 +424,8 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
         effectiveBaseMargin = Math.floor((balanceResult.balance * management.marginPercent) / 100);
         // 至少 10U
         effectiveBaseMargin = Math.max(10, effectiveBaseMargin);
-        // 向下取整到 10
-        effectiveBaseMargin = Math.floor(effectiveBaseMargin / 10) * 10;
+        // 不再向下取整到 10——会腰斩小余额（如 19 → 10）。只取整到 1U
+        effectiveBaseMargin = Math.floor(effectiveBaseMargin);
         console.log(`[TowerScheduler] 账户百分比模式: 余额=${balanceResult.balance.toFixed(2)}, ${management.marginPercent}% = ${effectiveBaseMargin}U`);
       } else {
         console.warn('[TowerScheduler] 获取余额失败，回退到 baseMargin');
