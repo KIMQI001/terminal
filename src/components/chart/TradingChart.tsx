@@ -167,12 +167,27 @@ export function TradingChart() {
   const canStartMeasure = isShiftPressed || isToolActive;
 
   // Calculate indicators when candles change
+  // Swing point lookback 缩放：短 TF 用更少 bars，避免等 50×15min=12.5h 才确认 swing
+  const getSwingLookback = (tf: string): number => {
+    const lookbacks: Record<string, number> = {
+      '1m': 30,   // 30 min
+      '5m': 30,   // 2.5 h
+      '15m': 20,  // 5 h
+      '1h': 24,   // 1 d
+      '4h': 30,   // 5 d
+      '1d': 30,   // 1 mo
+    };
+    return lookbacks[tf] ?? 50;
+  };
+
   const calculateIndicators = useCallback(
     (candleData: Candle[]) => {
       if (candleData.length < 10) return;
 
-      // Swing points (LuxAlgo 风格 length=50，包含 missed pivots 和 ghost levels)
-      const pivotResult = detectPivotsFull(candleData, 50);
+      const swingLength = getSwingLookback(timeframe);
+
+      // Swing points (LuxAlgo 风格，按 TF 缩放 length)
+      const pivotResult = detectPivotsFull(candleData, swingLength);
       setSwingPoints(pivotResult.pivots);
       setMissedPivots(pivotResult.missedPivots);
       setGhostLevels(pivotResult.ghostLevels);
@@ -722,7 +737,7 @@ export function TradingChart() {
           if (data.length === 0) return;
 
           const lastPrice = data[data.length - 1].close;
-          const swings = detectSwingPoints(data);
+          const swings = detectSwingPoints(data, getSwingLookback(tf));
 
           // OTE
           const otes = detectOTEZones(swings, lastPrice, data);
