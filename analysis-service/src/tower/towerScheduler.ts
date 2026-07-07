@@ -52,9 +52,16 @@ const COINGLASS_SERVICE_URL = process.env.COINGLASS_SERVICE_URL || 'http://127.0
 // 是否使用 Coinglass 清算数据（默认关闭）
 const USE_CG_DATA = process.env.TOWER_USE_CG_DATA === 'true';
 
-// 时间周期优先级（同距离时大级别优先）
+// 来源优先级（OTE > OB > FVG）
+const SOURCE_PRIORITY: Record<string, number> = {
+  'OTE': 3,
+  'OB': 2,
+  'FVG': 1,
+};
+
+// 时间周期优先级（小级别优先：15m > 1h > 4h > 1d）
 const TIMEFRAME_PRIORITY: Record<string, number> = {
-  '1d': 5, '4h': 4, '1h': 3, '15m': 2
+  '15m': 4, '1h': 3, '4h': 2, '1d': 1
 };
 
 /**
@@ -1333,34 +1340,37 @@ async function calculateOrders(
     return result;
   };
 
-  // 按距离排序函数：近的优先，同距离大级别优先
-  const sortByDistance = (
+  // 排序函数：来源优先 (OTE > OB > FVG) > 时间周期优先 (15m > 1h > 4h > 1d) > 距离近的优先
+  const sortByPriority = (
     blocks: typeof allBullish,
     currentPrice: number
   ) => {
     return blocks.sort((a, b) => {
-      const distanceA = Math.abs(a.entry - currentPrice);
-      const distanceB = Math.abs(b.entry - currentPrice);
+      // 1. 来源优先级：OTE > OB > FVG
+      const sourceA = SOURCE_PRIORITY[a.source] || 0;
+      const sourceB = SOURCE_PRIORITY[b.source] || 0;
+      if (sourceA !== sourceB) return sourceB - sourceA;
 
-      // 按距离排序，近的优先
-      if (distanceA !== distanceB) {
-        return distanceA - distanceB;
-      }
-      // 同距离大级别优先
+      // 2. 同来源：时间周期优先级（小级别优先）
       const tfA = TIMEFRAME_PRIORITY[a.timeframe] || 0;
       const tfB = TIMEFRAME_PRIORITY[b.timeframe] || 0;
-      return tfB - tfA;
+      if (tfA !== tfB) return tfB - tfA;
+
+      // 3. 同来源同周期：距离近的优先
+      const distanceA = Math.abs(a.entry - currentPrice);
+      const distanceB = Math.abs(b.entry - currentPrice);
+      return distanceA - distanceB;
     });
   };
 
   // 筛选塔块
   // 添加区域过滤: 多单只在折扣区(D区), 空单只在溢价区(P区)
-  let bullishCandidates = sortByDistance(
+  let bullishCandidates = sortByPriority(
     allBullish.filter(b => b.entry < currentPrice && currentPrice - b.entry >= minDistance),
     currentPrice
   );
 
-  let bearishCandidates = sortByDistance(
+  let bearishCandidates = sortByPriority(
     allBearish.filter(b => b.entry > currentPrice && b.entry - currentPrice >= minDistance),
     currentPrice
   );
