@@ -1128,10 +1128,13 @@ export function TradingChart() {
     // 只画 1D（4D 聚合数据有时异常）
     const anchor = dailyKAnchors['1D'];
     if (anchor && candleSeriesRef.current) {
+      const FIELD: Record<'O' | 'H' | 'L' | 'C', 'open' | 'high' | 'low' | 'close'> = {
+        O: 'open', H: 'high', L: 'low', C: 'close',
+      };
       (['O', 'H', 'L', 'C'] as const).forEach((line) => {
         if (!anchor.visible[line]) return;
         const pl = candleSeriesRef.current!.createPriceLine({
-          price: anchor[line.toLowerCase() as 'open' | 'high' | 'low' | 'close'],
+          price: anchor[FIELD[line]],
           color: LINE_COLORS[line],
           lineWidth: 1,
           lineStyle: 0,
