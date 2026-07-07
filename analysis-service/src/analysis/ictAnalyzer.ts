@@ -746,6 +746,16 @@ export function detectStructure(
 // ============================================
 // 综合分析
 // ============================================
+// 按 timeframe 缩放 swing 检测参数（短 TF 用更少 bars、更低最小幅度）
+// ============================================
+const SWING_PARAMS_BY_TF: Record<string, { leftBars: number; rightBars: number; minSwingPercent: number }> = {
+  '1m':  { leftBars: 3, rightBars: 1, minSwingPercent: 0.3 },
+  '5m':  { leftBars: 3, rightBars: 1, minSwingPercent: 0.5 },
+  '15m': { leftBars: 3, rightBars: 2, minSwingPercent: 1.0 },
+  '1h':  { leftBars: 3, rightBars: 2, minSwingPercent: 1.5 },
+  '4h':  { leftBars: 3, rightBars: 3, minSwingPercent: 2.0 },
+  '1d':  { leftBars: 3, rightBars: 3, minSwingPercent: 2.5 },
+};
 
 export function analyzeICT(
   candles: Candle[],
@@ -754,8 +764,11 @@ export function analyzeICT(
 ): ICTAnalysisResult {
   const currentPrice = candles[candles.length - 1].close;
 
+  // 按 TF 缩放 swing 检测参数
+  const params = SWING_PARAMS_BY_TF[timeframe] ?? { leftBars: 3, rightBars: 3, minSwingPercent: 1.5 };
+
   // 计算所有 ICT 指标
-  const swingPoints = detectSwingPoints(candles);
+  const swingPoints = detectSwingPoints(candles, params.leftBars, params.rightBars, params.minSwingPercent);
   const fvgs = detectFVGs(candles);
   const orderBlocks = detectOrderBlocks(candles);
   const oteZones = detectOTEZones(swingPoints, currentPrice, candles);
