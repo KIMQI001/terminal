@@ -78,7 +78,6 @@ export function TradingChart() {
 
   // Shift 键状态
   const [isShiftPressed, setIsShiftPressed] = useState(false);
-  const [chartReady, setChartReady] = useState(false);
 
   // OHLCV 显示数据
   const [ohlcvData, setOhlcvData] = useState<{ time: number; open: number; high: number; low: number; close: number; volume: number } | null>(null);
@@ -369,7 +368,6 @@ export function TradingChart() {
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
-    setChartReady(true);
 
     // 成交量柱状图
     const volumeSeries = chart.addHistogramSeries({
@@ -1103,7 +1101,7 @@ export function TradingChart() {
   // 日K锚点 OHLC 价格线（1D 实线 / 4D 虚线）
   const dailyKLineIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!chartReady || !candleSeriesRef.current) return;
+    if (!candleSeriesRef.current) return;
 
     // 清除旧的日K锚点线
     const toRemove = priceLinesRef.current.filter((l) => dailyKLineIdsRef.current.has((l as any)._tag));
@@ -1135,7 +1133,7 @@ export function TradingChart() {
         priceLinesRef.current.push(pl);
       });
     }
-  }, [dailyKAnchors, chartReady]);
+  }, [dailyKAnchors]);
   useEffect(() => {
     if (!candleSeriesRef.current) return;
 
