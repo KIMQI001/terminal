@@ -41,6 +41,7 @@ interface ChartState {
   dailyHL: DailyHL | null;  // 日K前高前低
   dailyHLLines: DailyHLLines;  // 价格线选中状态
   dailyKAnchors: { '1D': DailyKAnchor | null; '4D': DailyKAnchor | null };  // 日K/4D 锚点 OHLC
+  dailyKLineEnabled: boolean;  // 是否在图上画日K锚点 OHLC 线
 
   setSymbol: (symbol: string) => void;
   setTimeframe: (timeframe: Timeframe) => void;
@@ -55,6 +56,7 @@ interface ChartState {
   toggleDailyHLLine: (line: keyof DailyHLLines) => void;
   setDailyKAnchor: (tf: '1D' | '4D', anchor: DailyKAnchor | null) => void;
   toggleDailyKLine: (tf: '1D' | '4D', line: 'O' | 'H' | 'L' | 'C') => void;
+  setDailyKLineEnabled: (enabled: boolean) => void;
 }
 
 export const useChartStore = create<ChartState>((set) => ({
@@ -112,4 +114,6 @@ export const useChartStore = create<ChartState>((set) => ({
       },
     };
   }),
+  dailyKLineEnabled: false,
+  setDailyKLineEnabled: (enabled) => set({ dailyKLineEnabled: enabled }),
 }));

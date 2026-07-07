@@ -80,7 +80,7 @@ function aggregateNDaily(dailyKlines: AnchorCandle[], n: number): AnchorCandle[]
 }
 
 export function DailyKPanel() {
-  const { symbol, candles, dailyKAnchors, setDailyKAnchor, toggleDailyKLine } = useChartStore();
+  const { symbol, candles, dailyKAnchors, dailyKLineEnabled, setDailyKAnchor, setDailyKLineEnabled } = useChartStore();
   const { setPrefillData, openModal } = useOrderStore();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -236,7 +236,20 @@ export function DailyKPanel() {
         onClick={() => setIsCollapsed(!isCollapsed)}
       >
         <span className="text-xs font-semibold text-gray-600">日K锚点 (点击开单)</span>
-        <span className="text-gray-400 text-[10px]">{isCollapsed ? '▶' : '▼'}</span>
+        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          <label className="flex items-center gap-1 text-[10px] text-gray-500 cursor-pointer" title="在图上画 1D O/H/L/C 4 条线">
+            <input
+              type="checkbox"
+              checked={dailyKLineEnabled}
+              onChange={(e) => setDailyKLineEnabled(e.target.checked)}
+              className="w-3 h-3"
+            />
+            <span>画线</span>
+          </label>
+          <span className="text-gray-400 text-[10px] cursor-pointer" onClick={() => setIsCollapsed(!isCollapsed)}>
+            {isCollapsed ? '▶' : '▼'}
+          </span>
+        </div>
       </div>
 
       {/* 内容区 - 左右两栏 */}
