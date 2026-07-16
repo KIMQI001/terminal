@@ -230,7 +230,7 @@ export function initTowerManagementTables(): void {
 
   // 迁移：添加 max_entry_distance_percent 字段（最大入场距离百分比，默认 2%）
   try {
-    db.exec(`ALTER TABLE tower_management ADD COLUMN max_entry_distance_percent INTEGER NOT NULL DEFAULT 20`);  // 整数 20 = 2.0%
+    db.exec(`ALTER TABLE tower_management ADD COLUMN max_entry_distance_percent REAL NOT NULL DEFAULT 2.0`);  // 直接存百分比
     console.log('[TowerManagement] 添加 max_entry_distance_percent 字段');
   } catch { /* 列已存在 */ }
 
@@ -620,7 +620,7 @@ function rowToConfig(row: ManagementRow): TowerManagementConfig {
     bearishStartLayer: row.bearish_start_layer,
     minSpacingRatio: row.min_spacing_ratio,
     minEntryDistance: row.min_entry_distance ?? 500,
-    maxEntryDistancePercent: (row as any).max_entry_distance_percent ?? 20,
+    maxEntryDistancePercent: (row as any).max_entry_distance_percent ?? 2,
     trailingActivationRatio: row.trailing_activation_ratio ?? 0.02,
     trailingCallbackRate: row.trailing_callback_rate ?? 0.3,
     bullishLowFilter: (row as any).bullish_low_filter ?? 0,

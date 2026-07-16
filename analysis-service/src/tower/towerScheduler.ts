@@ -1253,7 +1253,7 @@ async function calculateOrders(
   // 最小距离（启动间距，千分比）
   const { minEntryDistance = 5, maxEntryDistancePercent = 20 } = management;  // maxEntryDistancePercent 存的是 整数×10，例如 20 = 2.0%
   const minDistance = currentPrice * (minEntryDistance / 1000);
-  const maxDistance = currentPrice * (maxEntryDistancePercent / 1000);  // 整数×10 除以 1000 = 百分比
+  const maxDistance = currentPrice * (maxEntryDistancePercent / 100);  // 百分比 → 点数
   // 最小间距（万分之 N）
   const minSpacing = currentPrice * (minSpacingRatio / 10000);
 

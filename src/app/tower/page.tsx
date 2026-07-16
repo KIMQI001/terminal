@@ -68,7 +68,7 @@ interface TowerManagementConfig {
   useHLPDFilter: boolean;           // HLPD区域过滤：true=多单<=D/空单>=P, false=不限
   biasFilter: number;                // MTF bias 过滤：1=只下同向单，0=不限
   lhHlOrders: number;                // LH/HL 不破单：1=在最新 HH 附近的 LH 下 SELL、在最新 LL 附近的 HL 下 BUY，0=不开启
-  maxEntryDistancePercent: number;  // 最大入场距离（整数×10，例 20 = 2.0%）
+  maxEntryDistancePercent: number;  // 最大入场距离（百分比，例 2 = 2.0%）
   monitorTimeframe: string;         // 周期过滤：0=所有周期, 15m/1h/4h/1d 只下指定周期
   lastRunAt: string | null;
   nextRunAt: string | null;
@@ -362,7 +362,7 @@ export default function TowerPage() {
       setUseHLPDFilter(config.useHLPDFilter ?? true);
       setBiasFilter(config.biasFilter ?? 0);
       setLhHlOrders(config.lhHlOrders ?? 0);
-      setMaxEntryDistancePercent(config.maxEntryDistancePercent ? config.maxEntryDistancePercent / 10 : 2);
+      setMaxEntryDistancePercent(config.maxEntryDistancePercent ?? 2);
       setMonitorTimeframe(config.monitorTimeframe ?? "0");
       // 同步到 localStorage
       localStorage.setItem(STORAGE_KEYS.BASE_MARGIN, String(config.baseMargin));
