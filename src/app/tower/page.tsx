@@ -186,7 +186,7 @@ export default function TowerPage() {
   const [baseMargin, setBaseMargin] = useState(100);
   const [marginPercent, setMarginPercent] = useState<0 | 10 | 25 | 33>(0); // 0=固定, 10/25/33=账户百分比
   const [marginIncrement, setMarginIncrement] = useState(0);
-  const [towerLayers, setTowerLayers] = useState(3);
+  const [towerLayers, setTowerLayers] = useState(1);  // 默认 1：每方向最多 1 个单（跟后端 cap 一致）
   const [bullishStartLayer, setBullishStartLayer] = useState(1);
   const [bearishStartLayer, setBearishStartLayer] = useState(1);
   const [minSpacingRatio, setMinSpacingRatio] = useState(5); // 万分之几，默认5（万分之五）
@@ -199,7 +199,7 @@ export default function TowerPage() {
   const [useHLPDFilter, setUseHLPDFilter] = useState(true); // HLPD区域过滤：true=多<=D/空>=P, false=不限
   const [biasFilter, setBiasFilter] = useState(0); // MTF bias 过滤：1=只下同向单，0=不限
   const [lhHlOrders, setLhHlOrders] = useState(0); // LH/HL 不破单：0=关, 1=开
-  const [monitorTimeframe, setMonitorTimeframe] = useState<string>("0"); // 周期过滤：0=所有，15m/1h/4h/1d 只下指定周期
+  const [monitorTimeframe, setMonitorTimeframe] = useState<string>("15m"); // 周期过滤：默认 15m（跟后端一致，0=所有周期）
   const [isAutoOrdering, setIsAutoOrdering] = useState(false);
   const [orderProgress, setOrderProgress] = useState<{
     current: number;
@@ -1302,7 +1302,7 @@ export default function TowerPage() {
                 </div>
 
                 {/* 周期过滤 */}
-                <div className="flex items-center gap-1" title="周期过滤: 0=所有周期, 否则只下指定周期">
+                <div className="flex items-center gap-1" title="周期过滤: 0=所有周期（推荐用 15m，跟你手动的 TF 一致）">
                   <span className="text-xs text-[var(--text-tertiary)]">周期</span>
                   <select
                     value={monitorTimeframe}
@@ -1311,8 +1311,8 @@ export default function TowerPage() {
                     className="w-14 px-1 py-1.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500 disabled:opacity-60"
                   >
                     {[
-                      { value: "0", label: "0" },
-                      { value: "15m", label: "15m" },
+                      { value: "0", label: "ALL" },
+                      { value: "15m", label: "15m ★" },
                       { value: "1h", label: "1h" },
                       { value: "4h", label: "4h" },
                       { value: "1d", label: "1d" },
@@ -1321,7 +1321,6 @@ export default function TowerPage() {
                     ))}
                   </select>
                 </div>
-
                 <button
                   onClick={handleToggleAutoManage}
                   disabled={isAutoOrdering || !data?.blocks?.length}
