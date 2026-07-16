@@ -1044,45 +1044,39 @@ impl KlineCache {
     }
 
     /// 检测并发送 FVG (Fair Value Gap) 钉钉通知
-    /// 只检测刚收盘那根 K 线（前一根作为 FVG 的中间 K 线）形成的 FVG，避免重复推送
-    async fn detect_fvg_and_notify(&mut self, symbol: &str, current_candle_time: i64) {
+    /// 只检测刚收盘那根 K 线（c2 = candles[len-2]）形成的新 FVG，
+    /// 并用 c2_time 与 last_fvg_time 比较跳过启动扫描已经补发的旧 FVG
+    async fn detect_fvg_and_notify(&mut self, symbol: &str) {
         // 至少需要 3 根 K 线才能检测 FVG
         if self.candles.len() < 3 {
             return;
         }
 
+        // c2 = 倒数第二根 K 线（刚收盘那根的前一根），FVG.time == c2.time
+        let c2_time = self.candles[self.candles.len() - 2].time;
+
+        // 跳过：如果本周期 c2 时间 <= 上次通知时间（启动扫描已补发的 FVG）
+        if let Some(last) = self.last_fvg_time {
+            if c2_time <= last {
+                debug!("[FVG] c2_time={} <= last_fvg_time={}, 已发送过, 跳过", c2_time, last);
+                return;
+            }
+        }
+
         let fvgs = detect_fvg(&self.candles, FVG_MIN_GAP_PERCENT);
 
-        // 新 K 线收盘时，FVG 的形成时间是上一根 K 线（即新 K 线时间 - 周期秒数）
-        // 这里假设 15m 周期 = 900 秒，从 current_candle_time 反推
-        let timeframe_secs = match self.timeframe.as_str() {
-            "1m" => 60,
-            "5m" => 300,
-            "15m" => 900,
-            "1h" => 3600,
-            "4h" => 14400,
-            _ => 900,
-        };
-        let prev_candle_time = current_candle_time - timeframe_secs;
-
-        // 收集本周期新形成的 FVG（理论上同一根中间 K 线最多形成 1 个方向的 FVG）
+        // 只收集本周期 c2 时刻形成的新 FVG
         let new_fvgs: Vec<&FVG> = fvgs
             .iter()
-            .filter(|f| f.time == prev_candle_time)
+            .filter(|f| f.time == c2_time)
             .collect();
 
         if new_fvgs.is_empty() {
-            debug!("[FVG] 本周期无新 FVG 形成");
+            debug!("[FVG] c2={} 无新 FVG 形成", c2_time);
             return;
         }
 
         for fvg in new_fvgs {
-            // 去重：同一 K 线时间已通知过则跳过
-            if self.last_fvg_time == Some(fvg.time) {
-                debug!("[FVG] 去重跳过: {}", fvg.time);
-                continue;
-            }
-
             self.last_fvg_time = Some(fvg.time);
 
             let direction = if fvg.fvg_type == "bullish" { "🐂做多" } else { "🐻做空" };
@@ -1464,7 +1458,7 @@ async fn main() -> anyhow::Result<()> {
                                             cache.detect_and_notify(parts[0]).await;
 
                                             // FVG 检测（每根新 K 线收盘时检查一次是否形成新 FVG）
-                                            cache.detect_fvg_and_notify(parts[0], candle.time).await;
+                                            cache.detect_fvg_and_notify(parts[0]).await;
                                         }
 
                                         // 倍量报警检测
