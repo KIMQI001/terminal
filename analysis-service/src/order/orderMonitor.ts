@@ -242,6 +242,8 @@ async function handleEntryFilled(
       // 优先用「反向 tower 入场价」作为 TP：例如 long 持仓 + 有 short 65000 的挂单，
       // 就把 long 的 TP 挂到 65000。找到就用，没找到就用 pendingOrder.takeProfit 默认值。
       const oppositeSide = pendingOrder.side === 'BUY' ? 'SELL' : 'BUY';
+      console.log(`[OrderMonitor] 扫描反向 ${oppositeSide} tower 入场单: 总挂单数=${existingOrders.length}`);
+
       const oppositeEntryOrder = existingOrders.find(o =>
         o.clientOrderId?.startsWith('ict_tower') &&
         o.clientOrderId !== clientOrderId &&
@@ -252,6 +254,10 @@ async function handleEntryFilled(
         o.type === 'LIMIT'
       );
 
+      // 打印所有 ict_tower 挂单（debug）
+      const allTower = existingOrders.filter(o => o.clientOrderId?.startsWith('ict_tower'));
+      console.log(`[OrderMonitor] 当前 symbol ict_tower 挂单: ${allTower.map(o => `${o.clientOrderId} side=${o.side} type=${o.type} price=${o.price} status=${o.status}`).join(' | ')}`);
+
       let tpPrice: number;
       let tpSource: string;
       if (oppositeEntryOrder && oppositeEntryOrder.price) {
@@ -259,7 +265,7 @@ async function handleEntryFilled(
         tpSource = `反向 tower 入场 ${oppositeSide}@${tpPrice} (${oppositeEntryOrder.clientOrderId})`;
       } else {
         tpPrice = pendingOrder.takeProfit;
-        tpSource = `默认 ${tpPrice}`;
+        tpSource = `默认 pendingOrder.takeProfit=${tpPrice}`;
       }
 
       // 下固定止盈单，使用短后缀避免超过36字符限制
