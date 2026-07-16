@@ -239,16 +239,39 @@ async function handleEntryFilled(
     }
 
     if (!hasTakeProfit) {
+      // 优先用「反向 tower 入场价」作为 TP：例如 long 持仓 + 有 short 65000 的挂单，
+      // 就把 long 的 TP 挂到 65000。找到就用，没找到就用 pendingOrder.takeProfit 默认值。
+      const oppositeSide = pendingOrder.side === 'BUY' ? 'SELL' : 'BUY';
+      const oppositeEntryOrder = existingOrders.find(o =>
+        o.clientOrderId?.startsWith('ict_tower') &&
+        o.clientOrderId !== clientOrderId &&
+        !o.clientOrderId?.endsWith('_sl') &&
+        !o.clientOrderId?.endsWith('_tp') &&
+        !o.clientOrderId?.endsWith('_trail') &&
+        o.side === oppositeSide &&
+        o.type === 'LIMIT'
+      );
+
+      let tpPrice: number;
+      let tpSource: string;
+      if (oppositeEntryOrder && oppositeEntryOrder.price) {
+        tpPrice = oppositeEntryOrder.price;
+        tpSource = `反向 tower 入场 ${oppositeSide}@${tpPrice} (${oppositeEntryOrder.clientOrderId})`;
+      } else {
+        tpPrice = pendingOrder.takeProfit;
+        tpSource = `默认 ${tpPrice}`;
+      }
+
       // 下固定止盈单，使用短后缀避免超过36字符限制
       const tpSuffix = Math.random().toString(36).slice(-4);
       const tpClientId = `${clientOrderId}_tp${tpSuffix}`;
-      console.log(`[OrderMonitor] 下固定止盈单: ${pendingOrder.takeProfit}`);
+      console.log(`[OrderMonitor] 下固定止盈单: ${tpPrice} (${tpSource})`);
       const fixedTpResult = await placeTakeProfitOrder(apiConfig, {
         symbol: pendingOrder.symbol,
         side: closeSide,
         positionSide: pendingOrder.positionSide,
         quantity: pendingOrder.quantity,
-        takeProfitPrice: pendingOrder.takeProfit,
+        takeProfitPrice: tpPrice,
         clientOrderId: tpClientId,
       });
 
