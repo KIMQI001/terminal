@@ -1332,19 +1332,65 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // 启动时扫描最近 FVG，仅标记 last_fvg_time 不发送钉钉，避免冷启动刷屏
+    // 启动时发送最近 FVG 报告（标记 + 通知一条）
     for (symbol, tf) in &subscriptions {
         let key = format!("{}@{}", symbol, tf);
         if let Some(cache) = caches.get_mut(&key) {
             if cache.candles.len() >= 3 {
                 let fvgs = detect_fvg(&cache.candles, FVG_MIN_GAP_PERCENT);
                 if let Some(latest) = fvgs.iter().max_by_key(|f| f.time) {
+                    // 设置 last_fvg_time 避免启动后再次推送同一条
                     cache.last_fvg_time = Some(latest.time);
-                    info!("[FVG] 启动扫描：最近 FVG 时间 {} ({} {})",
-                        latest.time, latest.fvg_type,
-                        chrono::DateTime::from_timestamp(latest.time, 0)
-                            .map(|d| d.format("%m-%d %H:%M").to_string())
-                            .unwrap_or_else(|| latest.time.to_string()));
+
+                    let dt = chrono::DateTime::from_timestamp(latest.time, 0)
+                        .map(|dt| {
+                            let offset = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+                            dt.with_timezone(&offset)
+                        })
+                        .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                        .unwrap_or_else(|| latest.time.to_string());
+
+                    let direction = if latest.fvg_type == "bullish" { "🐂做多" } else { "🐻做空" };
+                    let direction_emoji = if latest.fvg_type == "bullish" { "🟢" } else { "🔴" };
+                    let fvg_size = latest.high - latest.low;
+                    let entry_zone = if latest.fvg_type == "bullish" {
+                        latest.high - fvg_size * 0.22
+                    } else {
+                        latest.low + fvg_size * 0.22
+                    };
+                    let current_price = cache.candles.last().map(|c| c.close).unwrap_or(0.0);
+
+                    let startup_msg = format!(
+                        "### 🚀 服务启动 - 最近 15m FVG\n\n\
+                        - **交易对**: {}\n\
+                        - **周期**: {}\n\
+                        - **方向**: {} {}\n\
+                        - **形成时间**: {} UTC+8\n\
+                        - **FVG 上沿**: ${:.2}\n\
+                        - **FVG 下沿**: ${:.2}\n\
+                        - **Gap 大小**: ${:.2} ({:.3}%)\n\
+                        - **22% 入场区**: ${:.2}\n\
+                        - **当前价**: ${:.2}\n\n\
+                        *Pinbar 检测服务已启动，开始实时监控*",
+                        symbol,
+                        tf,
+                        direction_emoji,
+                        direction,
+                        dt,
+                        latest.high,
+                        latest.low,
+                        latest.gap_size,
+                        latest.gap_percent,
+                        entry_zone,
+                        current_price
+                    );
+
+                    info!("[FVG] 启动发送最近 FVG 报告: {} {} @ {}", symbol, latest.fvg_type, dt);
+                    if let Err(e) = notification::send_dingtalk_markdown("服务启动 - 最近 FVG", &startup_msg).await {
+                        warn!("[FVG] 启动钉钉通知失败: {}", e);
+                    }
+                } else {
+                    info!("[FVG] 启动扫描：历史中暂无符合条件的 FVG（gap >= {}%）", FVG_MIN_GAP_PERCENT);
                 }
             }
         }
