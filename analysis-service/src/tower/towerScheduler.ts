@@ -277,7 +277,7 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
       isTestnet: 'isTestnet' in apiConfig ? (apiConfig as { isTestnet?: boolean }).isTestnet : false,
     };
 
-    // 1. 检查持仓状态（有持仓时取消反向订单，不跳过更新）
+    // 1. 检查持仓状态（有持仓时跳过重排，避免再加仓或对冲）
     const positionsResult = await exchangeAdapter.getPositions(exchange, exchangeConfig, management.symbol);
     let currentPositions: { positionSide: string; positionAmt: number }[] = [];
     if (positionsResult.success && positionsResult.positions) {
@@ -288,17 +288,24 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     const hasLongPosition = currentPositions.some(p => p.positionSide === 'LONG');
     const hasShortPosition = currentPositions.some(p => p.positionSide === 'SHORT');
 
+    // 已经有持仓时跳过整个重排流程（SL/TP 由 orderMonitor 维护）
     if (currentPositions.length > 0) {
-      console.log(`[TowerScheduler] 有持仓，保留同向订单，取消反向订单: ${currentPositions.map(p => `${p.positionSide} ${p.positionAmt}`).join(', ')}`);
+      console.log(`[TowerScheduler] 已有持仓 (${currentPositions.map(p => `${p.positionSide} ${p.positionAmt}`).join(', ')})，跳过本次重排`);
+      addRecord({
+        managementId: management.id,
+        bullishCount: 0,
+        bearishCount: 0,
+        totalMargin: 0,
+        success: true,
+        skipped: true,
+        errorMessage: '已有持仓，跳过重排',
+      });
+      updateRunTime(management.id);
+      return;
     }
 
-    // 2. 取消反向订单（有持仓时只取消反向订单）
-    if (hasLongPosition || hasShortPosition) {
-      const cancelResult = await cancelOppositeOrders(exchange, exchangeConfig, management.symbol, hasLongPosition, hasShortPosition);
-      if (cancelResult.canceledCount > 0) {
-        console.log(`[TowerScheduler] 取消了 ${cancelResult.canceledCount} 个反向订单`);
-      }
-    }
+    // 2. 取消反向订单 —— 已在上一步 early return，有持仓时不会到这里
+    // 保留函数 cancelOppositeOrders() 以防未来需要恢复这个行为
 
     // 3. 检查当前订单数量和位置
     const orderCheck = await checkOrdersCount(exchange, exchangeConfig, management.symbol, management.towerLayers);
