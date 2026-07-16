@@ -1529,6 +1529,7 @@ async function placeOrders(
 
   for (const order of orders) {
     try {
+      console.log(`[TowerScheduler] placeOrders input: side=${order.side} entry=${order.price} SL=${order.stopLoss} TP=${order.takeProfit}`);
       // 按 OB 面板风格取整（尾数 0/5，BUY 向上，SELL 向下）
       // 先"让点位"：BUY +30（出价更高），SELL -30（要价更低），更快成交
       const adjustedEntry = order.side === 'BUY' ? order.price + ENTRY_OFFSET : order.price - ENTRY_OFFSET;
@@ -1612,6 +1613,7 @@ async function placeOrders(
       success++;
 
       // 保存待处理订单（用于成交后补下追踪止盈）
+      console.log(`[TowerScheduler] savePendingOrder: clientOrderId=${clientOrderId} entry=${order.price} SL=${order.stopLoss} TP=${order.takeProfit}`);
       await savePendingOrder({
         clientOrderId,
         symbol,
