@@ -1,7 +1,7 @@
 //! Pinbar 检测核心算法
 //! 从 TypeScript 移植自 src/lib/chart/indicators/swingPoints.ts 和 engulfingPinbar.ts
 
-use crate::types::{Candle, PinbarSignal, SwingPoint};
+use crate::types::{Candle, FVG, PinbarSignal, SwingPoint};
 
 /// 检测 Swing Points（pivot high/low）
 pub fn detect_swing_points(candles: &[Candle], length: usize) -> Vec<SwingPoint> {
@@ -251,6 +251,58 @@ pub fn detect_recent_pinbars(
     signals
 }
 
+/// 检测 Fair Value Gap (FVG)
+/// 三根 K 线模型：candle1、candle2（中间）、candle3
+/// - Bullish FVG: candle3.low > candle1.high （向上跳空缺口）
+/// - Bearish FVG: candle3.high < candle1.low （向下跳空缺口）
+/// 只检测缺口达到最小百分比阈值的 FVG，避免噪音
+pub fn detect_fvg(candles: &[Candle], min_gap_percent: f64) -> Vec<FVG> {
+    let mut fvgs: Vec<FVG> = Vec::new();
+    if candles.len() < 3 {
+        return fvgs;
+    }
+
+    for i in 2..candles.len() {
+        let c1 = &candles[i - 2];
+        let c2 = &candles[i - 1];
+        let c3 = &candles[i];
+
+        // Bullish FVG: c3.low > c1.high
+        if c3.low > c1.high {
+            let gap_size = c3.low - c1.high;
+            let gap_percent = (gap_size / c1.high) * 100.0;
+            if gap_percent >= min_gap_percent {
+                fvgs.push(FVG {
+                    fvg_type: "bullish".to_string(),
+                    high: c3.low,
+                    low: c1.high,
+                    time: c2.time,
+                    gap_size,
+                    gap_percent,
+                });
+            }
+        }
+
+        // Bearish FVG: c3.high < c1.low
+        if c3.high < c1.low {
+            let gap_size = c1.low - c3.high;
+            let gap_percent = (gap_size / c1.low) * 100.0;
+            if gap_percent >= min_gap_percent {
+                fvgs.push(FVG {
+                    fvg_type: "bearish".to_string(),
+                    high: c1.low,
+                    low: c3.high,
+                    time: c2.time,
+                    gap_size,
+                    gap_percent,
+                });
+            }
+        }
+    }
+
+    fvgs
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,5 +351,69 @@ mod tests {
         let signals = detect_engulfing_pinbar(&candles, &swing_points, 5);
 
         assert!(!signals.is_empty());
+    }
+
+    #[test]
+    fn test_detect_bullish_fvg() {
+        // Bullish FVG: c1.high=100, c2 跳空上去, c3.low=105
+        let candles = vec![
+            create_test_candle(1, 95.0, 100.0, 90.0, 98.0, 1000.0),  // c1: high=100
+            create_test_candle(2, 102.0, 110.0, 101.0, 108.0, 1000.0), // c2: 大阳线
+            create_test_candle(3, 108.0, 112.0, 105.0, 110.0, 1000.0), // c3: low=105 > c1.high=100
+        ];
+
+        let fvgs = detect_fvg(&candles, 0.1);
+        let bullish: Vec<&FVG> = fvgs.iter().filter(|f| f.fvg_type == "bullish").collect();
+
+        assert_eq!(bullish.len(), 1);
+        assert_eq!(bullish[0].high, 105.0);
+        assert_eq!(bullish[0].low, 100.0);
+        assert_eq!(bullish[0].time, 2);
+        assert!((bullish[0].gap_percent - 5.0).abs() < 0.01); // gap=5, c1.high=100, 5%
+    }
+
+    #[test]
+    fn test_detect_bearish_fvg() {
+        // Bearish FVG: c1.low=100, c2 跳空下去, c3.high=95
+        let candles = vec![
+            create_test_candle(1, 105.0, 108.0, 100.0, 102.0, 1000.0), // c1: low=100
+            create_test_candle(2, 98.0, 99.0, 90.0, 92.0, 1000.0),    // c2: 大阴线
+            create_test_candle(3, 90.0, 95.0, 88.0, 92.0, 1000.0),    // c3: high=95 < c1.low=100
+        ];
+
+        let fvgs = detect_fvg(&candles, 0.1);
+        let bearish: Vec<&FVG> = fvgs.iter().filter(|f| f.fvg_type == "bearish").collect();
+
+        assert_eq!(bearish.len(), 1);
+        assert_eq!(bearish[0].high, 100.0);
+        assert_eq!(bearish[0].low, 95.0);
+        assert_eq!(bearish[0].time, 2);
+        assert!((bearish[0].gap_percent - 5.0).abs() < 0.01); // gap=5, c1.low=100, 5%
+    }
+
+    #[test]
+    fn test_detect_fvg_min_gap_filter() {
+        // 缺口太小（0.05%），应被过滤
+        let candles = vec![
+            create_test_candle(1, 99.95, 100.0, 99.9, 99.98, 1000.0),
+            create_test_candle(2, 100.0, 100.5, 99.98, 100.4, 1000.0),
+            create_test_candle(3, 100.4, 100.6, 100.05, 100.5, 1000.0),
+        ];
+
+        let fvgs = detect_fvg(&candles, 0.1);
+        assert!(fvgs.is_empty(), "gap=0.05% 应被 0.1% 阈值过滤");
+    }
+
+    #[test]
+    fn test_detect_fvg_no_gap() {
+        // 无缺口：c3.low < c1.high（看涨不成立）
+        let candles = vec![
+            create_test_candle(1, 95.0, 100.0, 90.0, 98.0, 1000.0),
+            create_test_candle(2, 98.0, 102.0, 97.0, 100.0, 1000.0),
+            create_test_candle(3, 100.0, 103.0, 99.0, 101.0, 1000.0), // low=99 < c1.high=100
+        ];
+
+        let fvgs = detect_fvg(&candles, 0.1);
+        assert!(fvgs.is_empty(), "无缺口不应产生 FVG");
     }
 }

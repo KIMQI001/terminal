@@ -50,3 +50,22 @@ pub struct PinbarUpdate {
     pub signals: Vec<PinbarSignal>,
     pub swing_points: Vec<SwingPoint>,
 }
+
+/// FVG (Fair Value Gap) 信号
+/// Bullish: candle1.high < candle3.low (中间 K 线向上跳空)
+/// Bearish: candle1.low > candle3.high (中间 K 线向下跳空)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FVG {
+    /// "bullish" | "bearish"
+    pub fvg_type: String,
+    /// FVG 上边界（看涨=gap顶部，看跌=c1.low）
+    pub high: f64,
+    /// FVG 下边界（看涨=c1.high，看跌=gap底部）
+    pub low: f64,
+    /// 形成时间戳（中间 K 线 candle2.time）
+    pub time: i64,
+    /// Gap 绝对大小
+    pub gap_size: f64,
+    /// Gap 百分比（相对 c1.high 或 c1.low）
+    pub gap_percent: f64,
+}

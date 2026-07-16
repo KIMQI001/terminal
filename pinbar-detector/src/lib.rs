@@ -5,5 +5,5 @@
 pub mod detector;
 pub mod types;
 
-pub use detector::{detect_swing_points, detect_engulfing_pinbar, detect_recent_pinbars};
-pub use types::{Candle, PinbarSignal, PinbarUpdate, SwingPoint};
+pub use detector::{detect_swing_points, detect_engulfing_pinbar, detect_recent_pinbars, detect_fvg};
+pub use types::{Candle, PinbarSignal, PinbarUpdate, SwingPoint, FVG};

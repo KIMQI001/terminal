@@ -10,7 +10,7 @@ mod binance;
 mod notification;
 
 use futures_util::{SinkExt, StreamExt};
-use pinbar_detector::{detect_recent_pinbars, Candle};
+use pinbar_detector::{detect_fvg, detect_recent_pinbars, Candle, FVG};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
@@ -72,6 +72,9 @@ fn get_protective_stop_points() -> f64 {
 
 /// Swing Point 附近范围
 const SWING_RANGE: usize = 5;
+
+/// FVG 最小 Gap 百分比（默认 0.1%，与前端 src/lib/chart/indicators/fvg.ts 保持一致）
+const FVG_MIN_GAP_PERCENT: f64 = 0.1;
 
 /// K线数据
 #[derive(Debug, Deserialize)]
@@ -825,6 +828,7 @@ struct KlineCache {
     update_count: usize,
     last_pinbar_time: Option<i64>,  // 上次发送 PINBAR 通知的时间
     last_volume_time: Option<i64>,   // 上次发送倍量通知的时间
+    last_fvg_time: Option<i64>,      // 上次发送 FVG 通知的时间
 }
 
 impl KlineCache {
@@ -835,6 +839,7 @@ impl KlineCache {
             update_count: 0,
             last_pinbar_time: None,
             last_volume_time: None,
+            last_fvg_time: None,
         }
     }
 
@@ -1037,6 +1042,111 @@ impl KlineCache {
             quality: quality.to_string(),
         })
     }
+
+    /// 检测并发送 FVG (Fair Value Gap) 钉钉通知
+    /// 只检测刚收盘那根 K 线（前一根作为 FVG 的中间 K 线）形成的 FVG，避免重复推送
+    async fn detect_fvg_and_notify(&mut self, symbol: &str, current_candle_time: i64) {
+        // 至少需要 3 根 K 线才能检测 FVG
+        if self.candles.len() < 3 {
+            return;
+        }
+
+        let fvgs = detect_fvg(&self.candles, FVG_MIN_GAP_PERCENT);
+
+        // 新 K 线收盘时，FVG 的形成时间是上一根 K 线（即新 K 线时间 - 周期秒数）
+        // 这里假设 15m 周期 = 900 秒，从 current_candle_time 反推
+        let timeframe_secs = match self.timeframe.as_str() {
+            "1m" => 60,
+            "5m" => 300,
+            "15m" => 900,
+            "1h" => 3600,
+            "4h" => 14400,
+            _ => 900,
+        };
+        let prev_candle_time = current_candle_time - timeframe_secs;
+
+        // 收集本周期新形成的 FVG（理论上同一根中间 K 线最多形成 1 个方向的 FVG）
+        let new_fvgs: Vec<&FVG> = fvgs
+            .iter()
+            .filter(|f| f.time == prev_candle_time)
+            .collect();
+
+        if new_fvgs.is_empty() {
+            debug!("[FVG] 本周期无新 FVG 形成");
+            return;
+        }
+
+        for fvg in new_fvgs {
+            // 去重：同一 K 线时间已通知过则跳过
+            if self.last_fvg_time == Some(fvg.time) {
+                debug!("[FVG] 去重跳过: {}", fvg.time);
+                continue;
+            }
+
+            self.last_fvg_time = Some(fvg.time);
+
+            let direction = if fvg.fvg_type == "bullish" { "🐂做多" } else { "🐻做空" };
+            let direction_emoji = if fvg.fvg_type == "bullish" { "🟢" } else { "🔴" };
+
+            // UTC+8 时间
+            let dt = chrono::DateTime::from_timestamp(fvg.time, 0)
+                .map(|dt| {
+                    let offset = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+                    dt.with_timezone(&offset)
+                })
+                .map(|d| d.format("%m-%d %H:%M").to_string())
+                .unwrap_or_else(|| fvg.time.to_string());
+
+            // Fibonacci 22% 入场区（与 TS 版保持一致）
+            let fvg_size = fvg.high - fvg.low;
+            let entry_zone = if fvg.fvg_type == "bullish" {
+                fvg.high - fvg_size * 0.22
+            } else {
+                fvg.low + fvg_size * 0.22
+            };
+            let current_price = self.candles.last().map(|c| c.close).unwrap_or(0.0);
+
+            let tip = if fvg.fvg_type == "bullish" {
+                "💡 *价格回踩 22% 区域企稳可考虑做多*"
+            } else {
+                "💡 *价格回踩 22% 区域受阻可考虑做空*"
+            };
+
+            let msg = format!(
+                "### 📐 15m FVG 信号\n\n\
+                - **交易对**: {}\n\
+                - **周期**: {}\n\
+                - **方向**: {} {}\n\
+                - **形成时间**: {} UTC+8\n\
+                - **FVG 上沿**: ${:.2}\n\
+                - **FVG 下沿**: ${:.2}\n\
+                - **Gap 大小**: ${:.2} ({:.3}%)\n\
+                - **22% 入场区**: ${:.2}\n\
+                - **当前价**: ${:.2}\n\n\
+                {}",
+                symbol,
+                self.timeframe,
+                direction_emoji,
+                direction,
+                dt,
+                fvg.high,
+                fvg.low,
+                fvg.gap_size,
+                fvg.gap_percent,
+                entry_zone,
+                current_price,
+                tip
+            );
+
+            info!("[FVG] 发送钉钉通知: {} {} @ {}", symbol, fvg.fvg_type, dt);
+
+            if let Err(e) = notification::send_dingtalk_markdown("15m FVG 信号", &msg).await {
+                warn!("[FVG] 钉钉通知发送失败: {}", e);
+            } else {
+                info!("[FVG] 钉钉通知已发送");
+            }
+        }
+    }
 }
 
 /// PINBAR 信号结构
@@ -1222,6 +1332,24 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // 启动时扫描最近 FVG，仅标记 last_fvg_time 不发送钉钉，避免冷启动刷屏
+    for (symbol, tf) in &subscriptions {
+        let key = format!("{}@{}", symbol, tf);
+        if let Some(cache) = caches.get_mut(&key) {
+            if cache.candles.len() >= 3 {
+                let fvgs = detect_fvg(&cache.candles, FVG_MIN_GAP_PERCENT);
+                if let Some(latest) = fvgs.iter().max_by_key(|f| f.time) {
+                    cache.last_fvg_time = Some(latest.time);
+                    info!("[FVG] 启动扫描：最近 FVG 时间 {} ({} {})",
+                        latest.time, latest.fvg_type,
+                        chrono::DateTime::from_timestamp(latest.time, 0)
+                            .map(|d| d.format("%m-%d %H:%M").to_string())
+                            .unwrap_or_else(|| latest.time.to_string()));
+                }
+            }
+        }
+    }
+
     // 2. 连接到 Binance WebSocket 实时更新
     info!("Connecting to Binance WebSocket...");
     let (ws_stream, _) = connect_async(BINANCE_WS_URL).await?;
@@ -1288,6 +1416,9 @@ async fn main() -> anyhow::Result<()> {
                                         let parts: Vec<&str> = key.split('@').collect();
                                         if parts.len() == 2 {
                                             cache.detect_and_notify(parts[0]).await;
+
+                                            // FVG 检测（每根新 K 线收盘时检查一次是否形成新 FVG）
+                                            cache.detect_fvg_and_notify(parts[0], candle.time).await;
                                         }
 
                                         // 倍量报警检测
