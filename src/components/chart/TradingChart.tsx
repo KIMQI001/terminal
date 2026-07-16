@@ -569,10 +569,24 @@ export function TradingChart() {
               const prev2SameColor = i >= 2 ? (data[i - 2].close >= data[i - 2].open) === isCurrentBullish : false;
               const hasSameColorBefore = prev1SameColor && prev2SameColor;
 
+              // 反转确认：第二根（i+2）的高/低不能突破倍量+第一根的范围
+              // 绿柱：i+2.high ≤ max(i.high, i+1.high) —— 没突破前高，涨到头了
+              // 红柱：i+2.low  ≥ min(i.low,  i+1.low)  —— 没跌破前低，跌到头了
+              // 如果 i+2 不存在（最后一根附近），跳过反转确认 → 不染色
+              let hasReversalConfirm = false;
+              if (i + 2 < data.length) {
+                const i2 = data[i + 2];
+                if (isCurrentBullish) {
+                  hasReversalConfirm = i2.high <= Math.max(c.high, data[i + 1].high);
+                } else {
+                  hasReversalConfirm = i2.low  >= Math.min(c.low,  data[i + 1].low);
+                }
+              }
+
               // 普通：阳k白色透明，阴k黑色透明
-              // 倍量 + 后两根有一根实体<100 + 前两根同色：阳k绿色，阴k红色
+              // 倍量 + 小实体 + 同色前两根 + 反转确认：阳k绿色，阴k红色
               let color: string;
-              if (isHighVolume && hasSmallBody && hasSameColorBefore) {
+              if (isHighVolume && hasSmallBody && hasSameColorBefore && hasReversalConfirm) {
                 color = c.close >= c.open ? 'rgba(34, 197, 94, 0.7)' : 'rgba(239, 68, 68, 0.7)';
               } else {
                 color = c.close >= c.open ? 'rgba(0, 0, 0, 0.2)' : 'rgba(0, 0, 0, 0.4)';
