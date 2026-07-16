@@ -1251,10 +1251,13 @@ async function calculateOrders(
   }
 
   // 最小距离（启动间距，千分比）
-  const { minEntryDistance = 5 } = management;
+  const { minEntryDistance = 5, maxEntryDistancePercent = 20 } = management;  // maxEntryDistancePercent 存的是 整数×10，例如 20 = 2.0%
   const minDistance = currentPrice * (minEntryDistance / 1000);
+  const maxDistance = currentPrice * (maxEntryDistancePercent / 1000);  // 整数×10 除以 1000 = 百分比
   // 最小间距（万分之 N）
   const minSpacing = currentPrice * (minSpacingRatio / 10000);
+
+  console.log(`[TowerScheduler] 距离范围: ${(minDistance / currentPrice * 100).toFixed(2)}% - ${(maxDistance / currentPrice * 100).toFixed(2)}% (${minDistance.toFixed(0)} - ${maxDistance.toFixed(0)} 点)`);
 
   // 筛选函数：保证所有已选塔块之间间距 >= minSpacing
   const filterWithSpacing = (
@@ -1297,35 +1300,32 @@ async function calculateOrders(
     blocks: typeof allBullish,
     currentPrice: number
   ) => {
+    // 只按距离排序：最近的 block 最优先（不管 OTE/OB/FVG，不管 TF）
     return blocks.sort((a, b) => {
-      // 1. 来源优先级：OTE > OB > FVG
-      const sourceA = SOURCE_PRIORITY[a.source] || 0;
-      const sourceB = SOURCE_PRIORITY[b.source] || 0;
-      if (sourceA !== sourceB) return sourceB - sourceA;
-
-      // 2. 同来源：时间周期优先级（小级别优先）
-      const tfA = TIMEFRAME_PRIORITY[a.timeframe] || 0;
-      const tfB = TIMEFRAME_PRIORITY[b.timeframe] || 0;
-      if (tfA !== tfB) return tfB - tfA;
-
-      // 3. 同来源同周期：距离近的优先
-      const distanceA = Math.abs(a.entry - currentPrice);
-      const distanceB = Math.abs(b.entry - currentPrice);
-      return distanceA - distanceB;
+      return Math.abs(a.entry - currentPrice) - Math.abs(b.entry - currentPrice);
     });
   };
 
   // 筛选塔块
+  // 距离过滤：必须在 [minDistance, maxDistance] 范围内（默认 0.5% - 2.0%）
   // 添加区域过滤: 多单只在折扣区(D区), 空单只在溢价区(P区)
   let bullishCandidates = sortByPriority(
-    allBullish.filter(b => b.entry < currentPrice && currentPrice - b.entry >= minDistance),
+    allBullish.filter(b => {
+      const dist = currentPrice - b.entry;
+      return dist >= minDistance && dist <= maxDistance;
+    }),
     currentPrice
   );
 
   let bearishCandidates = sortByPriority(
-    allBearish.filter(b => b.entry > currentPrice && b.entry - currentPrice >= minDistance),
+    allBearish.filter(b => {
+      const dist = b.entry - currentPrice;
+      return dist >= minDistance && dist <= maxDistance;
+    }),
     currentPrice
   );
+
+  console.log(`[TowerScheduler] 距离过滤后候选: 多 ${bullishCandidates.length} 个, 空 ${bearishCandidates.length} 个`);
 
   // 区域过滤: 只在折扣区开多，只在溢价区开空（可通过 useHLPDFilter 关闭）
   if (dailyHL && useHLPDFilter) {

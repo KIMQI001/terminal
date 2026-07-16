@@ -24,6 +24,7 @@ export interface TowerManagementConfig {
   bearishStartLayer: number;     // 空塔起始层
   minSpacingRatio: number;       // 最小间距（万分比）
   minEntryDistance: number;      // 启动间距（点数）
+  maxEntryDistancePercent: number; // 最大入场距离（百分比），默认 2%（超过当前价 2% 的 block 不下）
   trailingActivationRatio: number; // 追踪止盈激活比例（默认 0.02 = 2%）
   trailingCallbackRate: number;    // 追踪止盈回撤率（默认 0.3 = 0.3%）
   bullishLowFilter: number;       // 多单过滤：1=只下L以下的多单，0=不限制
@@ -68,6 +69,7 @@ interface ManagementRow {
   bearish_start_layer: number;
   min_spacing_ratio: number;
   min_entry_distance: number;
+  max_entry_distance_percent: number;
   trailing_activation_ratio: number;
   trailing_callback_rate: number;
   bullish_low_filter: number;
@@ -226,6 +228,12 @@ export function initTowerManagementTables(): void {
     console.log('[TowerManagement] 添加 lh_hl_orders 字段');
   } catch { /* 列已存在 */ }
 
+  // 迁移：添加 max_entry_distance_percent 字段（最大入场距离百分比，默认 2%）
+  try {
+    db.exec(`ALTER TABLE tower_management ADD COLUMN max_entry_distance_percent INTEGER NOT NULL DEFAULT 20`);  // 整数 20 = 2.0%
+    console.log('[TowerManagement] 添加 max_entry_distance_percent 字段');
+  } catch { /* 列已存在 */ }
+
   console.log('[TowerManagement] 表初始化完成');
 }
 
@@ -279,6 +287,7 @@ export function upsertManagement(config: {
   useHLPDFilter?: boolean;
   biasFilter?: number;
   lhHlOrders?: number;
+  maxEntryDistancePercent?: number;
   marginPercent?: number;
   monitorTimeframe?: string;
 }): TowerManagementConfig {
@@ -317,6 +326,7 @@ export function upsertManagement(config: {
         use_hlpd_filter = ?,
         bias_filter = ?,
         lh_hl_orders = ?,
+        max_entry_distance_percent = ?,
         monitor_timeframe = ?,
         next_run_at = ?,
         updated_at = ?
@@ -607,6 +617,7 @@ function rowToConfig(row: ManagementRow): TowerManagementConfig {
     bearishStartLayer: row.bearish_start_layer,
     minSpacingRatio: row.min_spacing_ratio,
     minEntryDistance: row.min_entry_distance ?? 500,
+    maxEntryDistancePercent: (row as any).max_entry_distance_percent ?? 20,
     trailingActivationRatio: row.trailing_activation_ratio ?? 0.02,
     trailingCallbackRate: row.trailing_callback_rate ?? 0.3,
     bullishLowFilter: (row as any).bullish_low_filter ?? 0,
