@@ -1044,40 +1044,37 @@ impl KlineCache {
     }
 
     /// 检测并发送 FVG (Fair Value Gap) 钉钉通知
-    /// 只检测刚收盘那根 K 线（c2 = candles[len-2]）形成的新 FVG，
-    /// 并用 c2_time 与 last_fvg_time 比较跳过启动扫描已经补发的旧 FVG
+    /// 每根 K 线收盘时扫描所有 FVG，把 FVG.time > last_fvg_time 的全部推送
+    /// （不止本周期 c2 时刻，确保任何新形成的 FVG 都能推到）
     async fn detect_fvg_and_notify(&mut self, symbol: &str) {
         // 至少需要 3 根 K 线才能检测 FVG
         if self.candles.len() < 3 {
             return;
         }
 
-        // c2 = 倒数第二根 K 线（刚收盘那根的前一根），FVG.time == c2.time
-        let c2_time = self.candles[self.candles.len() - 2].time;
-
-        // 跳过：如果本周期 c2 时间 <= 上次通知时间（启动扫描已补发的 FVG）
-        if let Some(last) = self.last_fvg_time {
-            if c2_time <= last {
-                debug!("[FVG] c2_time={} <= last_fvg_time={}, 已发送过, 跳过", c2_time, last);
-                return;
-            }
-        }
-
         let fvgs = detect_fvg(&self.candles, FVG_MIN_GAP_PERCENT);
 
-        // 只收集本周期 c2 时刻形成的新 FVG
-        let new_fvgs: Vec<&FVG> = fvgs
+        // 只取比上次通知更新的 FVG（启动扫描的 last_fvg_time 会把历史 FVG 排除掉）
+        let last = self.last_fvg_time.unwrap_or(0);
+        let mut new_fvgs: Vec<&FVG> = fvgs
             .iter()
-            .filter(|f| f.time == c2_time)
+            .filter(|f| f.time > last)
             .collect();
 
         if new_fvgs.is_empty() {
-            debug!("[FVG] c2={} 无新 FVG 形成", c2_time);
+            debug!("[FVG] 无新 FVG (last_fvg_time={})", last);
             return;
         }
 
+        // 按时间升序排列，逐个推送
+        new_fvgs.sort_by_key(|f| f.time);
+
+        // 先更新 last_fvg_time 到最新的，避免重复
+        if let Some(latest) = new_fvgs.last() {
+            self.last_fvg_time = Some(latest.time);
+        }
+
         for fvg in new_fvgs {
-            self.last_fvg_time = Some(fvg.time);
 
             let direction = if fvg.fvg_type == "bullish" { "🐂做多" } else { "🐻做空" };
             let direction_emoji = if fvg.fvg_type == "bullish" { "🟢" } else { "🔴" };
