@@ -440,6 +440,15 @@ export const useOrderStore = create<OrderState>((set, get) => ({
           const { realOrders } = get();
           const existingIndex = realOrders.findIndex(o => o.id === realOrder.id);
 
+          // 订单已成交/被取消：从列表中移除（交易所也看不到了）
+          const terminalStatuses = ['FILLED', 'CANCELED', 'EXPIRED', 'REJECTED'];
+          if (terminalStatuses.includes(realOrder.status)) {
+            if (existingIndex >= 0) {
+              set({ realOrders: realOrders.filter((_, i) => i !== existingIndex) });
+            }
+            return;
+          }
+
           if (existingIndex >= 0) {
             // 更新现有订单
             const updated = [...realOrders];
