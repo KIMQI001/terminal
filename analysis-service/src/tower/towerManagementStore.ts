@@ -181,6 +181,21 @@ export function initTowerManagementTables(): void {
     console.log('[TowerManagement] 添加 monitor_timeframe 字段');
   } catch { /* 列已存在 */ }
 
+  // 迁移：把 '0'（所有周期）的旧配置改成 '15m'（你手动看的 TF）
+  // 一次性升级，避免历史数据继续走"5 TF 一起筛"的旧逻辑
+  try {
+    const result = db.prepare(`
+      UPDATE tower_management
+      SET monitor_timeframe = '15m'
+      WHERE monitor_timeframe = '0' OR monitor_timeframe IS NULL OR monitor_timeframe = ''
+    `).run();
+    if (result.changes > 0) {
+      console.log(`[TowerManagement] 已将 ${result.changes} 条旧 monitor_timeframe='0' 的配置升级为 '15m'`);
+    }
+  } catch (e) {
+    console.error('[TowerManagement] monitor_timeframe 升级失败:', e);
+  }
+
   // 迁移：添加 HLPD 区域过滤开关字段
   try {
     db.exec(`ALTER TABLE tower_management ADD COLUMN use_hlpd_filter INTEGER NOT NULL DEFAULT 1`);
@@ -270,7 +285,7 @@ export function upsertManagement(config: {
   const exchange = config.exchange || 'binance';
   const trailingActivationRatio = config.trailingActivationRatio ?? 0.02;
   const trailingCallbackRate = config.trailingCallbackRate ?? 0.3;
-  const monitorTimeframe = config.monitorTimeframe ?? '0';
+  const monitorTimeframe = config.monitorTimeframe ?? '15m';  // 默认 15m（你手动看的 TF）
   const useHLPDFilter = config.useHLPDFilter ?? true;
   const db = getDatabase();
   const now = new Date().toISOString();

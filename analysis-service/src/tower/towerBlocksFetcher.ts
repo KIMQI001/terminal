@@ -64,9 +64,9 @@ export async function fetchTowerBlocks(symbol: string): Promise<TowerBlocksResul
 
       const ictResult = analyzeICT(candles, symbol, tf);
 
-      // 收集 FVG（填充度 < 22%）
+      // 收集 FVG（填充度 < 80%——放宽，让真正在 OTE 区域的也能下单）
       for (const fvg of ictResult.fvgs) {
-        if (!fvg.filled && fvg.fillPercentage < 22) {
+        if (!fvg.filled && fvg.fillPercentage < 80) {
           towerBlocks.push({
             id: `fvg-${tf}-${fvg.time}`,
             type: fvg.type,
@@ -114,8 +114,8 @@ export async function fetchTowerBlocks(symbol: string): Promise<TowerBlocksResul
           }
         }
 
-        // OTE 使用与 FVG 相同的 22% 过滤
-        if (fillPercent < 22) {
+        // OTE 放宽到 80%——你手动看 OTE 经常是已经填了一些的，不该过滤掉
+        if (fillPercent < 80) {
           towerBlocks.push({
             id: `ote-${tf}-${ote.startTime}`,
             type: ote.type,
