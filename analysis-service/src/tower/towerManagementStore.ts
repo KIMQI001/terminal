@@ -350,6 +350,7 @@ export function upsertManagement(config: {
       useHLPDFilter ? 1 : 0,
       config.biasFilter ?? 0,
       config.lhHlOrders ?? 0,
+      config.maxEntryDistancePercent ?? 20,
       monitorTimeframe,
       nextRunAt,
       now,
@@ -365,8 +366,9 @@ export function upsertManagement(config: {
         user_id, symbol, exchange, is_active, interval_minutes, base_margin, margin_percent, margin_increment,
         tower_layers, bullish_start_layer, bearish_start_layer, min_spacing_ratio, min_entry_distance,
         trailing_activation_ratio, trailing_callback_rate, bullish_low_filter, bearish_high_filter,
-        use_hlpd_filter, bias_filter, lh_hl_orders, monitor_timeframe, next_run_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        use_hlpd_filter, bias_filter, lh_hl_orders, max_entry_distance_percent,
+        monitor_timeframe, next_run_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       config.userId,
       config.symbol,
@@ -388,6 +390,7 @@ export function upsertManagement(config: {
       useHLPDFilter ? 1 : 0,
       config.biasFilter ?? 0,
       config.lhHlOrders ?? 0,
+      config.maxEntryDistancePercent ?? 20,
       monitorTimeframe,
       nextRunAt,
       now,
