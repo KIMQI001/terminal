@@ -1061,8 +1061,10 @@ impl KlineCache {
             .filter(|f| f.time > last)
             .collect();
 
+        info!("[FVG] 检测心跳: candles={} last_fvg_time={} fvgs={} new={}",
+            self.candles.len(), last, fvgs.len(), new_fvgs.len());
+
         if new_fvgs.is_empty() {
-            debug!("[FVG] 无新 FVG (last_fvg_time={})", last);
             return;
         }
 
@@ -1444,10 +1446,12 @@ async fn main() -> anyhow::Result<()> {
 
                                     // 只有在新K线添加时（非更新最后一根）才检测
                                     if cache.candles.len() > prev_len {
-                                        debug!("[{}] [Kline] 新K线到达: {} len={}",
+                                        info!("[{}] [Kline] 新K线到达: {} candle_time={} len={} last_fvg_time={:?}",
                                             chrono::Local::now().format("%H:%M:%S"),
                                             key,
-                                            cache.candles.len());
+                                            candle.time,
+                                            cache.candles.len(),
+                                            cache.last_fvg_time);
 
                                         // PINBAR 检测（新的完整K线）- detect_and_notify 内部会发送钉钉通知
                                         let parts: Vec<&str> = key.split('@').collect();
