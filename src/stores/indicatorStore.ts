@@ -1,6 +1,21 @@
 import { create } from "zustand";
 import { IndicatorState, OrderBlock, FVG, BOS, CHoCH, LiquidityZone } from "@/types/indicator";
 import { SwingPoint, Timeframe } from "@/types/chart";
+
+// localStorage 持久化 key
+const INDICATOR_ENABLED_KEY = 'terminal.indicator.enabled';
+
+// 页面加载时读取 localStorage 覆盖默认 enabled
+const loadEnabled = (): IndicatorState => {
+  if (typeof window === 'undefined') return {} as IndicatorState;
+  try {
+    const raw = localStorage.getItem(INDICATOR_ENABLED_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // 忽略解析错误
+  }
+  return {} as IndicatorState;
+};
 import { OTEZone } from "@/lib/chart/indicators/ote";
 import { BreakerBlock } from "@/lib/chart/indicators/breakerBlocks";
 import { Inducement } from "@/lib/chart/indicators/inducement";
@@ -122,8 +137,10 @@ interface IndicatorStoreState {
   clearAll: () => void;
 }
 
-export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
-  enabled: {
+export const useIndicatorStore = create<IndicatorStoreState>((set) => {
+  // 从 localStorage 读取已保存的开关状态，跟默认值合并（保存的优先）
+  const persistedEnabled = loadEnabled();
+  const defaultEnabled: IndicatorState = {
     swingPoints: true,
     orderBlocks: false,
     fvg: false,
@@ -135,7 +152,10 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
     breakerBlocks: false,
     inducement: false,
     equilibrium: true,
-  },
+  };
+  return {
+    enabled: { ...defaultEnabled, ...persistedEnabled },
+
   swingPoints: [],
   missedPivots: [],
   ghostLevels: [],
@@ -267,4 +287,16 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => ({
       inducements: [],
       equilibriumLevels: [],
     }),
-}));
+  };
+});
+
+// 监听 enabled 变化，持久化到 localStorage
+if (typeof window !== 'undefined') {
+  useIndicatorStore.subscribe((state) => {
+    try {
+      localStorage.setItem(INDICATOR_ENABLED_KEY, JSON.stringify(state.enabled));
+    } catch {
+      // 忽略 localStorage 写入失败（隐私模式 / 容量超限）
+    }
+  });
+}
