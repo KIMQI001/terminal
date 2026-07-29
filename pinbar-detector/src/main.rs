@@ -1476,6 +1476,68 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // 启动时发送最近 OB 报告（跟 FVG 启动规则一致：推送最近 1 条，设置 last_ob_time 避免重复）
+    for (symbol, tf) in &subscriptions {
+        let key = format!("{}@{}", symbol, tf);
+        if let Some(cache) = caches.get_mut(&key) {
+            if cache.candles.len() >= 20 {
+                let obs_all = detect_order_blocks(&cache.candles, 10);
+                if let Some(latest) = obs_all.iter().max_by_key(|o| o.time) {
+                    cache.last_ob_time = Some(latest.time);
+
+                    let dt = chrono::DateTime::from_timestamp(latest.time, 0)
+                        .map(|dt| {
+                            let offset = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+                            dt.with_timezone(&offset)
+                        })
+                        .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                        .unwrap_or_else(|| latest.time.to_string());
+
+                    let direction = if latest.ob_type == "bullish" { "🐂做多" } else { "🐻做空" };
+                    let direction_emoji = if latest.ob_type == "bullish" { "🟢" } else { "🔴" };
+                    let ob_size = latest.top - latest.btm;
+                    let entry_zone = if latest.ob_type == "bullish" {
+                        latest.top - ob_size * 0.22
+                    } else {
+                        latest.btm + ob_size * 0.22
+                    };
+                    let current_price = cache.candles.last().map(|c| c.close).unwrap_or(0.0);
+
+                    let startup_msg = format!(
+                        "### 🚀 服务启动 - 最近 15m OB\n\n\
+                        - **交易对**: {}\n\
+                        - **周期**: {}\n\
+                        - **方向**: {} {}\n\
+                        - **形成时间**: {} UTC+8\n\
+                        - **OB 上沿**: ${:.2}\n\
+                        - **OB 下沿**: ${:.2}\n\
+                        - **OB 大小**: ${:.2}\n\
+                        - **22% 入场区**: ${:.2}\n\
+                        - **当前价**: ${:.2}\n\n\
+                        *Pinbar 检测服务已启动，开始实时监控*",
+                        symbol,
+                        tf,
+                        direction_emoji,
+                        direction,
+                        dt,
+                        latest.top,
+                        latest.btm,
+                        ob_size,
+                        entry_zone,
+                        current_price
+                    );
+
+                    info!("[OB] 启动发送最近 OB 报告: {} {} @ {}", symbol, latest.ob_type, dt);
+                    if let Err(e) = notification::send_dingtalk_markdown("服务启动 - 最近 OB", &startup_msg).await {
+                        warn!("[OB] 启动钉钉通知失败: {}", e);
+                    }
+                } else {
+                    info!("[OB] 启动扫描：历史中暂无符合条件的 OB");
+                }
+            }
+        }
+    }
+
     // 2. 连接到 Binance WebSocket 实时更新
     info!("Connecting to Binance WebSocket...");
     let (ws_stream, _) = connect_async(BINANCE_WS_URL).await?;
