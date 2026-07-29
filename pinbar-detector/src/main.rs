@@ -10,7 +10,7 @@ mod binance;
 mod notification;
 
 use futures_util::{SinkExt, StreamExt};
-use pinbar_detector::{detect_fvg, detect_recent_pinbars, Candle, FVG};
+use pinbar_detector::{detect_fvg, detect_order_blocks, detect_recent_pinbars, Candle, FVG, OrderBlock};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
@@ -829,6 +829,7 @@ struct KlineCache {
     last_pinbar_time: Option<i64>,  // 上次发送 PINBAR 通知的时间
     last_volume_time: Option<i64>,   // 上次发送倍量通知的时间
     last_fvg_time: Option<i64>,      // 上次发送 FVG 通知的时间
+    last_ob_time: Option<i64>,        // 上次发送 OB 通知的时间
 }
 
 impl KlineCache {
@@ -840,6 +841,7 @@ impl KlineCache {
             last_pinbar_time: None,
             last_volume_time: None,
             last_fvg_time: None,
+            last_ob_time: None,
         }
     }
 
@@ -1137,6 +1139,91 @@ impl KlineCache {
                 warn!("[FVG] 钉钉通知发送失败: {}", e);
             } else {
                 info!("[FVG] 钉钉通知已发送");
+            }
+        }
+    }
+
+    async fn detect_ob_and_notify(&mut self, symbol: &str) {
+        if self.candles.len() < 20 {
+            return;
+        }
+
+        // 用 last_ob_time 排重，避免重启后重复推送历史 OB
+        let last = self.last_ob_time.unwrap_or(0);
+        let obs_all = detect_order_blocks(&self.candles, 10);
+        let mut new_obs: Vec<&OrderBlock> = obs_all.iter().filter(|o| o.time > last).collect();
+
+        info!("[OB] 检测心跳: candles={} last_ob_time={} obs={} new={}",
+            self.candles.len(), last, obs_all.len(), new_obs.len());
+
+        if new_obs.is_empty() {
+            return;
+        }
+
+        new_obs.sort_by_key(|o| o.time);
+        if let Some(latest) = new_obs.last() {
+            self.last_ob_time = Some(latest.time);
+        }
+
+        let current_price = self.candles.last().map(|c| c.close).unwrap_or(0.0);
+
+        for ob in new_obs {
+            let direction = if ob.ob_type == "bullish" { "🐂做多" } else { "🐻做空" };
+            let direction_emoji = if ob.ob_type == "bullish" { "🟢" } else { "🔴" };
+
+            let dt = chrono::DateTime::from_timestamp(ob.time, 0)
+                .map(|dt| {
+                    let offset = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+                    dt.with_timezone(&offset)
+                })
+                .map(|d| d.format("%m-%d %H:%M").to_string())
+                .unwrap_or_else(|| ob.time.to_string());
+
+            let ob_size = ob.top - ob.btm;
+            let entry_zone = if ob.ob_type == "bullish" {
+                ob.top - ob_size * 0.22
+            } else {
+                ob.btm + ob_size * 0.22
+            };
+
+            let tip = if ob.ob_type == "bullish" {
+                "💡 *价格回踩 OB 22% 区域企稳可考虑做多*"
+            } else {
+                "💡 *价格回踩 OB 22% 区域受阻可考虑做空*"
+            };
+
+            let msg = format!(
+                "### 📦 15m OB 信号\n\n\
+                - **交易对**: {}\n\
+                - **周期**: {}\n\
+                - **方向**: {} {}\n\
+                - **形成时间**: {} UTC+8\n\
+                - **OB 上沿**: ${:.2}\n\
+                - **OB 下沿**: ${:.2}\n\
+                - **OB 大小**: ${:.2} ({:.3}%)\n\
+                - **22% 入场区**: ${:.2}\n\
+                - **当前价**: ${:.2}\n\n\
+                {}",
+                symbol,
+                self.timeframe,
+                direction_emoji,
+                direction,
+                dt,
+                ob.top,
+                ob.btm,
+                ob_size,
+                ob_size / current_price * 100.0,
+                entry_zone,
+                current_price,
+                tip
+            );
+
+            info!("[OB] 发送钉钉通知: {} {} @ {}", symbol, ob.ob_type, dt);
+
+            if let Err(e) = notification::send_dingtalk_markdown("15m OB 信号", &msg).await {
+                warn!("[OB] 钉钉通知发送失败: {}", e);
+            } else {
+                info!("[OB] 钉钉通知已发送");
             }
         }
     }
@@ -1460,6 +1547,9 @@ async fn main() -> anyhow::Result<()> {
 
                                             // FVG 检测（每根新 K 线收盘时检查一次是否形成新 FVG）
                                             cache.detect_fvg_and_notify(parts[0]).await;
+
+                                            // OB 检测（每根新 K 线收盘时检查一次）
+                                            cache.detect_ob_and_notify(parts[0]).await;
                                         }
 
                                         // 倍量报警检测
