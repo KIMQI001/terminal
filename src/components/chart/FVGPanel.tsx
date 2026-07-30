@@ -70,7 +70,7 @@ export function FVGPanel() {
     const isBullish = fvg.type === "bullish";
     const side = isBullish ? "buy" : "sell";
     const size = fvg.high - fvg.low;
-    const ratio = fvgClickCount % 2 === 0 ? 0.22 : 0.55;
+    const ratio = fvgClickCount % 2 === 0 ? 0.22 : 0.60;
     const rawEntry = isBullish
       ? fvg.high - size * ratio
       : fvg.low + size * ratio;
