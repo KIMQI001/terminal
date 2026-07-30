@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useChartStore } from "@/stores/chartStore";
 import { useOrderStore, OTEPrefillData, TradingLine } from "@/stores/orderStore";
@@ -57,22 +57,30 @@ export function FVGPanel() {
     return nearest;
   }, [multiTimeframeFVG, fvgs, timeframe, currentPrice]);
 
+  // 点击循环计数：第 1 次 → 0.22，第 2 次 → 0.55，再点回到 0.22
+  const [fvgClickCount, setFvgClickCount] = useState(0);
+  // fvgs 数量变化时重置（跟 OTE 一致）
+  useEffect(() => {
+    setFvgClickCount(0);
+  }, [fvgs.length]);
+
   // 点击FVG条目，填充交易参数
+  // 点击循环：第 1 次 0.22（深），第 2 次 0.55（浅，靠近边界）
   const handleFVGClick = (fvg: FVG) => {
     const isBullish = fvg.type === "bullish";
     const side = isBullish ? "buy" : "sell";
-    // 入场价格取整到 5 或 0（看多向上，看跌向下）
-    const rawEntry = fvg.fib22;
+    const size = fvg.high - fvg.low;
+    const ratio = fvgClickCount % 2 === 0 ? 0.22 : 0.55;
+    const rawEntry = isBullish
+      ? fvg.high - size * ratio
+      : fvg.low + size * ratio;
     const entry = isBullish
       ? Math.ceil(rawEntry / 5) * 5
       : Math.floor(rawEntry / 5) * 5;
-    const size = fvg.high - fvg.low;
     const stopLoss = isBullish ? fvg.low : fvg.high;
-
-    // 止盈 = size的5倍
     const takeProfit = isBullish
-      ? entry + size * 5  // 看涨: 向上5倍
-      : entry - size * 5; // 看跌: 向下5倍
+      ? entry + size * 5
+      : entry - size * 5;
 
     const prefillData: OTEPrefillData = {
       side,
@@ -81,7 +89,6 @@ export function FVGPanel() {
       takeProfit,
     };
 
-    // 设置图表上的水平线
     const lines: TradingLine[] = [
       { price: entry, type: "entry", side },
       { price: stopLoss, type: "stopLoss", side },
@@ -91,6 +98,7 @@ export function FVGPanel() {
 
     setPrefillData(prefillData);
     openModal();
+    setFvgClickCount(fvgClickCount + 1);
   };
 
   // 计算FVG被填充的百分比（用当前价格，作为 fallback）
@@ -176,7 +184,7 @@ export function FVGPanel() {
                     onClick={() => handleFVGClick(fvg)}
                     className={`relative grid grid-cols-4 gap-1 text-[9px] py-0.5 items-center rounded border border-dashed ${borderColor} overflow-hidden cursor-pointer hover:bg-gray-100 transition-colors`}
                   >
-                    {/* 填充背景 - 从左到右填充（所有周期都显示） */}
+                    {/* 填充背景 */}
                     {displayFillPercent > 0 && (
                       <div
                         className={`absolute inset-y-0 left-0 ${fillColor} opacity-50`}
