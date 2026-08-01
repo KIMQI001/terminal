@@ -41,6 +41,7 @@ export function HistoricalDailyHLPanel() {
 
   // 点击列头排序：同列再点切方向，换列重置为 asc
   const handleHeaderClick = (key: KeyType) => {
+    console.log("[OHLC sort] header click:", key, "current sortKey:", sortKey);
     if (sortKey === key) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
@@ -55,8 +56,12 @@ export function HistoricalDailyHLPanel() {
     const sorted = [...dailies].sort((a, b) => {
       const va = a[sortKey as keyof DailyOHLC] as number;
       const vb = b[sortKey as keyof DailyOHLC] as number;
-      return sortDir === "asc" ? va - vb : vb - va;
+      const cmp = sortDir === "asc" ? va - vb : vb - va;
+      if (cmp !== 0) return cmp;
+      // tie-breaker: 时间倒序（新的在前）
+      return b.time - a.time;
     });
+    console.log("[OHLC sort]", sortKey, sortDir, "in:", dailies.length, "out:", sorted.length);
     return sorted;
   })();
 
