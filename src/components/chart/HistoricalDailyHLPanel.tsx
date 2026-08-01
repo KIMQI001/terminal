@@ -2,15 +2,18 @@
 
 /**
  * 历史日K极值面板
- * - 显示最近 3 根日K的 high / low
- * - 自动检测活跃 OB 是否有包裹（OB.top > day.high AND OB.btm < day.low）
+ * - 显示最近 10 根日K的 high / low
+ * - 自动检测 15m OB 是否包裹（OB.top > day.high AND OB.btm < day.low）
  * - 命中的 HL 高亮（"高胜率"标记）
+ * - 点击 HL 价格 → 预填下单（entry=HL, SL=HL±200）
  */
 
 import { useState, useEffect, useMemo } from "react";
 import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useChartStore } from "@/stores/chartStore";
+import { useIndicatorStore } from "@/stores/indicatorStore";
+import { useOrderStore, OTEPrefillData, TradingLine } from "@/stores/orderStore";
 import { fetchKlines } from "@/lib/binance/api";
 import { cn } from "@/lib/utils";
 import type { OrderBlock } from "@/types/indicator";
@@ -42,6 +45,8 @@ export function HistoricalDailyHLPanel() {
   const [dailies, setDailies] = useState<DailyOHLC[]>([]);
   const [overlapObs, setOverlapObs] = useState<ActiveOB[]>([]);
   const { symbol, dailyKAnchors } = useChartStore();
+  const { multiTimeframeOB } = useIndicatorStore();
+  const { setPrefillData, setTradingLines, openModal } = useOrderStore();
 
   // 拉取最近 3 根日 K
   useEffect(() => {
@@ -69,23 +74,41 @@ export function HistoricalDailyHLPanel() {
     };
   }, [symbol]);
 
-  // 从 chartStore 拿 1D OB（最近的活跃 OB）
-  // dailyKAnchors['1D'] 给当前日的 OB；要找 15m OB 需要其他来源
-  // 这里简化：从 dailyKAnchors['1D'] 拿当前 OB，dailyKLineEnabled 开启时画线
+  // 从 indicatorStore 取 15m OB（用户指定的检测目标）
   const ob15m: ActiveOB[] = useMemo(() => {
-    // 简化：从 dailyKAnchors 取 1D anchor（当前最近的 OB）
-    // 实际生产可以从 indicatorStore.multiTimeframeOB['15m'] 取
-    const ob = dailyKAnchors['1D'];
+    const ob = multiTimeframeOB['15m'];
     if (!ob) return [];
     return [
       {
         top: ob.high,
         btm: ob.low,
-        type: "bullish",
-        loc: ob.time,
+        type: ob.type,
+        loc: ob.startTime,
       },
     ];
-  }, [dailyKAnchors]);
+  }, [multiTimeframeOB]);
+
+  // 点击 HL 价格 → 预填下单
+  const handleHlClick = (hlType: 'H' | 'L', price: number) => {
+    // H 价位做空（挂上面等回踩），L 价位做多（挂下面等反弹）
+    const side = hlType === 'H' ? 'sell' : 'buy';
+    const slOffset = hlType === 'H' ? 200 : -200;
+    const tpOffset = hlType === 'H' ? -1000 : 1000;
+    const prefillData: OTEPrefillData = {
+      side,
+      entry: price,
+      stopLoss: price + slOffset,
+      takeProfit: price + tpOffset,
+    };
+    const lines: TradingLine[] = [
+      { price: prefillData.entry, type: 'entry', side },
+      { price: prefillData.stopLoss, type: 'stopLoss', side },
+      { price: prefillData.takeProfit, type: 'takeProfit', side },
+    ];
+    setTradingLines(lines);
+    setPrefillData(prefillData);
+    openModal();
+  };
 
   // 检测 overlap
   useEffect(() => {
@@ -146,23 +169,25 @@ export function HistoricalDailyHLPanel() {
                   <span className="text-gray-600 font-mono">{formatDate(day.time)}</span>
                   <span
                     className={cn(
-                      "text-right font-mono",
+                      "text-right font-mono cursor-pointer hover:underline",
                       hOverlapped
                         ? "text-red-600 font-bold bg-yellow-100 px-0.5 rounded"
-                        : "text-gray-700"
+                        : "text-gray-700 hover:bg-red-50"
                     )}
-                    title={hOverlapped ? "🎯 OB 包裹此高点" : ""}
+                    title={hOverlapped ? "🎯 OB 包裹此高点，点击做空" : "点击做空 (H 价位)"}
+                    onClick={() => handleHlClick('H', day.high)}
                   >
                     {day.high.toFixed(1)}
                   </span>
                   <span
                     className={cn(
-                      "text-right font-mono",
+                      "text-right font-mono cursor-pointer hover:underline",
                       lOverlapped
                         ? "text-green-600 font-bold bg-yellow-100 px-0.5 rounded"
-                        : "text-gray-700"
+                        : "text-gray-700 hover:bg-green-50"
                     )}
-                    title={lOverlapped ? "🎯 OB 包裹此低点" : ""}
+                    title={lOverlapped ? "🎯 OB 包裹此低点，点击做多" : "点击做多 (L 价位)"}
+                    onClick={() => handleHlClick('L', day.low)}
                   >
                     {day.low.toFixed(1)}
                   </span>
