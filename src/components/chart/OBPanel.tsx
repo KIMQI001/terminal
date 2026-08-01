@@ -217,18 +217,13 @@ export function OBPanel() {
                 // 优先使用数据中的 fillPercentage
                 const displayFillPercent = ob.fillPercentage ?? fillPercent;
 
-                // 重叠高亮：当前 OB 与 same+HTF 周期 OTE/FVG 是否同向 + 价格重叠
-                // 跨周期规则：HTF item 不会因 LTF 重叠而高亮（HTF 不传 LTF 给它检查）
-                const hasHlOverlap = obHasOverlap(ob);
                 return (
                   <div
                     key={tf}
                     onClick={() => handleOBClick(ob)}
-                    title={hasHlOverlap ? '🎯 OB 包裹历史日 K 极值（高胜率）' : ''}
                     className={cn(
                       "relative grid grid-cols-4 gap-1 text-[9px] py-0.5 items-center rounded border border-dashed overflow-hidden cursor-pointer hover:bg-gray-100 transition-colors",
-                      borderColor,
-                      hasHlOverlap && "bg-yellow-50 ring-1 ring-yellow-400"
+                      borderColor
                     )}
                   >
                     {/* 填充背景 - 从左到右填充（所有周期都显示） */}
