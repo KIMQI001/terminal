@@ -1,21 +1,60 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useChartStore } from "@/stores/chartStore";
 import { useOrderStore, OTEPrefillData, TradingLine } from "@/stores/orderStore";
 import { OrderBlock } from "@/types/indicator";
+import { fetchKlines } from "@/lib/binance/api";
+import { cn } from "@/lib/utils";
 // (overlap helpers 暂时未使用，保留供未来使用)
 
 const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d'] as const;
 
+interface DailyHL {
+  high: number;
+  low: number;
+  time: number;
+}
+
 export function OBPanel() {
   const [isCollapsed, setIsCollapsed] = useState(true);
   const { orderBlocks, multiTimeframeOB, multiTimeframeOTE, multiTimeframeFVG } = useIndicatorStore();
-  const { candles, timeframe } = useChartStore();
+  const { candles, timeframe, symbol } = useChartStore();
   const { setPrefillData, setTradingLines, openModal } = useOrderStore();
 
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
+
+  // 拉取最近 3 根日 K
+  const [dailyHls, setDailyHls] = useState<DailyHL[]>([]);
+  useEffect(() => {
+    if (!symbol) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const data = await fetchKlines(symbol, "1d", 3);
+        if (cancelled) return;
+        setDailyHls(data.map((c) => ({ high: c.high, low: c.low, time: c.time })));
+      } catch {
+        // ignore
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol]);
+
+  // 检测 OB 是否包裹任意历史日 K 的 high/low
+  const obHasOverlap = (ob: OrderBlock): boolean => {
+    for (const day of dailyHls) {
+      // 高被包：OB.top > day.high AND OB.btm < day.high
+      if (ob.high > day.high && ob.low < day.high) return true;
+      // 低被包：OB.top > day.low AND OB.btm < day.low
+      if (ob.high > day.low && ob.low < day.low) return true;
+    }
+    return false;
+  };
 
   // 获取指定周期的 OB（当前周期优先使用 orderBlocks 数组，保证数据最新）
   const getOBForTimeframe = (tf: string): OrderBlock | null => {
@@ -180,11 +219,17 @@ export function OBPanel() {
 
                 // 重叠高亮：当前 OB 与 same+HTF 周期 OTE/FVG 是否同向 + 价格重叠
                 // 跨周期规则：HTF item 不会因 LTF 重叠而高亮（HTF 不传 LTF 给它检查）
+                const hasHlOverlap = obHasOverlap(ob);
                 return (
                   <div
                     key={tf}
                     onClick={() => handleOBClick(ob)}
-                    className={`relative grid grid-cols-4 gap-1 text-[9px] py-0.5 items-center rounded border border-dashed ${borderColor} overflow-hidden cursor-pointer hover:bg-gray-100 transition-colors`}
+                    title={hasHlOverlap ? '🎯 OB 包裹历史日 K 极值（高胜率）' : ''}
+                    className={cn(
+                      "relative grid grid-cols-4 gap-1 text-[9px] py-0.5 items-center rounded border border-dashed overflow-hidden cursor-pointer hover:bg-gray-100 transition-colors",
+                      borderColor,
+                      hasHlOverlap && "bg-yellow-50 ring-1 ring-yellow-400"
+                    )}
                   >
                     {/* 填充背景 - 从左到右填充（所有周期都显示） */}
                     {displayFillPercent > 0 && (
