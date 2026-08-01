@@ -49,7 +49,7 @@ export function HistoricalDailyHLPanel() {
     let cancelled = false;
     const load = async () => {
       try {
-        const data = await fetchKlines(symbol, "1d", 3);
+        const data = await fetchKlines(symbol, "1d", 10);
         if (cancelled) return;
         const candles: DailyOHLC[] = data.map((c) => ({
           time: c.time,
@@ -115,7 +115,7 @@ export function HistoricalDailyHLPanel() {
         className="flex items-center justify-between px-3 py-1.5 cursor-pointer hover:bg-gray-50 rounded-t-lg border-b border-gray-100"
         onClick={() => setIsCollapsed(!isCollapsed)}
       >
-        <span className="text-xs font-semibold text-gray-600">历史日K HL (3天)</span>
+        <span className="text-xs font-semibold text-gray-600">历史日K HL (10天)</span>
         <span className="text-gray-400 text-[10px]">{isCollapsed ? '▶' : '▼'}</span>
       </div>
 

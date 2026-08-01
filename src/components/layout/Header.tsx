@@ -3,7 +3,6 @@
 import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User, Maximize2, Minimize2, Building2, Layers, Bot, BarChart3, LineChart } from "lucide-react";
 import { MTFPanel } from "@/components/chart/MTFPanel";
 import { DailyHLPanel } from "@/components/chart/DailyHLPanel";
-import { HistoricalDailyHLPanel } from "@/components/chart/HistoricalDailyHLPanel";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -154,8 +153,6 @@ export function Header() {
         <MTFPanel />
         {/* Daily H/L Panel */}
         <DailyHLPanel />
-        {/* 历史日K HL (3天) + OB 包裹检测 */}
-        <HistoricalDailyHLPanel />
 
         {/* 图表类型切换 */}
         <Button

@@ -10,6 +10,7 @@
 
 import { useState, useEffect } from "react";
 import { useChartStore } from "@/stores/chartStore";
+import { HistoricalDailyHLPanel } from "./HistoricalDailyHLPanel";
 import { useOrderStore } from "@/stores/orderStore";
 import { fetchKlines } from "@/lib/binance/api";
 
@@ -254,17 +255,23 @@ export function DailyKPanel() {
 
       {/* 内容区 - 左右两栏 */}
       {!isCollapsed && (
-        <div className="flex">
-          {/* 左侧: 1D */}
-          <div className="px-2 py-2 w-[200px]">
-            {renderAnchorColumn("1D", dailyAnchor, "text-blue-600")}
+        <div>
+          <div className="flex">
+            {/* 左侧: 1D */}
+            <div className="px-2 py-2 w-[200px]">
+              {renderAnchorColumn("1D", dailyAnchor, "text-blue-600")}
+            </div>
+
+            <div className="w-px bg-gray-200 my-2" />
+
+            {/* 右侧: 4D */}
+            <div className="px-2 py-2 min-w-[130px]">
+              {renderAnchorColumn("4D", fourDayAnchor, "text-purple-600")}
+            </div>
           </div>
-
-          <div className="w-px bg-gray-200 my-2" />
-
-          {/* 右侧: 4D */}
-          <div className="px-2 py-2 min-w-[130px]">
-            {renderAnchorColumn("4D", fourDayAnchor, "text-purple-600")}
+          {/* 下方：历史日K HL（10 天） */}
+          <div className="border-t border-gray-200">
+            <HistoricalDailyHLPanel />
           </div>
         </div>
       )}
