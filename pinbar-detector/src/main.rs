@@ -8,15 +8,20 @@
 
 mod binance;
 mod notification;
+mod daily_hl;
 
 use futures_util::{SinkExt, StreamExt};
 use pinbar_detector::{detect_fvg, detect_order_blocks, detect_recent_pinbars, Candle, FVG, OrderBlock};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
+use std::sync::OnceLock;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{debug, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+/// 启动时缓存的 Binance config（用于拉日 K）
+static OB_CONFIG: OnceLock<binance::BinanceConfig> = OnceLock::new();
 
 /// Binance WebSocket K线地址（USDC 合约）
 const BINANCE_WS_URL: &str = "wss://fstream.binance.com/market/ws/btcusdc@kline_15m";
@@ -830,6 +835,8 @@ struct KlineCache {
     last_volume_time: Option<i64>,   // 上次发送倍量通知的时间
     last_fvg_time: Option<i64>,      // 上次发送 FVG 通知的时间
     last_ob_time: Option<i64>,        // 上次发送 OB 通知的时间
+    daily_candles: Vec<(i64, f64, f64, f64, f64, f64)>,  // 历史日 K，用于 OB 命中检测
+    daily_last_fetch: Option<i64>,    // 上次拉取日 K 的时间戳（毫秒）
 }
 
 impl KlineCache {
@@ -842,6 +849,8 @@ impl KlineCache {
             last_volume_time: None,
             last_fvg_time: None,
             last_ob_time: None,
+            daily_candles: Vec::new(),
+            daily_last_fetch: None,
         }
     }
 
@@ -1167,6 +1176,25 @@ impl KlineCache {
 
         let current_price = self.candles.last().map(|c| c.close).unwrap_or(0.0);
 
+        // 每日 K 线刷新（每小时一次）—— 用于检测 OB 是否包含历史日 K 的 high/low
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let need_daily_refresh = match self.daily_last_fetch {
+            None => true,
+            Some(t) => now_ms - t > 3600 * 1000,
+        };
+        if need_daily_refresh {
+            if let Some(cfg) = OB_CONFIG.get() {
+                match binance::fetch_klines(cfg, symbol, "1d", 7).await {
+                    Ok(c) => {
+                        self.daily_candles = c;
+                        self.daily_last_fetch = Some(now_ms);
+                        info!("[OB] 历史日 K 拉取: {} 根", self.daily_candles.len());
+                    }
+                    Err(e) => warn!("[OB] 拉取日 K 失败: {}", e),
+                }
+            }
+        }
+
         for ob in new_obs {
             let direction = if ob.ob_type == "bullish" { "🐂做多" } else { "🐻做空" };
             let direction_emoji = if ob.ob_type == "bullish" { "🟢" } else { "🔴" };
@@ -1192,8 +1220,31 @@ impl KlineCache {
                 "💡 *价格回踩 OB 22% 区域受阻可考虑做空*"
             };
 
+            // 检查 OB 是否包含历史日 K 的 high/low 极值
+            let hl_hits = daily_hl::find_overlapped_hl(ob.top, ob.btm, &self.daily_candles);
+            let high_win = !hl_hits.is_empty();
+            let title_emoji = if high_win { "🎯📦" } else { "📦" };
+            let title = if high_win {
+                "15m OB 信号 (含历史日 K 极值 🎯)"
+            } else {
+                "15m OB 信号"
+            };
+
+            let hl_section = if high_win {
+                let lines: Vec<String> = hl_hits.iter().map(|h| {
+                    let h_dt = chrono::DateTime::from_timestamp(h.daily_time, 0)
+                        .map(|dt| dt.with_timezone(&chrono::FixedOffset::east_opt(8 * 3600).unwrap()))
+                        .map(|d| d.format("%m-%d").to_string())
+                        .unwrap_or_default();
+                    format!("  - {} @ ${:.2} ({})", h.hl_type, h.price, h_dt)
+                }).collect();
+                format!("\n🎯 **历史日 K 极值命中**:\n{}\n", lines.join("\n"))
+            } else {
+                String::new()
+            };
+
             let msg = format!(
-                "### 📦 15m OB 信号\n\n\
+                "{} 15m OB 信号\n\n\
                 - **交易对**: {}\n\
                 - **周期**: {}\n\
                 - **方向**: {} {}\n\
@@ -1202,8 +1253,8 @@ impl KlineCache {
                 - **OB 下沿**: ${:.2}\n\
                 - **OB 大小**: ${:.2} ({:.3}%)\n\
                 - **22% 入场区**: ${:.2}\n\
-                - **当前价**: ${:.2}\n\n\
-                {}",
+                - **当前价**: ${:.2}\n{}{}",
+                title_emoji,
                 symbol,
                 self.timeframe,
                 direction_emoji,
@@ -1215,12 +1266,14 @@ impl KlineCache {
                 ob_size / current_price * 100.0,
                 entry_zone,
                 current_price,
+                hl_section,
                 tip
             );
 
-            info!("[OB] 发送钉钉通知: {} {} @ {}", symbol, ob.ob_type, dt);
+            info!("[OB] 发送钉钉通知: {} {} @ {} hit_hl={}",
+                symbol, ob.ob_type, dt, hl_hits.len());
 
-            if let Err(e) = notification::send_dingtalk_markdown("15m OB 信号", &msg).await {
+            if let Err(e) = notification::send_dingtalk_markdown(title, &msg).await {
                 warn!("[OB] 钉钉通知发送失败: {}", e);
             } else {
                 info!("[OB] 钉钉通知已发送");
@@ -1268,7 +1321,8 @@ async fn main() -> anyhow::Result<()> {
 
     // 初始化 Binance 配置（从环境变量读取）
     let binance_config = crate::binance::BinanceConfig::from_env();
-    if binance_config.is_some() {
+    if let Some(ref cfg) = binance_config {
+        let _ = OB_CONFIG.set(cfg.clone());
         println!("✅ Binance 配置已加载");
     } else {
         println!("⚠️  未配置 Binance API（不下单）");

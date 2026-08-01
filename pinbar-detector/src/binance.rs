@@ -709,3 +709,62 @@ pub async fn place_trailing_stop_order(
     let msg = data.get("msg").and_then(|v| v.as_str()).unwrap_or("未知错误");
     anyhow::bail!("追踪止盈失败: {}", msg)
 }
+/// 获取历史 K 线（REST API）。返回 (time, open, high, low, close, volume) 元组。
+pub async fn fetch_klines(
+    config: &BinanceConfig,
+    symbol: &str,
+    interval: &str,
+    limit: usize,
+) -> anyhow::Result<Vec<(i64, f64, f64, f64, f64, f64)>> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let base = config.base_url();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+
+    let query = format!("symbol={}&interval={}&limit={}&timestamp={}",
+        symbol.to_uppercase(), interval, limit, timestamp);
+    let signature = sign_request(&query, &config.api_secret);
+
+    let url = format!("{}/fapi/v1/klines?{}&signature={}", base, query, signature);
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&url)
+        .header("X-MBX-APIKEY", &config.api_key)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        anyhow::bail!("HTTP {} 获取 K 线失败: {}", status, text);
+    }
+
+    let arr: Vec<serde_json::Value> = response.json().await?;
+    let candles: Vec<(i64, f64, f64, f64, f64, f64)> = arr.iter().filter_map(|v| {
+        let a = v.as_array()?;
+        if a.len() < 6 { return None; }
+        Some((
+            a[0].as_i64()?,
+            a[1].as_str()?.parse().ok()?,
+            a[2].as_str()?.parse().ok()?,
+            a[3].as_str()?.parse().ok()?,
+            a[4].as_str()?.parse().ok()?,
+            a[5].as_str()?.parse().ok()?,
+        ))
+    }).collect();
+    Ok(candles)
+}
+
+fn sign_request(query: &str, secret: &str) -> String {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
+        .expect("HMAC accepts any key length");
+    mac.update(query.as_bytes());
+    let result = mac.finalize().into_bytes();
+    hex::encode(result)
+}
