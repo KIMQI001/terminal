@@ -1150,7 +1150,7 @@ impl KlineCache {
 
         // 用 last_ob_time 排重，避免重启后重复推送历史 OB
         let last = self.last_ob_time.unwrap_or(0);
-        let obs_all = detect_order_blocks(&self.candles, 10);
+        let obs_all = detect_order_blocks(&self.candles);
         let mut new_obs: Vec<&OrderBlock> = obs_all.iter().filter(|o| o.time > last).collect();
 
         info!("[OB] 检测心跳: candles={} last_ob_time={} obs={} new={}",
@@ -1417,7 +1417,7 @@ async fn main() -> anyhow::Result<()> {
         let key = format!("{}@{}", symbol, tf);
         if let Some(cache) = caches.get_mut(&key) {
             if cache.candles.len() >= 20 {
-                let obs_all = detect_order_blocks(&cache.candles, 10);
+                let obs_all = detect_order_blocks(&cache.candles);
                 if let Some(latest) = obs_all.iter().max_by_key(|o| o.time) {
                     cache.last_ob_time = Some(latest.time);
 
