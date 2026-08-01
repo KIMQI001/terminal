@@ -28,12 +28,37 @@ function formatDate(ts: number): string {
 }
 
 type KeyType = "O" | "H" | "L" | "C";
+type SortDir = "asc" | "desc";
 
 export function HistoricalDailyHLPanel() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [dailies, setDailies] = useState<DailyOHLC[]>([]);
-  const { symbol } = useChartStore();
+  const [sortKey, setSortKey] = useState<KeyType | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const { symbol, candles } = useChartStore();
+  const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
   const { setPrefillData, setTradingLines, openModal } = useOrderStore();
+
+  // 点击列头排序：同列再点切方向，换列重置为 asc
+  const handleHeaderClick = (key: KeyType) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
+
+  // 排序后的列表（无排序时保持原顺序 = 按 time 倒序）
+  const sortedDailies = (() => {
+    if (!sortKey) return dailies;
+    const sorted = [...dailies].sort((a, b) => {
+      const va = a[sortKey as keyof DailyOHLC] as number;
+      const vb = b[sortKey as keyof DailyOHLC] as number;
+      return sortDir === "asc" ? va - vb : vb - va;
+    });
+    return sorted;
+  })();
 
   // 拉取最近 10 根日 K
   useEffect(() => {
@@ -63,39 +88,14 @@ export function HistoricalDailyHLPanel() {
   }, [symbol]);
 
   // 点击 O/H/L/C → 预填下单
-  // H/C 价位 → 做空（反向阻力）；O/L 价位 → 做多（反向支撑）
-  // O 和 C 同向：O 做多（开盘价作为入场）、C 做空（收盘价作为入场）
-  // H 价位 → 做空（阻力）；L 价位 → 做多（支撑）
+  // 方向判定：点击价 > 当前价 → 做空（在阻力位挂单等回踩）
+  //         点击价 < 当前价 → 做多（在支撑位挂单等反弹）
   const handlePriceClick = (key: KeyType, price: number) => {
-    let side: "buy" | "sell";
-    let slOffset: number;
-    let tpOffset: number;
-    let label: string;
-    if (key === "H") {
-      // H 价位做空（阻力位挂空）
-      side = "sell";
-      slOffset = 200;
-      tpOffset = -1000;
-      label = "H 阻力做空";
-    } else if (key === "L") {
-      // L 价位做多（支撑位挂多）
-      side = "buy";
-      slOffset = -200;
-      tpOffset = 1000;
-      label = "L 支撑做多";
-    } else if (key === "O") {
-      // O 价位做多（开盘突破）
-      side = "buy";
-      slOffset = -200;
-      tpOffset = 1000;
-      label = "O 开盘做多";
-    } else {
-      // C 价位做空（收盘压制）
-      side = "sell";
-      slOffset = 200;
-      tpOffset = -1000;
-      label = "C 收盘做空";
-    }
+    if (currentPrice <= 0) return;
+    const side: "buy" | "sell" = price > currentPrice ? "sell" : "buy";
+    const slOffset = side === "buy" ? -200 : 200;
+    const tpOffset = side === "buy" ? 1000 : -1000;
+    void key;  // 仅用于语义（hover tooltip），不再决定方向
     const prefillData: OTEPrefillData = {
       side,
       entry: price,
@@ -126,16 +126,25 @@ export function HistoricalDailyHLPanel() {
         <div className="px-2 py-2 min-w-[200px]">
           <div className="grid grid-cols-5 gap-1 text-[9px] text-gray-400 font-medium pb-0.5 border-b">
             <span>日期</span>
-            <span className="text-right">O</span>
-            <span className="text-right text-red-500">H</span>
-            <span className="text-right text-green-600">L</span>
-            <span className="text-right">C</span>
+            {(["O", "H", "L", "C"] as KeyType[]).map((key) => (
+              <span
+                key={key}
+                onClick={() => handleHeaderClick(key)}
+                className={`text-right cursor-pointer select-none hover:text-gray-700 ${
+                  sortKey === key ? "text-gray-700 font-semibold" : ""
+                } ${key === "H" ? "text-red-500" : ""} ${key === "L" ? "text-green-600" : ""}`}
+                title={`点击排序 ${key}`}
+              >
+                {key}
+                {sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+              </span>
+            ))}
           </div>
 
-          {dailies.length === 0 ? (
+          {sortedDailies.length === 0 ? (
             <div className="text-[9px] text-gray-400 py-1">加载中...</div>
           ) : (
-            dailies.map((day) => (
+            sortedDailies.map((day) => (
               <div
                 key={day.time}
                 className="grid grid-cols-5 gap-1 text-[9px] py-0.5 items-center rounded hover:bg-gray-50"
