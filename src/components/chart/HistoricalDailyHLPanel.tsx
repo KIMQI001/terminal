@@ -45,7 +45,7 @@ export function HistoricalDailyHLPanel() {
   const [dailies, setDailies] = useState<DailyOHLC[]>([]);
   const [overlapObs, setOverlapObs] = useState<ActiveOB[]>([]);
   const { symbol, dailyKAnchors } = useChartStore();
-  const { multiTimeframeOB } = useIndicatorStore();
+  const { multiTimeframeOB, orderBlocks } = useIndicatorStore();
   const { setPrefillData, setTradingLines, openModal } = useOrderStore();
 
   // 拉取最近 3 根日 K
@@ -74,19 +74,18 @@ export function HistoricalDailyHLPanel() {
     };
   }, [symbol]);
 
-  // 从 indicatorStore 取 15m OB（用户指定的检测目标）
+  // 从 indicatorStore 取当前周期所有 OBs（OBPanel Zones 列表同源）
+// 当前用户的图表周期就是 OBPanel 显示的周期（推荐 15m）
   const ob15m: ActiveOB[] = useMemo(() => {
-    const ob = multiTimeframeOB['15m'];
-    if (!ob) return [];
-    return [
-      {
-        top: ob.high,
-        btm: ob.low,
-        type: ob.type,
-        loc: ob.startTime,
-      },
-    ];
-  }, [multiTimeframeOB]);
+    return orderBlocks
+      .filter((b) => b.startTime && b.high && b.low)
+      .map((b) => ({
+        top: b.high,
+        btm: b.low,
+        type: b.type,
+        loc: b.startTime,
+      }));
+  }, [orderBlocks]);
 
   // 点击 HL 价格 → 预填下单
   const handleHlClick = (hlType: 'H' | 'L', price: number) => {

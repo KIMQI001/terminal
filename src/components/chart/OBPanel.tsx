@@ -280,7 +280,12 @@ export function OBPanel() {
                     <div
                       key={index}
                       onClick={() => handleOBClick(ob)}
-                      className={`relative ${hoverColor} rounded p-1 text-[9px] cursor-pointer transition-colors overflow-hidden`}
+                      title={obHasOverlap(ob) ? '🎯 此 OB 包裹历史日 K 极值（高胜率）' : ''}
+                      className={cn(
+                        "relative rounded p-1 text-[9px] cursor-pointer transition-colors overflow-hidden",
+                        obHasOverlap(ob) && "ring-2 ring-yellow-400 bg-yellow-50",
+                        hoverColor,
+                      )}
                     >
                       {/* 底色 */}
                       <div className={`absolute inset-0 ${bgColor}`} />
