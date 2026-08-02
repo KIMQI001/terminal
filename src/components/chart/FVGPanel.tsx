@@ -57,7 +57,10 @@ export function FVGPanel() {
     return nearest;
   }, [multiTimeframeFVG, fvgs, timeframe, currentPrice]);
 
-  // 点击循环计数：第 1 次 → 0.22，第 2 次 → 0.55，再点回到 0.22
+// FVG 入场比例三档循环：0.22（深）→ 0.60（中）→ 0.90（浅）→ 0.22
+const FVG_RATIOS = [0.22, 0.60, 0.90];
+
+  // 点击循环计数：第 1 次 → 0.22，第 2 次 → 0.60，第 3 次 → 0.90，再点回到 0.22
   const [fvgClickCount, setFvgClickCount] = useState(0);
   // fvgs 数量变化时重置（跟 OTE 一致）
   useEffect(() => {
@@ -65,12 +68,12 @@ export function FVGPanel() {
   }, [fvgs.length]);
 
   // 点击FVG条目，填充交易参数
-  // 点击循环：第 1 次 0.22（深），第 2 次 0.55（浅，靠近边界）
+  // 点击循环：0.22（深）→ 0.60（中）→ 0.90（浅）→ 0.22
   const handleFVGClick = (fvg: FVG) => {
     const isBullish = fvg.type === "bullish";
     const side = isBullish ? "buy" : "sell";
     const size = fvg.high - fvg.low;
-    const ratio = fvgClickCount % 2 === 0 ? 0.22 : 0.60;
+    const ratio = FVG_RATIOS[fvgClickCount % 3];
     const rawEntry = isBullish
       ? fvg.high - size * ratio
       : fvg.low + size * ratio;

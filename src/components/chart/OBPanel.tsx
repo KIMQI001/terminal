@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useChartStore } from "@/stores/chartStore";
 import { useOrderStore, OTEPrefillData, TradingLine } from "@/stores/orderStore";
@@ -17,9 +17,14 @@ interface DailyHL {
   time: number;
 }
 
+// OB 入场比例三档循环：0.22（深）→ 0.60（中）→ 0.90（浅）→ 0.22
+const OB_RATIOS = [0.22, 0.60, 0.90];
+
 export function OBPanel() {
   const [isCollapsed, setIsCollapsed] = useState(true);
   const { orderBlocks, multiTimeframeOB, multiTimeframeOTE, multiTimeframeFVG } = useIndicatorStore();
+  // OB 点击循环计数器（0.22 → 0.60 → 0.90 → 0.22 ...）
+  const obClickCountRef = useRef(0);
   const { candles, timeframe, symbol } = useChartStore();
   const { setPrefillData, setTradingLines, openModal } = useOrderStore();
 
@@ -104,9 +109,12 @@ export function OBPanel() {
   const handleOBClick = (ob: OrderBlock) => {
     const isBullish = ob.type === "bullish";
     const side = isBullish ? "buy" : "sell";
-    // 入场点使用 0.22 位置（类似 FVG fib22）
+    // 入场点循环：0.22（深）→ 0.60（中）→ 0.90（浅）→ 0.22
     const size = ob.high - ob.low;
-    const rawEntry = isBullish ? ob.high - size * 0.22 : ob.low + size * 0.22;
+    // 周期循环根据 OBPanel 自身的点击次数（OB 列表只用一个计数器）
+    const ratio = OB_RATIOS[(obClickCountRef.current ?? 0) % 3];
+    obClickCountRef.current = (obClickCountRef.current + 1) % 3;
+    const rawEntry = isBullish ? ob.high - size * ratio : ob.low + size * ratio;
     // 入场价格取整到 5 或 0（看多向上，看跌向下）
     const entry = isBullish
       ? Math.ceil(rawEntry / 5) * 5
