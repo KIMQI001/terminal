@@ -205,9 +205,9 @@ analyzeRoutes.get('/tower', async (req: Request, res: Response) => {
 
       const ictResult = analyzeICT(candles, symbol, tf);
 
-      // 收集 FVG（填充度 < 22%）
+      // 收集 FVG（填充度 < 80%）
       for (const fvg of ictResult.fvgs) {
-        if (!fvg.filled && fvg.fillPercentage < 22) {
+        if (!fvg.filled && fvg.fillPercentage < 80) {
           towerBlocks.push({
             id: `fvg-${tf}-${fvg.time}`,
             type: fvg.type,
@@ -255,8 +255,8 @@ analyzeRoutes.get('/tower', async (req: Request, res: Response) => {
           }
         }
 
-        // OTE 使用与 FVG 相同的 22% 过滤
-        if (fillPercent < 22) {
+        // OTE 使用与 FVG 相同的 80% 过滤
+        if (fillPercent < 80) {
           towerBlocks.push({
             id: `ote-${tf}-${ote.startTime}`,
             type: ote.type,
@@ -274,8 +274,8 @@ analyzeRoutes.get('/tower', async (req: Request, res: Response) => {
     // 过滤塔块：
     // 1. bearish 塔块入场点必须 > 当前价格（做空需要价格上涨到阻力区）
     // 2. bullish 塔块入场点必须 < 当前价格（做多需要价格下跌到支撑区）
-    // 3. 只保留当前价格上下 6000 点范围内的塔块
-    const PRICE_RANGE = 6000;
+    // 3. 只保留当前价格上下 20000 点范围内的塔块
+    const PRICE_RANGE = 20000;
     const filteredBlocks = towerBlocks.filter(block => {
       const distanceFromPrice = Math.abs(block.entry - currentPrice);
       if (distanceFromPrice > PRICE_RANGE) return false;
