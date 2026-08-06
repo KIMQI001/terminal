@@ -30,11 +30,25 @@ export interface TowerBlocksResult {
  * 获取塔块数据
  * 与 analyze.ts 中的 /api/analyze/tower 逻辑一致
  */
-export async function fetchTowerBlocks(symbol: string): Promise<TowerBlocksResult | null> {
+export async function fetchTowerBlocks(symbol: string, enabledTFs?: string): Promise<TowerBlocksResult | null> {
   try {
-    const timeframes: Timeframe[] = ['15m', '1h', '4h', '1d'];
+    // enabledTFs: JSON 数组字符串如 '["5m","15m"]'。默认 ['15m']
+    let timeframes: Timeframe[] = ['15m'];
+    if (enabledTFs) {
+      try {
+        const parsed = JSON.parse(enabledTFs);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          timeframes = parsed.filter((tf: string) =>
+            ['5m', '15m', '1h', '4h', '1d'].includes(tf)
+          ) as Timeframe[];
+          if (timeframes.length === 0) timeframes = ['15m'];
+        }
+      } catch {
+        // ignore parse error, use default
+      }
+    }
 
-    console.log(`[TowerBlocksFetcher] 获取塔块数据: ${symbol}`);
+    console.log(`[TowerBlocksFetcher] 获取塔块数据: ${symbol} (TFs: ${timeframes.join(',')})`);
 
     // BTC/ETH 请求 5000 根，其他交易对请求 1000 根
     const baseCoin = symbol.replace('USDC', '').replace('USDT', '');

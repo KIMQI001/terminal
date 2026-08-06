@@ -101,6 +101,7 @@ towerManagementRoutes.post('/', (req: Request, res: Response) => {
       biasFilter = 0,
       lhHlOrders = 0,
       maxEntryDistancePercent = 20,
+      enabledTimeframes = '["15m"]',
       monitorTimeframe = '0',
     } = req.body;
 
@@ -127,6 +128,7 @@ towerManagementRoutes.post('/', (req: Request, res: Response) => {
       minSpacingRatio,
       minEntryDistance,
       maxEntryDistancePercent,
+      enabledTimeframes,
       trailingActivationRatio,
       trailingCallbackRate,
       bullishLowFilter,
@@ -180,6 +182,7 @@ towerManagementRoutes.post('/start', (req: Request, res: Response) => {
       biasFilter = 0,
       lhHlOrders = 0,
       maxEntryDistancePercent = 20,
+      enabledTimeframes = '["15m"]',
       monitorTimeframe = '0',
     } = req.body;
 
@@ -207,6 +210,7 @@ towerManagementRoutes.post('/start', (req: Request, res: Response) => {
       minSpacingRatio,
       minEntryDistance,
       maxEntryDistancePercent,
+      enabledTimeframes,
       trailingActivationRatio,
       trailingCallbackRate,
       bullishLowFilter,

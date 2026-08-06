@@ -33,6 +33,7 @@ export interface TowerManagementConfig {
   biasFilter: number;              // MTF bias 过滤：1=只下同向单，0=不限
   lhHlOrders: number;              // LH/HL 不破单：1=在最新 HH 附近的 LH 下 SELL、在最新 LL 附近的 HL 下 BUY，0=不开启
   monitorTimeframe: string;       // 周期过滤：0=所有周期, 15m/1h/4h/1d 只下指定周期
+  enabledTimeframes: string;     // 启用哪些时间周期（JSON 数组字符串），如 '["5m","15m"]'。空 = 默认 ['15m']。影响 towerBlocksFetcher 拉取范围 + 前端面板显示
   lastRunAt: string | null;      // 上次执行时间
   nextRunAt: string | null;      // 下次执行时间
   lastBias: 'long' | 'short' | 'wait'; // 上次确认的 MTF bias（用于检测翻转）
@@ -234,6 +235,26 @@ export function initTowerManagementTables(): void {
     console.log('[TowerManagement] 添加 max_entry_distance_percent 字段');
   } catch { /* 列已存在 */ }
 
+  // 迁移：添加 enabled_timeframes 字段（启用的时间周期 JSON 数组字符串，默认 '["15m"]'）
+  try {
+    db.exec(`ALTER TABLE tower_management ADD COLUMN enabled_timeframes TEXT NOT NULL DEFAULT '["15m"]'`);
+    console.log('[TowerManagement] 添加 enabled_timeframes 字段');
+  } catch { /* 列已存在 */ }
+
+  // 迁移：把空字符串或 NULL 升级为默认
+  try {
+    const result = db.prepare(`
+      UPDATE tower_management
+      SET enabled_timeframes = '["15m"]'
+      WHERE enabled_timeframes IS NULL OR enabled_timeframes = ''
+    `).run();
+    if (result.changes > 0) {
+      console.log(`[TowerManagement] 已升级 ${result.changes} 条 enabled_timeframes`);
+    }
+  } catch (e) {
+    console.error('[TowerManagement] enabled_timeframes 升级失败:', e);
+  }
+
   console.log('[TowerManagement] 表初始化完成');
 }
 
@@ -290,11 +311,13 @@ export function upsertManagement(config: {
   maxEntryDistancePercent?: number;
   marginPercent?: number;
   monitorTimeframe?: string;
+  enabledTimeframes?: string;
 }): TowerManagementConfig {
   const exchange = config.exchange || 'binance';
   const trailingActivationRatio = config.trailingActivationRatio ?? 0.02;
   const trailingCallbackRate = config.trailingCallbackRate ?? 0.3;
   const monitorTimeframe = config.monitorTimeframe ?? '15m';  // 默认 15m（你手动看的 TF）
+  const enabledTimeframes = config.enabledTimeframes ?? '["15m"]';  // 默认只启用 15m 守塔（用户在 UI 里选）
   const useHLPDFilter = config.useHLPDFilter ?? true;
   const db = getDatabase();
   const now = new Date().toISOString();
@@ -327,6 +350,7 @@ export function upsertManagement(config: {
         bias_filter = ?,
         lh_hl_orders = ?,
         max_entry_distance_percent = ?,
+        enabled_timeframes = ?,
         monitor_timeframe = ?,
         next_run_at = ?,
         updated_at = ?
@@ -351,6 +375,7 @@ export function upsertManagement(config: {
       config.biasFilter ?? 0,
       config.lhHlOrders ?? 0,
       config.maxEntryDistancePercent ?? 20,
+      enabledTimeframes,
       monitorTimeframe,
       nextRunAt,
       now,
@@ -366,9 +391,9 @@ export function upsertManagement(config: {
         user_id, symbol, exchange, is_active, interval_minutes, base_margin, margin_percent, margin_increment,
         tower_layers, bullish_start_layer, bearish_start_layer, min_spacing_ratio, min_entry_distance,
         trailing_activation_ratio, trailing_callback_rate, bullish_low_filter, bearish_high_filter,
-        use_hlpd_filter, bias_filter, lh_hl_orders, max_entry_distance_percent,
+        use_hlpd_filter, bias_filter, lh_hl_orders, max_entry_distance_percent, enabled_timeframes,
         monitor_timeframe, next_run_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       config.userId,
       config.symbol,
@@ -391,6 +416,7 @@ export function upsertManagement(config: {
       config.biasFilter ?? 0,
       config.lhHlOrders ?? 0,
       config.maxEntryDistancePercent ?? 20,
+      enabledTimeframes,
       monitorTimeframe,
       nextRunAt,
       now,
@@ -621,6 +647,7 @@ function rowToConfig(row: ManagementRow): TowerManagementConfig {
     minSpacingRatio: row.min_spacing_ratio,
     minEntryDistance: row.min_entry_distance ?? 500,
     maxEntryDistancePercent: (row as any).max_entry_distance_percent ?? 2,
+    enabledTimeframes: (row as any).enabled_timeframes ?? '["15m"]',
     trailingActivationRatio: row.trailing_activation_ratio ?? 0.02,
     trailingCallbackRate: row.trailing_callback_rate ?? 0.3,
     bullishLowFilter: (row as any).bullish_low_filter ?? 0,

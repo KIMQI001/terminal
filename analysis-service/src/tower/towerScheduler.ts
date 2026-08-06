@@ -384,7 +384,7 @@ async function executeTowerManagement(management: TowerManagementConfig): Promis
     }
 
     // 3. 获取塔块数据
-    const towerData = await fetchTowerBlocks(management.symbol);
+    const towerData = await fetchTowerBlocks(management.symbol, management.enabledTimeframes);
     if (!towerData || !towerData.blocks.length) {
       console.error(`[TowerScheduler] 获取塔块数据失败: ${management.symbol}`);
       addRecord({
