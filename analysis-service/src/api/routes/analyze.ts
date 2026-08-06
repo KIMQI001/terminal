@@ -297,9 +297,11 @@ analyzeRoutes.get('/tower', async (req: Request, res: Response) => {
     };
 
     const dedupedBlocks = filteredBlocks.reduce((acc, block) => {
-      // 查找是否已有相近入场价的同类型塔块
+      // 按周期分别去重：同周期 + 同类型 + 入场价相近 才视为重复
+      // 跨周期保留（5m 15m 1h 4h 1d 都同时存在）
       const existingIndex = acc.findIndex(b =>
         b.type === block.type &&
+        b.timeframe === block.timeframe &&
         Math.abs(b.entry - block.entry) < DEDUP_THRESHOLD
       );
 
@@ -307,14 +309,9 @@ analyzeRoutes.get('/tower', async (req: Request, res: Response) => {
         // 没有重复，直接添加
         acc.push(block);
       } else {
-        // 有重复，比较优先级
+        // 同周期 + 同类型 + 距离近：保留填充度更低的（更新更强信号）
         const existing = acc[existingIndex];
-        const existingPriority = timeframePriority[existing.timeframe] || 0;
-        const newPriority = timeframePriority[block.timeframe] || 0;
-
-        // 优先保留更高周期，同周期保留填充度更低的
-        if (newPriority > existingPriority ||
-            (newPriority === existingPriority && block.fillPercent < existing.fillPercent)) {
+        if (block.fillPercent < existing.fillPercent) {
           acc[existingIndex] = block;
         }
       }
