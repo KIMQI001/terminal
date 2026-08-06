@@ -1176,7 +1176,7 @@ export default function TowerPage() {
             </div>
 
             {/* 第二行：操作按钮 */}
-            <div className="flex items-center gap-2 pt-1 border-t border-[var(--border)]">
+            <div className="flex items-center gap-2 pt-1 border-t border-[var(--border)] flex-wrap">
               {/* 守塔按钮 */}
               <button
                 onClick={() => handleAutoTower(false)}
