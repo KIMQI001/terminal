@@ -49,7 +49,7 @@ export interface PivotResult {
 }
 
 export function detectPivots(
-  candles: Array<{ time: number; high: number; low: number; close: number; open: number; volume: number }>,
+  candles: Array<{ time: number; high: number; low: number; close: number; open: number; volume?: number }>,
   length: number = 20,
   showRegular: boolean = true,
   showMissed: boolean = true

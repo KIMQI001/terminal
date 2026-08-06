@@ -222,6 +222,24 @@ function selectBestFromGroup(group: SwingPoint[]): SwingPoint {
   });
 }
 
+/**
+ * LuxAlgo 风格的 swing 检测（替代 detectSwingPoints）
+ * 参数对齐：15m 用 length=20，跟前端 TradingChart 一致
+ */
+export function detectSwingPointsLuxAlgo(
+  candles: Candle[],
+  length: number = 20,
+): SwingPoint[] {
+  const { detectPivots } = require('./luxAlgo') as typeof import('./luxAlgo');
+  const result = detectPivots(candles, length, true, false);
+  return result.pivots.map((p: any) => ({
+    type: p.pivotType as 'high' | 'low',
+    price: p.price,
+    time: p.time,
+    index: p.index,
+  }));
+}
+
 // ============================================
 // FVG 检测
 // ============================================
@@ -764,11 +782,15 @@ export function analyzeICT(
 ): ICTAnalysisResult {
   const currentPrice = candles[candles.length - 1].close;
 
-  // 按 TF 缩放 swing 检测参数
-  const params = SWING_PARAMS_BY_TF[timeframe] ?? { leftBars: 3, rightBars: 3, minSwingPercent: 1.5 };
+  // LuxAlgo swing 检测：length 按 TF 缩放，跟前端 TradingChart 一致
+  // 前端在 TradingChart.tsx 的 getSwingLookback(tf) 已经定义
+  const lengthByTF: Record<string, number> = {
+    '1m': 30, '5m': 30, '15m': 20, '1h': 24, '4h': 30, '1d': 30,
+  };
+  const swingLength = lengthByTF[timeframe] ?? 20;
 
-  // 计算所有 ICT 指标
-  const swingPoints = detectSwingPoints(candles, params.leftBars, params.rightBars, params.minSwingPercent);
+  // 计算所有 ICT 指标（swing 改用 LuxAlgo，跟前端一对齐）
+  const swingPoints = detectSwingPointsLuxAlgo(candles, swingLength);
   const fvgs = detectFVGs(candles);
   const orderBlocks = detectOrderBlocks(candles);
   const oteZones = detectOTEZones(swingPoints, currentPrice, candles);
