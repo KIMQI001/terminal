@@ -454,8 +454,8 @@ export default function TowerPage() {
     error,
     refetch,
   } = useQuery<TowerBlocksResult>({
-    queryKey: ["tower-blocks", symbol],
-    queryFn: () => fetchTowerBlocks(symbol),
+    queryKey: ["tower-blocks", symbol, user?.id],
+    queryFn: () => fetchTowerBlocks(symbol, user?.id),
     refetchInterval: 60000, // Auto refresh every 60 seconds
     staleTime: 30000, // Consider data stale after 30 seconds
   });

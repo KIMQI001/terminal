@@ -333,9 +333,12 @@ export interface TowerBlocksResult {
  * 获取所有周期的塔块数据
  */
 export async function fetchTowerBlocks(
-  symbol: string = "BTCUSDC"
+  symbol: string = "BTCUSDC",
+  userId?: number
 ): Promise<TowerBlocksResult> {
-  const res = await fetch(`${API_BASE}/analyze/tower?symbol=${symbol}`);
+  const params = new URLSearchParams({ symbol });
+  if (userId) params.set("userId", String(userId));
+  const res = await fetch(`${API_BASE}/analyze/tower?${params.toString()}`);
   const json: ApiResponse<TowerBlocksResult> = await res.json();
 
   if (!json.success || !json.data) {

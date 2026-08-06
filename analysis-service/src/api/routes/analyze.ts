@@ -9,6 +9,7 @@ import { fetchLiquidation } from '../../data/liquidationClient';
 import { analyzeICT } from '../../analysis/ictAnalyzer';
 import { generateTradeSignal, generateReversalSignal, canCallAI, getCallStats } from '../../analysis/aiAnalyzer';
 import { analyzeReversal } from '../../analysis/mtfAnalyzer';
+import { getManagement } from '../../tower/towerManagementStore';
 
 export const analyzeRoutes = Router();
 
@@ -146,7 +147,29 @@ analyzeRoutes.get('/status', (_req: Request, res: Response) => {
 analyzeRoutes.get('/tower', async (req: Request, res: Response) => {
   try {
     const symbol = (req.query.symbol as string) || 'BTCUSDC';
-    const timeframes: Timeframe[] = ['5m', '15m', '1h', '4h', '1d'];
+    const userId = parseInt(req.query.userId as string) || 0;
+
+    // 优先用 management 的 enabledTimeframes（用户配置过）
+    // 未配置或 userId=0 时 fall back 到默认 5 个 TF
+    let timeframes: Timeframe[] = ['5m', '15m', '1h', '4h', '1d'];
+    if (userId > 0) {
+      const m = getManagement(userId, symbol);
+      if (m) {
+        try {
+          const tfs = JSON.parse(m.enabledTimeframes);
+          if (Array.isArray(tfs) && tfs.length > 0) {
+            timeframes = tfs.filter((t) =>
+              ['5m', '15m', '1h', '4h', '1d'].includes(t),
+            ) as Timeframe[];
+            if (timeframes.length === 0) {
+              timeframes = ['5m', '15m', '1h', '4h', '1d'];
+            }
+          }
+        } catch {
+          // 解析失败用默认
+        }
+      }
+    }
 
     console.log(`[API] 塔块数据请求: ${symbol}`);
 
