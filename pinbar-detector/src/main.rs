@@ -43,6 +43,24 @@ fn get_fixed_profit_points() -> f64 {
         .unwrap_or(300.0)
 }
 
+/// 开仓占账户余额比例 0.0~1.0（从环境变量读取，默认0.3=30%）
+fn get_position_pct() -> f64 {
+    env::var("POSITION_PCT")
+        .unwrap_or_else(|_| "0.3".to_string())
+        .parse::<f64>()
+        .unwrap_or(0.3)
+        .clamp(0.0, 1.0)
+}
+
+/// 杠杆倍数（从环境变量读取，默认100x，clamp 到 1~125）
+fn get_leverage() -> u32 {
+    env::var("LEVERAGE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(100)
+        .clamp(1, 125)
+}
+
 /// 追踪止盈激活点数（从环境变量读取，默认300点）
 fn get_trailing_activation_points() -> f64 {
     env::var("TRAILING_ACTIVATION_POINTS")
@@ -276,8 +294,9 @@ async fn send_volume_alert(
             // 获取可用余额（USDC）
             match crate::binance::get_balance(config, "USDC").await {
                 Ok(balance) => {
-                    let use_amount = balance / 2.0; // 可用金额的一半
-                    let leverage = 100;
+                    let position_pct = get_position_pct();
+                    let leverage = get_leverage();
+                    let use_amount = balance * position_pct;
                     quantity = (use_amount * leverage as f64) / entry_price;
                     let client_order_id_prefix = format!("vol_{}", chrono::Utc::now().timestamp_millis());
 
