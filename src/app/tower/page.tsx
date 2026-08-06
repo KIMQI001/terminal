@@ -1198,6 +1198,19 @@ export default function TowerPage() {
                   🔄 更新
                 </button>
 
+                {/* 启动 / 停止 托管（始终显示，可点击切换） */}
+                <button
+                  onClick={handleToggleAutoManage}
+                  disabled={isAutoOrdering}
+                  className={`px-3 py-1.5 text-xs font-medium rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                    isAutoManaged
+                      ? "bg-green-500 hover:bg-green-600 text-white"
+                      : "bg-[var(--bg-tertiary)] hover:bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-[var(--border)]"
+                  }`}
+                >
+                  {isAutoManaged ? "⏹ 停止托管" : "▶ 启动托管"}
+                </button>
+
                 <div className="h-5 w-px bg-[var(--border)]" />
 
                 <select
