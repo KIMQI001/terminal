@@ -1175,43 +1175,43 @@ export default function TowerPage() {
               </div>
             </div>
 
-            {/* 第二行：操作按钮 */}
-            <div className="flex items-center gap-2 pt-1 border-t border-[var(--border)] flex-wrap">
-              {/* 守塔按钮 */}
-              <button
-                onClick={() => handleAutoTower(false)}
-                disabled={isAutoOrdering || !data?.blocks?.length}
-                className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white text-xs font-medium rounded transition-colors"
-              >
-                {isAutoOrdering ? "下单中..." : "🏯 守塔"}
-              </button>
+            {/* 第二行：托管 + 过滤 + 启停按钮（分组） */}
+            <div className="pt-1 border-t border-[var(--border)] space-y-1.5">
+              {/* 子行 1：守塔 / 更新按钮 + 间隔 + 追踪止盈两参数 */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* 守塔按钮 */}
+                <button
+                  onClick={() => handleAutoTower(false)}
+                  disabled={isAutoOrdering || !data?.blocks?.length}
+                  className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white text-xs font-medium rounded transition-colors"
+                >
+                  {isAutoOrdering ? "下单中..." : "🏯 守塔"}
+                </button>
 
-              {/* 更新按钮 */}
-              <button
-                onClick={handleRefreshTower}
-                disabled={isAutoOrdering || !data?.blocks?.length}
-                className="px-2 py-1.5 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white text-xs rounded transition-colors"
-                title="取消所有订单并重新下单"
-              >
-                🔄 更新
-              </button>
+                {/* 更新按钮 */}
+                <button
+                  onClick={handleRefreshTower}
+                  disabled={isAutoOrdering || !data?.blocks?.length}
+                  className="px-2 py-1.5 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-500 disabled:cursor-not-allowed text-white text-xs rounded transition-colors"
+                  title="取消所有订单并重新下单"
+                >
+                  🔄 更新
+                </button>
 
-              <div className="h-5 w-px bg-[var(--border)]" />
+                <div className="h-5 w-px bg-[var(--border)]" />
 
-              {/* 托管设置 */}
-              <div className="flex items-center gap-1.5">
                 <select
                   value={autoInterval}
                   onChange={(e) => handleAutoIntervalChange(Number(e.target.value))}
                   disabled={isAutoManaged}
                   className="w-16 px-1 py-1.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500 disabled:opacity-60"
+                  title="托管间隔（分钟）"
                 >
                   {AUTO_INTERVALS.filter(opt => opt.value > 0).map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </select>
 
-                {/* 追踪止盈激活比例 */}
                 <div className="flex items-center gap-0.5" title="追踪止盈激活比例">
                   <input
                     type="number"
@@ -1226,7 +1226,6 @@ export default function TowerPage() {
                   <span className="text-xs text-[var(--text-tertiary)]">%</span>
                 </div>
 
-                {/* 追踪止盈回撤率 */}
                 <div className="flex items-center gap-0.5" title="追踪止盈回撤率">
                   <input
                     type="number"
@@ -1240,7 +1239,10 @@ export default function TowerPage() {
                   />
                   <span className="text-xs text-[var(--text-tertiary)]">%回</span>
                 </div>
+              </div>
 
+              {/* 子行 2：过滤器 + 时间周期 + 最大距离 */}
+              <div className="flex items-center gap-2 flex-wrap">
                 {/* 多L过滤 */}
                 <div className="flex items-center gap-1" title="多L过滤: 1=只下L以下的多单">
                   <span className="text-xs text-green-500">多L</span>
@@ -1281,7 +1283,7 @@ export default function TowerPage() {
                   />
                 </div>
 
-                {/* MTF Bias 过滤：0=关, 1=开（开启后只下当前 session bias 同向单） */}
+                {/* MTF Bias 过滤：0=关, 1=开 */}
                 <div className="flex items-center gap-1" title="MTF Bias 过滤: 0=关(无脑两边都开), 1=开(只下当前 session bias 同向单)">
                   <span className="text-xs text-[var(--text-tertiary)]">Bias</span>
                   <select
@@ -1295,7 +1297,7 @@ export default function TowerPage() {
                   </select>
                 </div>
 
-                {/* LH/HL 不破单：0=关, 1=开（在 HH 附近 LH 下 SELL、LL 附近 HL 下 BUY） */}
+                {/* LH/HL 不破单：0=关, 1=开 */}
                 <div className="flex items-center gap-1" title="LH/HL 不破单: 0=关, 1=开(在最新 HH 附近的 LH 下 SELL，LL 附近的 HL 下 BUY；受 Bias 过滤)">
                   <span className="text-xs text-[var(--text-tertiary)]">LH/HL</span>
                   <select
@@ -1377,17 +1379,6 @@ export default function TowerPage() {
                     className="w-12 px-1 py-1.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[var(--text-primary)] text-center focus:outline-none focus:border-blue-500 disabled:opacity-60"
                   />
                 </div>
-                <button
-                  onClick={handleToggleAutoManage}
-                  disabled={isAutoOrdering || !data?.blocks?.length}
-                  className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-                    isAutoManaged
-                      ? "bg-green-500 hover:bg-green-600 text-white"
-                      : "bg-[var(--bg-tertiary)] hover:bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-[var(--border)]"
-                  } disabled:opacity-50 disabled:cursor-not-allowed`}
-                >
-                  {isAutoManaged ? "⏹ 停止托管" : "▶ 启动托管"}
-                </button>
               </div>
 
               {/* 托管状态 */}
