@@ -70,6 +70,7 @@ interface TowerManagementConfig {
   lhHlOrders: number;                // LH/HL 不破单：1=在最新 HH 附近的 LH 下 SELL、在最新 LL 附近的 HL 下 BUY，0=不开启
   maxEntryDistancePercent: number;  // 最大入场距离（百分比，例 2 = 2.0%）
   monitorTimeframe: string;         // 周期过滤：0=所有周期, 15m/1h/4h/1d 只下指定周期
+  enabledTimeframes: string[];      // 启用的时间周期数组（['5m', '15m'] 等），控制守塔拉取哪些 TF 的 K 线
   lastRunAt: string | null;
   nextRunAt: string | null;
   createdAt: string;
@@ -200,6 +201,7 @@ export default function TowerPage() {
   const [useHLPDFilter, setUseHLPDFilter] = useState(true); // HLPD区域过滤：true=多<=D/空>=P, false=不限
   const [biasFilter, setBiasFilter] = useState(0); // MTF bias 过滤：1=只下同向单，0=不限
   const [lhHlOrders, setLhHlOrders] = useState(0); // LH/HL 不破单：0=关, 1=开
+  const [enabledTimeframes, setEnabledTimeframes] = useState<string[]>(["15m"]); // 启用的时间周期
   const [maxEntryDistancePercent, setMaxEntryDistancePercent] = useState(2); // 最大入场距离百分比（默认 2%）
   const [monitorTimeframe, setMonitorTimeframe] = useState<string>("15m"); // 周期过滤：默认 15m（跟后端一致，0=所有周期）
   const [isAutoOrdering, setIsAutoOrdering] = useState(false);
@@ -311,6 +313,7 @@ export default function TowerPage() {
           biasFilter,
           lhHlOrders,
           maxEntryDistancePercent,
+          enabledTimeframes: JSON.stringify(enabledTimeframes),
           monitorTimeframe,
         }),
       });
@@ -363,6 +366,7 @@ export default function TowerPage() {
       setBiasFilter(config.biasFilter ?? 0);
       setLhHlOrders(config.lhHlOrders ?? 0);
       setMaxEntryDistancePercent(config.maxEntryDistancePercent ?? 2);
+      setEnabledTimeframes(Array.isArray(config.enabledTimeframes) ? config.enabledTimeframes : ["15m"]);
       setMonitorTimeframe(config.monitorTimeframe ?? "0");
       // 同步到 localStorage
       localStorage.setItem(STORAGE_KEYS.BASE_MARGIN, String(config.baseMargin));
@@ -1305,7 +1309,40 @@ export default function TowerPage() {
                   </select>
                 </div>
 
-                {/* 周期过滤 */}
+                {/* 启用的时间周期（多选） */}
+                <div className="flex items-center gap-1" title="守塔拉取哪些时间周期的 K 线（多选）">
+                  <span className="text-xs text-[var(--text-tertiary)]">TFs</span>
+                  <div className="flex gap-0.5">
+                    {(['5m', '15m', '1h', '4h', '1d'] as const).map((tf) => {
+                      const checked = enabledTimeframes.includes(tf);
+                      return (
+                        <button
+                          key={tf}
+                          type="button"
+                          disabled={isAutoManaged}
+                          onClick={() => {
+                            if (checked) {
+                              if (enabledTimeframes.length > 1) {
+                                setEnabledTimeframes(enabledTimeframes.filter(t => t !== tf));
+                              }
+                            } else {
+                              setEnabledTimeframes([...enabledTimeframes, tf]);
+                            }
+                          }}
+                          className={`px-1.5 py-0.5 text-[9px] rounded border transition-colors disabled:opacity-60 ${
+                            checked
+                              ? 'bg-blue-500 text-white border-blue-500'
+                              : 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] border-[var(--border)] hover:border-blue-500'
+                          }`}
+                        >
+                          {tf}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 周期过滤（影响下单 TF） */}
                 <div className="flex items-center gap-1" title="周期过滤: 0=所有周期（推荐用 15m，跟你手动的 TF 一致）">
                   <span className="text-xs text-[var(--text-tertiary)]">周期</span>
                   <select
