@@ -288,8 +288,7 @@ async fn place_order_with_sl_tp(
     quantity: f64,
     client_order_id_prefix: &str,
 ) -> bool {
-    // 1. 检查现有仓位
-    let mut has_same_position = false;
+    // 1. 检查现有仓位 — "只挂最新"语义:同/反向持仓都市价平,只留最新一张
     match crate::binance::get_positions(config, symbol).await {
         Ok(positions) => {
             for pos in positions.iter() {
@@ -304,23 +303,15 @@ async fn place_order_with_sl_tp(
                 } else {
                     false
                 };
-                if is_opposite {
-                    info!("[反向平仓] {} -> {}", pos.position_side, position_side);
-                    match crate::binance::close_position_market(config, symbol, &pos.position_side, pos_amt).await {
-                        Ok(order_id) => info!("反向平仓成功: orderId={}", order_id),
-                        Err(e) => warn!("反向平仓失败: {}", e),
-                    }
-                } else {
-                    has_same_position = true;
-                    info!("[同向仓位] {} 已有持仓，跳过开仓", pos.position_side);
+                let action = if is_opposite { "[反向平仓]" } else { "[同向清旧]" };
+                info!("{} {} {} (准备下新单: {})", action, pos.position_side, pos_amt, position_side);
+                match crate::binance::close_position_market(config, symbol, &pos.position_side, pos_amt).await {
+                    Ok(order_id) => info!("{}成功: orderId={}", action, order_id),
+                    Err(e) => warn!("{}失败: {}", action, e),
                 }
             }
         }
         Err(e) => warn!("获取持仓失败: {}", e),
-    }
-
-    if has_same_position {
-        return false;
     }
 
     // 2. 取消同前缀的挂单(OB 触发时只清 ob_ 自己的,不动 vol_ 或手动单)
