@@ -1468,8 +1468,8 @@ async fn main() -> anyhow::Result<()> {
                     }).collect();
                     if let Some(cache) = caches.get_mut(&key) {
                         cache.load_from_api(klines);
-                        // 加载后立即检测一次（OB）
-                        cache.detect_ob_and_notify(symbol).await;
+                        // 启动时只加载数据,OB 报警由下面"启动时发送最近 OB"段统一处理
+                        // (避免 REST 加载后立即推 OB 时 last_ob_time=None,导致所有历史 OB 全发)
                     }
                 }
             }
