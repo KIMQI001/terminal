@@ -198,6 +198,64 @@ fn fmt_ts_inline(ts: i64) -> String {
         .unwrap_or_else(|| ts.to_string())
 }
 
+/// 生成「最近 OB 列表」的 Markdown 段(类似前端 OBPanel 右侧 Zones)
+///
+/// exclude_time: 过滤掉这条 OB(OB 报警自己时用,避免重复)
+/// current_price: 用于算 OB 距当前价距离 + 填充百分比
+fn format_recent_obs_section(
+    candles: &[Candle],
+    exclude_time: Option<i64>,
+    current_price: f64,
+    limit: usize,
+) -> String {
+    let obs = pinbar_detector::detect_order_blocks(candles);
+    let mut sorted = obs.clone();
+    sorted.sort_by(|a, b| b.time.cmp(&a.time));  // 按时间降序
+
+    let filtered: Vec<&pinbar_detector::OrderBlock> = sorted.iter()
+        .filter(|ob| exclude_time.map_or(true, |t| ob.time != t))
+        .take(limit)
+        .collect();
+
+    if filtered.is_empty() {
+        return String::new();
+    }
+
+    let mut lines = vec!["\n**附近 OB 列表:**".to_string()];
+    for ob in filtered {
+        let is_bullish = ob.ob_type == "bullish";
+        let label = if is_bullish { "🟢BUY" } else { "🔴SELL" };
+        let size = ob.top - ob.btm;
+        let mid = if is_bullish {
+            ob.top - size * 0.22
+        } else {
+            ob.btm + size * 0.22
+        };
+        // 填充百分比(价格从 OB 一侧进入 OB 区域的进度)
+        let fill_pct = if size > 0.0 {
+            if is_bullish {
+                if current_price >= ob.top { 0.0 }
+                else if current_price <= ob.btm { 100.0 }
+                else { ((ob.top - current_price) / size) * 100.0 }
+            } else {
+                if current_price <= ob.btm { 0.0 }
+                else if current_price >= ob.top { 100.0 }
+                else { ((current_price - ob.btm) / size) * 100.0 }
+            }
+        } else { 0.0 };
+        let mitigated = if ob.mitigated { "✓已缓解" } else { "活跃" };
+        lines.push(format!(
+            "  - {} `.22=${:.1}` 大小={:.2}% 填充={:.0}% {} @ {}",
+            label, mid,
+            (size / mid) * 100.0,
+            fill_pct,
+            mitigated,
+            fmt_ts_inline(ob.time),
+        ));
+    }
+    lines.join("\n") + "\n"
+}
+
 /// 是否启用交易（从环境变量读取，默认true）
 fn get_enable_trading() -> bool {
     env::var("ENABLE_TRADING")
@@ -629,6 +687,11 @@ async fn send_volume_alert(
         small_direction,
         zone_section
     );
+
+    // 加附近 OB 段(类似前端 OBPanel 右侧 Zones)
+    let current_price = candles.last().map(|c| c.close).unwrap_or(0.0);
+    let obs_section = format_recent_obs_section(candles, None, current_price, 5);
+    let message = format!("{}{}", message, obs_section);
 
     info!("发送钉钉通知: 15m 倍量报警");
 
@@ -1481,6 +1544,10 @@ impl KlineCache {
                 zone_section,
                 tip
             );
+
+            // 加附近 OB 列表段(过滤掉自身 OB)
+            let obs_section = format_recent_obs_section(&self.candles, Some(ob.time), current_price, 5);
+            let msg = format!("{}{}", msg, obs_section);
 
             info!("[OB] 发送钉钉通知: {} {} @ {} hit_hl={}",
                 symbol, ob.ob_type, dt, hl_hits.len());
