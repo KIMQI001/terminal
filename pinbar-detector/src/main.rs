@@ -32,8 +32,14 @@ const BINANCE_REST_URL: &str = "https://fapi.binance.com";
 /// 每个周期返回的最近信号数量
 const RECENT_SIGNALS_LIMIT: usize = 5;
 
-/// Swing Point 检测长度
-const SWING_LENGTH: usize = 50;
+/// Swing Point 检测长度(从环境变量读取,默认 20 — 与前端 15m 一致)
+fn get_swing_length() -> usize {
+    env::var("SWING_LENGTH")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(20)
+        .clamp(2, 500)
+}
 
 /// 固定止盈点数（从环境变量读取，默认300点）
 fn get_fixed_profit_points() -> f64 {
@@ -915,7 +921,7 @@ impl KlineCache {
 
         let signals = detect_recent_pinbars(
             &self.candles,
-            SWING_LENGTH,
+            get_swing_length(),
             SWING_RANGE,
             RECENT_SIGNALS_LIMIT,
         );
@@ -1402,8 +1408,8 @@ async fn main() -> anyhow::Result<()> {
         let key = format!("{}@{}", symbol, tf);
         if let Some(cache) = caches.get(&key) {
             let candles = &cache.candles;
-            if candles.len() >= SWING_LENGTH + 5 {
-                let sps = pinbar_detector::detect_swing_points(candles, SWING_LENGTH);
+            if candles.len() >= get_swing_length() + 5 {
+                let sps = pinbar_detector::detect_swing_points(candles, get_swing_length());
                 let zone = pinbar_detector::find_swing_zone(&sps);
 
                 // 把秒级时间戳格式化成 UTC+8 字符串
@@ -1478,7 +1484,7 @@ async fn main() -> anyhow::Result<()> {
         let key = format!("{}@{}", symbol, tf);
         if let Some(cache) = caches.get_mut(&key) {
             if cache.candles.len() >= 50 {
-                let signals = detect_recent_pinbars(&cache.candles, SWING_LENGTH, SWING_RANGE, 1);
+                let signals = detect_recent_pinbars(&cache.candles, get_swing_length(), SWING_RANGE, 1);
                 if let Some(sig) = signals.first() {
                     // 设置 last_pinbar_time 避免启动后再发一次
                     cache.last_pinbar_time = Some(sig.time);
