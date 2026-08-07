@@ -300,43 +300,25 @@ async fn place_order_with_sl_tp(
     quantity: f64,
     client_order_id_prefix: &str,
 ) -> bool {
-    // 1. 检查现有仓位
-    //    - 反向持仓:市价平仓(反手)
-    //    - 同向持仓:不**平**(加仓场景),只计数
-    //    - 同方向已有 ≥ 2 单 → 跳过(加仓上限)
-    let mut same_dir_count = 0;
-    match crate::binance::get_positions(config, symbol).await {
-        Ok(positions) => {
-            for pos in positions.iter() {
-                let pos_amt = pos.position_amt.abs();
-                if pos_amt < 0.001 {
-                    continue;
-                }
-                let is_opposite = if position_side == "LONG" && pos.position_side == "SHORT" {
-                    true
-                } else if position_side == "SHORT" && pos.position_side == "LONG" {
-                    true
-                } else {
-                    false
-                };
-                if is_opposite {
-                    info!("[反向平仓] {} {} (准备下新单: {})", pos.position_side, pos_amt, position_side);
-                    match crate::binance::close_position_market(config, symbol, &pos.position_side, pos_amt).await {
-                        Ok(order_id) => info!("反向平仓成功: orderId={}", order_id),
-                        Err(e) => warn!("反向平仓失败: {}", e),
-                    }
-                } else {
-                    same_dir_count += 1;
-                    info!("[同向加仓] {} 已有 {} 单", pos.position_side, same_dir_count);
-                }
-            }
+    // 1. 检查现有仓位 — 数总持仓(不区分方向,允许双仓 1多+1空)
+    //    - 总持仓 = 0 → 第 1 单(POSITION_PCT)
+    //    - 总持仓 = 1 → 第 2 单(SECOND_ORDER_PCT)
+    //    - 总持仓 ≥ 2 → 跳过
+    //    - **不**平任何持仓(允许 LONG + SHORT 并存)
+    let mut total_position_count = 0;
+    if let Ok(positions) = crate::binance::get_positions(config, symbol).await {
+        total_position_count = positions.iter()
+            .filter(|p| p.position_amt.abs() > 0.001)
+            .count();
+        if total_position_count > 0 {
+            info!("[仓位检查] 已有 {} 个持仓(允许双仓),准备下新单: {}",
+                total_position_count, position_side);
         }
-        Err(e) => warn!("获取持仓失败: {}", e),
     }
 
-    // 2. 加仓上限:同方向最多 2 单
-    if same_dir_count >= 2 {
-        info!("[Risk] 已有 {} 个同方向持仓,跳过加仓(MAX 2)", same_dir_count);
+    // 2. 总持仓上限:最多 2 单
+    if total_position_count >= 2 {
+        info!("[Risk] 已有 {} 个持仓,跳过(MAX 2)", total_position_count);
         return false;
     }
 
@@ -450,14 +432,14 @@ async fn send_volume_alert(
             // 获取可用余额（USDC）
             match crate::binance::get_balance(config, "USDC").await {
                 Ok(balance) => {
-                    // 查同方向持仓数,决定第 1 单(30%)还是第 2 单(80%)
-                    let same_dir_count = match crate::binance::get_positions(config, symbol).await {
+                    // 数总持仓(不区分方向),决定第 1 单还是第 2 单
+                    let total_position_count = match crate::binance::get_positions(config, symbol).await {
                         Ok(positions) => positions.iter()
-                            .filter(|p| p.position_amt.abs() > 0.001 && p.position_side == position_side)
+                            .filter(|p| p.position_amt.abs() > 0.001)
                             .count(),
                         Err(_) => 0,
                     };
-                    let pct = if same_dir_count == 0 {
+                    let pct = if total_position_count == 0 {
                         get_position_pct()
                     } else {
                         get_second_order_pct()
@@ -1548,14 +1530,14 @@ impl KlineCache {
 
                     match crate::binance::get_balance(cfg, "USDC").await {
                         Ok(balance) => {
-                            // 查同方向持仓数,决定第 1 单(30%)还是第 2 单(80%)
-                            let same_dir_count = match crate::binance::get_positions(cfg, symbol).await {
+                            // 数总持仓(不区分方向),决定第 1 单还是第 2 单
+                            let total_position_count = match crate::binance::get_positions(cfg, symbol).await {
                                 Ok(positions) => positions.iter()
-                                    .filter(|p| p.position_amt.abs() > 0.001 && p.position_side == position_side)
+                                    .filter(|p| p.position_amt.abs() > 0.001)
                                     .count(),
                                 Err(_) => 0,
                             };
-                            let pct = if same_dir_count == 0 {
+                            let pct = if total_position_count == 0 {
                                 get_position_pct()
                             } else {
                                 get_second_order_pct()
