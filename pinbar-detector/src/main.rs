@@ -717,10 +717,21 @@ async fn send_volume_alert(
         zone_section
     );
 
+    // 加入场 OB 判断段(告诉用户入场价是否落在附近 OB 内部)
+    let ob_check = is_entry_in_ob(entry_price, candles);
+    let ob_check_section = match ob_check {
+        Some(ob) => format!(
+            "\n**入场 OB 判断**: 🟢 在 {} OB 内部 (top=${:.2} btm=${:.2}),继续下单",
+            if ob.ob_type == "bullish" { "bullish(支撑)" } else { "bearish(阻力)" },
+            ob.top, ob.btm
+        ),
+        None => "\n**入场 OB 判断**: ⚠️ 不在附近 OB 内部,跳过下单".to_string(),
+    };
+
     // 加附近 OB 段(类似前端 OBPanel 右侧 Zones)
     let current_price = candles.last().map(|c| c.close).unwrap_or(0.0);
     let obs_section = format_recent_obs_section(candles, None, current_price, 5);
-    let message = format!("{}{}", message, obs_section);
+    let message = format!("{}{}{}", message, ob_check_section, obs_section);
 
     info!("发送钉钉通知: 15m 倍量报警");
 
