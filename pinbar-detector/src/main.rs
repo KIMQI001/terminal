@@ -429,9 +429,9 @@ async fn send_volume_alert(
     let mut quantity = 0.0;
     if should_trade {
         if let Some(config) = binance_config {
-            // 获取可用余额（USDC）
-            match crate::binance::get_balance(config, "USDC").await {
-                Ok(balance) => {
+            // 获取钱包总余额(USDC)— 用于仓位计算,不受已用保证金影响
+            match crate::binance::get_wallet_balance(config, "USDC").await {
+                Ok(wallet_balance) => {
                     // 数总持仓(不区分方向),决定第 1 单还是第 2 单
                     let total_position_count = match crate::binance::get_positions(config, symbol).await {
                         Ok(positions) => positions.iter()
@@ -445,7 +445,7 @@ async fn send_volume_alert(
                         get_second_order_pct()
                     };
                     let leverage = get_leverage();
-                    let use_amount = balance * pct;
+                    let use_amount = wallet_balance * pct;
                     quantity = (use_amount * leverage as f64) / entry_price;
                     let client_order_id_prefix = format!("vol_{}", chrono::Utc::now().timestamp_millis());
 
@@ -1528,8 +1528,8 @@ impl KlineCache {
                         entry_zone - fixed_profit_pts
                     };
 
-                    match crate::binance::get_balance(cfg, "USDC").await {
-                        Ok(balance) => {
+                    match crate::binance::get_wallet_balance(cfg, "USDC").await {
+                        Ok(wallet_balance) => {
                             // 数总持仓(不区分方向),决定第 1 单还是第 2 单
                             let total_position_count = match crate::binance::get_positions(cfg, symbol).await {
                                 Ok(positions) => positions.iter()
@@ -1543,7 +1543,7 @@ impl KlineCache {
                                 get_second_order_pct()
                             };
                             let leverage = get_leverage();
-                            let use_amount = balance * pct;
+                            let use_amount = wallet_balance * pct;
                             let quantity = (use_amount * leverage as f64) / entry_zone;
                             let prefix = format!("ob_{}", chrono::Utc::now().timestamp_millis());
 

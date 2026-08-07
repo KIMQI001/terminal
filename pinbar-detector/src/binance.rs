@@ -158,6 +158,38 @@ pub fn format_price(price: f64, precision: u32) -> String {
     format!("{:.prec$}", price, prec = precision as usize)
 }
 
+/// 获取账户钱包余额(总余额,已扣占用保证金前的值)
+/// 用于仓位计算:每次下单都按总余额比例算,而不是剩余可用余额
+pub async fn get_wallet_balance(config: &BinanceConfig, asset: &str) -> anyhow::Result<f64> {
+    let timestamp = chrono::Utc::now().timestamp_millis();
+    let query = format!("timestamp={}", timestamp);
+    let signature = generate_signature(&query, &config.api_secret);
+    let url = format!("{}/fapi/v2/account?{}&signature={}", config.base_url(), query, signature);
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("X-MBX-APIKEY", &config.api_key)
+        .send()
+        .await?;
+
+    let data: serde_json::Value = resp.json().await?;
+
+    if let Some(assets) = data.get("assets").and_then(|a| a.as_array()) {
+        for asset_data in assets {
+            if asset_data["asset"].as_str() == Some(asset) {
+                let wallet = asset_data["walletBalance"]
+                    .as_str()
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+                return Ok(wallet);
+            }
+        }
+    }
+
+    Ok(0.0)
+}
+
 /// 获取账户余额
 pub async fn get_balance(config: &BinanceConfig, asset: &str) -> anyhow::Result<f64> {
     let timestamp = chrono::Utc::now().timestamp_millis();
