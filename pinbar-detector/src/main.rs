@@ -178,6 +178,17 @@ fn get_volume_alert_ratio() -> f64 {
         .unwrap_or(2.0)
 }
 
+/// 把秒级时间戳格式化成 UTC+8 字符串(供 swing 推送用)
+fn fmt_ts_inline(ts: i64) -> String {
+    chrono::DateTime::from_timestamp(ts, 0)
+        .map(|dt| {
+            let offset = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+            dt.with_timezone(&offset)
+        })
+        .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| ts.to_string())
+}
+
 /// 是否启用交易（从环境变量读取，默认true）
 fn get_enable_trading() -> bool {
     env::var("ENABLE_TRADING")
@@ -253,6 +264,9 @@ fn check_volume_alert(candles: &[Candle]) -> Option<(usize, f64, usize)> {
 }
 
 /// 格式化倍量报警消息并发送钉钉，同时可选自动下单
+///
+/// `swing_zone`: 优先用 KlineCache 缓存的 zone(由 update_swing_zone 维护),
+/// None 时现场算一次(用于启动时缓存还没填充的边界 case)
 async fn send_volume_alert(
     symbol: &str,
     candles: &[Candle],
@@ -261,6 +275,7 @@ async fn send_volume_alert(
     small_index: usize,    // 小实体K线位置
     binance_config: Option<&crate::binance::BinanceConfig>,
     should_trade: bool,    // 是否实际下单，false=仅报警（启动时）
+    swing_zone: Option<&pinbar_detector::SwingZone>,
 ) {
     let vol_candle = &candles[vol_index];
     let small_candle = &candles[small_index];
@@ -515,10 +530,13 @@ async fn send_volume_alert(
         String::new()
     };
 
-    // 计算 swing zone(中线对比)
-    let swing_zone = {
-        let sps = pinbar_detector::detect_swing_points(candles, get_swing_length());
-        pinbar_detector::find_swing_zone(&sps)
+    // 优先用缓存的 swing zone(由 update_swing_zone 维护),缓存为空时现场算
+    let swing_zone = match swing_zone {
+        Some(z) => Some(z.clone()),
+        None => {
+            let sps = pinbar_detector::detect_swing_points(candles, get_swing_length());
+            pinbar_detector::find_swing_zone(&sps)
+        }
     };
 
     let zone_section = match swing_zone {
@@ -900,6 +918,10 @@ struct KlineCache {
     last_volume_time: Option<i64>,   // 上次发送倍量通知的时间
     last_fvg_time: Option<i64>,      // 上次发送 FVG 通知的时间
     last_ob_time: Option<i64>,        // 上次发送 OB 通知的时间
+    // Swing Zone 缓存(由 update_swing_zone 维护)
+    swing_zone: Option<pinbar_detector::SwingZone>,
+    last_reported_swing_high: Option<i64>,  // 上次主动推送的 high swing 时间
+    last_reported_swing_low: Option<i64>,   // 上次主动推送的 low swing 时间
     daily_candles: Vec<(i64, f64, f64, f64, f64, f64)>,  // 历史日 K，用于 OB 命中检测
     daily_last_fetch: Option<i64>,    // 上次拉取日 K 的时间戳（毫秒）
 }
@@ -914,6 +936,9 @@ impl KlineCache {
             last_volume_time: None,
             last_fvg_time: None,
             last_ob_time: None,
+            swing_zone: None,
+            last_reported_swing_high: None,
+            last_reported_swing_low: None,
             daily_candles: Vec::new(),
             daily_last_fetch: None,
         }
@@ -951,6 +976,72 @@ impl KlineCache {
             self.candles.remove(0);
         }
         self.update_count += 1;
+    }
+
+    /// 主动检测 swing zone 变化,有新高/新低时主动推送钉钉
+    ///
+    /// force_init = true: 只算并缓存,不推送(启动消息已发过,只用来初始化 last_reported_xxx)
+    /// force_init = false: 算 + 缓存 + 比对,有新 swing 就推钉钉
+    async fn update_swing_zone(&mut self, symbol: &str, force_init: bool) {
+        if self.candles.len() < get_swing_length() + 5 {
+            return;
+        }
+        let sps = pinbar_detector::detect_swing_points(&self.candles, get_swing_length());
+        let zone = pinbar_detector::find_swing_zone(&sps);
+        self.swing_zone = zone.clone();
+
+        let Some(z) = zone else { return; };
+
+        if force_init {
+            // 初始化模式:不推送,只记 last_reported(启动消息已发)
+            self.last_reported_swing_high = Some(z.high_time);
+            self.last_reported_swing_low = Some(z.low_time);
+            return;
+        }
+
+        // 主动推送模式:比对 last_reported,有新就推
+        let new_high = match self.last_reported_swing_high {
+            Some(prev) => z.high_time > prev,
+            None => true,
+        };
+        let new_low = match self.last_reported_swing_low {
+            Some(prev) => z.low_time > prev,
+            None => true,
+        };
+
+        if new_high {
+            self.last_reported_swing_high = Some(z.high_time);
+            let msg = format!(
+                "### 📐 新 Swing High\n\n\
+**交易对**: {} @ {}\n\n\
+**新 High ({}):** ${:.2} @ {}\n\n\
+**当前中线:** ${:.2} (Low=${:.2})",
+                symbol, self.timeframe,
+                z.high_class, z.high, fmt_ts_inline(z.high_time),
+                z.mid, z.low,
+            );
+            info!("[Swing] 新 High 推送: ${:.2} @ {}", z.high, z.high_time);
+            if let Err(e) = notification::send_dingtalk_markdown("Swing 更新 - 新 High", &msg).await {
+                warn!("[Swing] 推送新 High 失败: {}", e);
+            }
+        }
+
+        if new_low {
+            self.last_reported_swing_low = Some(z.low_time);
+            let msg = format!(
+                "### 📐 新 Swing Low\n\n\
+**交易对**: {} @ {}\n\n\
+**新 Low ({}):** ${:.2} @ {}\n\n\
+**当前中线:** ${:.2} (High=${:.2})",
+                symbol, self.timeframe,
+                z.low_class, z.low, fmt_ts_inline(z.low_time),
+                z.mid, z.high,
+            );
+            info!("[Swing] 新 Low 推送: ${:.2} @ {}", z.low, z.low_time);
+            if let Err(e) = notification::send_dingtalk_markdown("Swing 更新 - 新 Low", &msg).await {
+                warn!("[Swing] 推送新 Low 失败: {}", e);
+            }
+        }
     }
 
     /// 检测并打印 PINBAR 信号，发送钉钉通知
@@ -1308,10 +1399,14 @@ impl KlineCache {
                 String::new()
             };
 
-            // 计算 swing zone(中线对比)
-            let swing_zone = {
-                let sps = pinbar_detector::detect_swing_points(&self.candles, get_swing_length());
-                pinbar_detector::find_swing_zone(&sps)
+            // 优先用缓存的 swing zone(由 update_swing_zone 主动维护)
+            // 缓存为空时(比如启动初期还没调过)才现场算一次
+            let swing_zone = match self.swing_zone.clone() {
+                Some(z) => Some(z),
+                None => {
+                    let sps = pinbar_detector::detect_swing_points(&self.candles, get_swing_length());
+                    pinbar_detector::find_swing_zone(&sps)
+                }
             };
 
             let zone_section = match swing_zone {
@@ -1484,11 +1579,13 @@ async fn main() -> anyhow::Result<()> {
     // 加载完后推送最近 swing zone(只显示最近一个 HH + 一个 LL + 中线)
     for (symbol, tf) in &subscriptions {
         let key = format!("{}@{}", symbol, tf);
-        if let Some(cache) = caches.get(&key) {
+        if let Some(cache) = caches.get_mut(&key) {
+            // 初始化 swing zone 缓存(只算不发,启动消息已自带详细推送)
+            cache.update_swing_zone(symbol, true).await;
+
             let candles = &cache.candles;
             if candles.len() >= get_swing_length() + 5 {
-                let sps = pinbar_detector::detect_swing_points(candles, get_swing_length());
-                let zone = pinbar_detector::find_swing_zone(&sps);
+                let zone = cache.swing_zone.clone();
 
                 let fmt_ts = |ts: i64| -> String {
                     chrono::DateTime::from_timestamp(ts, 0)
@@ -1611,8 +1708,9 @@ async fn main() -> anyhow::Result<()> {
                     // 设置 last_volume_time 避免启动后再发一次
                     cache.last_volume_time = Some(cache.candles[index].time);
                     let candles = cache.candles.clone();
+                    let zone_ref = cache.swing_zone.as_ref();
                     // 启动时 should_trade=false，仅报警不下单
-                    send_volume_alert(symbol, &candles, index, ratio, small_index, binance_config.as_ref(), false).await;
+                    send_volume_alert(symbol, &candles, index, ratio, small_index, binance_config.as_ref(), false, zone_ref).await;
                 }
             }
         }
@@ -1744,10 +1842,14 @@ async fn main() -> anyhow::Result<()> {
                                             cache.candles.len(),
                                             cache.last_fvg_time);
 
-                                        // PINBAR 检测（新的完整K线）- detect_and_notify 内部会发送钉钉通知
+                                        // 先更新 swing zone 缓存(有新 High/Low 会主动推送)
                                         let parts: Vec<&str> = key.split('@').collect();
                                         if parts.len() == 2 {
-                                            cache.detect_ob_and_notify(parts[0]).await;
+                                            let symbol = parts[0];
+                                            cache.update_swing_zone(symbol, false).await;
+
+                                            // PINBAR 检测（新的完整K线）- detect_and_notify 内部会发送钉钉通知
+                                            cache.detect_ob_and_notify(symbol).await;
                                         }
 
                                         // 倍量报警检测
@@ -1775,6 +1877,7 @@ async fn main() -> anyhow::Result<()> {
                                                             small_index,
                                                             binance_config.as_ref(),
                                                             get_enable_trading(),
+                                                            cache.swing_zone.as_ref(),
                                                         )
                                                         .await;
                                                     }
