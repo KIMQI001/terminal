@@ -190,6 +190,88 @@ pub async fn get_balance(config: &BinanceConfig, asset: &str) -> anyhow::Result<
     Ok(0.0)
 }
 
+/// 只取消 clientOrderId 以指定 prefix 开头的挂单(普通 + Algo)
+///
+/// 用于 OB/倍量 两套互不干扰: OB 触发时只清自己前缀("ob_")的挂单,
+/// 不会动到倍量("vol_")或其它手动单。
+pub async fn cancel_orders_by_prefix(
+    config: &BinanceConfig,
+    symbol: &str,
+    prefix: &str,
+) -> anyhow::Result<()> {
+    let client = reqwest::Client::new();
+
+    // 1. 拉普通挂单
+    let timestamp = chrono::Utc::now().timestamp_millis();
+    let query = format!("symbol={}&timestamp={}", symbol, timestamp);
+    let signature = generate_signature(&query, &config.api_secret);
+    let url = format!("{}/fapi/v1/openOrders?{}&signature={}", config.base_url(), query, signature);
+    let resp = client
+        .get(&url)
+        .header("X-MBX-APIKEY", &config.api_key)
+        .send()
+        .await?;
+
+    if let Ok(data) = resp.json::<Vec<serde_json::Value>>().await {
+        for order in data.iter() {
+            let client_oid = order.get("clientOrderId").and_then(|v| v.as_str()).unwrap_or("");
+            if !client_oid.starts_with(prefix) {
+                continue;
+            }
+            if let Some(order_id) = order.get("orderId").and_then(|v| v.as_u64()) {
+                let ts = chrono::Utc::now().timestamp_millis();
+                let q = format!("symbol={}&orderId={}&timestamp={}", symbol, order_id, ts);
+                let sig = generate_signature(&q, &config.api_secret);
+                let cancel_url = format!("{}/fapi/v1/order?{}&signature={}", config.base_url(), q, sig);
+                let cancel_resp = client
+                    .delete(&cancel_url)
+                    .header("X-MBX-APIKEY", &config.api_key)
+                    .send()
+                    .await;
+                if cancel_resp.is_ok() {
+                    println!("[Binance] 取消 {} 前缀挂单: orderId={} clientOrderId={}", prefix, order_id, client_oid);
+                }
+            }
+        }
+    }
+
+    // 2. 拉 Algo 条件单
+    let algo_timestamp = chrono::Utc::now().timestamp_millis();
+    let algo_query = format!("symbol={}&timestamp={}", symbol, algo_timestamp);
+    let algo_signature = generate_signature(&algo_query, &config.api_secret);
+    let algo_url = format!("{}/fapi/v1/openAlgoOrders?{}&signature={}", config.base_url(), algo_query, algo_signature);
+    let algo_resp = client
+        .get(&algo_url)
+        .header("X-MBX-APIKEY", &config.api_key)
+        .send()
+        .await?;
+
+    if let Ok(algo_data) = algo_resp.json::<Vec<serde_json::Value>>().await {
+        for algo_order in algo_data.iter() {
+            let client_oid = algo_order.get("clientAlgoId").and_then(|v| v.as_str()).unwrap_or("");
+            if !client_oid.starts_with(prefix) {
+                continue;
+            }
+            if let Some(algo_id) = algo_order.get("algoId").and_then(|v| v.as_u64()) {
+                let ts = chrono::Utc::now().timestamp_millis();
+                let q = format!("symbol={}&algoId={}&timestamp={}", symbol, algo_id, ts);
+                let sig = generate_signature(&q, &config.api_secret);
+                let cancel_url = format!("{}/fapi/v1/algoOrder?{}&signature={}", config.base_url(), q, sig);
+                let cancel_resp = client
+                    .delete(&cancel_url)
+                    .header("X-MBX-APIKEY", &config.api_key)
+                    .send()
+                    .await;
+                if cancel_resp.is_ok() {
+                    println!("[Binance] 取消 {} 前缀 Algo: algoId={} clientAlgoId={}", prefix, algo_id, client_oid);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// 取消所有挂单（普通订单 + Algo 条件单）
 pub async fn cancel_all_orders(config: &BinanceConfig, symbol: &str) -> anyhow::Result<()> {
     let timestamp = chrono::Utc::now().timestamp_millis();

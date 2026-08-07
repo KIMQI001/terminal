@@ -323,8 +323,8 @@ async fn place_order_with_sl_tp(
         return false;
     }
 
-    // 2. 取消所有挂单
-    if let Err(e) = crate::binance::cancel_all_orders(config, symbol).await {
+    // 2. 取消同前缀的挂单(OB 触发时只清 ob_ 自己的,不动 vol_ 或手动单)
+    if let Err(e) = crate::binance::cancel_orders_by_prefix(config, symbol, client_order_id_prefix).await {
         warn!("取消挂单失败: {}", e);
     }
 
