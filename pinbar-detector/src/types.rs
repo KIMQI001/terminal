@@ -69,3 +69,24 @@ pub struct FVG {
     /// Gap 百分比（相对 c1.high 或 c1.low）
     pub gap_percent: f64,
 }
+
+/// 价格区(由一对 swing point 组成)
+/// 多单方向: high=HH, low=HL
+/// 空单方向: high=LH, low=LL
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwingZone {
+    /// 高点价格
+    pub high: f64,
+    /// 低点价格
+    pub low: f64,
+    /// 中线 = (high + low) / 2
+    pub mid: f64,
+    /// 高点时间
+    pub high_time: i64,
+    /// 低点时间
+    pub low_time: i64,
+    /// 高点分类 "HH" | "LH"
+    pub high_class: String,
+    /// 低点分类 "HL" | "LL"
+    pub low_class: String,
+}

@@ -1397,6 +1397,47 @@ async fn main() -> anyhow::Result<()> {
 
     println!("\n历史数据加载完成，开始监听实时 K 线...\n");
 
+    // 加载完后推送最近 HL/HH + 中线(供检查准度)
+    for (symbol, tf) in &subscriptions {
+        let key = format!("{}@{}", symbol, tf);
+        if let Some(cache) = caches.get(&key) {
+            let candles = &cache.candles;
+            if candles.len() >= SWING_LENGTH + 5 {
+                let sps = pinbar_detector::detect_swing_points(candles, SWING_LENGTH);
+                let long_zone = pinbar_detector::find_swing_zone(&sps, "long");
+                let short_zone = pinbar_detector::find_swing_zone(&sps, "short");
+
+                let fmt_zone = |label: &str, z: Option<&pinbar_detector::SwingZone>| -> String {
+                    match z {
+                        Some(z) => format!(
+                            "**{}**: {}={} ({}), {}={} ({}), **中线**={:.2}",
+                            label,
+                            z.high_class, z.high, z.high_time,
+                            z.low_class, z.low, z.low_time,
+                            z.mid
+                        ),
+                        None => format!("**{}**: 无配对", label),
+                    }
+                };
+
+                let zone_msg = format!(
+                    "### 📐 服务就绪 - 最近 Swing Zone\n\n\
+**监控**: {} @ {}\n\n\
+{}\n\n\
+{}",
+                    symbol, tf,
+                    fmt_zone("多单 (HL/HH)", long_zone.as_ref()),
+                    fmt_zone("空单 (LH/LL)", short_zone.as_ref()),
+                );
+
+                info!("发送钉钉通知: Swing Zone 校验");
+                if let Err(e) = notification::send_dingtalk_markdown("服务就绪 - Swing Zone", &zone_msg).await {
+                    warn!("Swing Zone 钉钉通知失败: {}", e);
+                }
+            }
+        }
+    }
+
     // 发送最近 PINBAR 信号的钉钉通知（启动时证明检测能力）
     for (symbol, tf) in &subscriptions {
         let key = format!("{}@{}", symbol, tf);

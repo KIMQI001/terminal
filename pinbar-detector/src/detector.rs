@@ -1,7 +1,7 @@
 //! Pinbar 检测核心算法
 //! 从 TypeScript 移植自 src/lib/chart/indicators/swingPoints.ts 和 engulfingPinbar.ts
 
-use crate::types::{Candle, FVG, PinbarSignal, SwingPoint};
+use crate::types::{Candle, FVG, PinbarSignal, SwingPoint, SwingZone};
 
 /// 检测 Swing Points（pivot high/low）
 pub fn detect_swing_points(candles: &[Candle], length: usize) -> Vec<SwingPoint> {
@@ -303,6 +303,78 @@ pub fn detect_fvg(candles: &[Candle], min_gap_percent: f64) -> Vec<FVG> {
     fvgs
 }
 
+/// 找出最近一对 swing point 形成的价格区
+///
+/// direction = "long":  找最近一个 HL(low 端),再找它之前最近的 HH(high 端) → (HH, HL, 中线)
+/// direction = "short": 找最近一个 LH(high 端),再找它之前最近的 LL(low 端) → (LH, LL, 中线)
+///
+/// 配对规则:按时间倒序遍历,先找到「近端」,再向前找「远端」。
+/// 不要求 HH/HL 严格交替(简化版配对,不做 ICT 结构确认)。
+pub fn find_swing_zone(swing_points: &[SwingPoint], direction: &str) -> Option<SwingZone> {
+    if direction != "long" && direction != "short" {
+        return None;
+    }
+
+    // 近端 pivot 的分类:多单→HL, 空单→LH
+    let near_class = if direction == "long" { "HL" } else { "LH" };
+    // 远端 pivot 的分类:多单→HH, 空单→LL
+    let far_class = if direction == "long" { "HH" } else { "LL" };
+    // 远端 pivot 的 swing_type(都是 high,无论 long/short — 因为 HL/LH 都是 swing_type="high",HH/LL 也是 "high")
+    // 实际 HL/LH 的 swing_type 是 "low" 还是 "high"?
+    //   HL: high 类的更高低点,swing_type="low"
+    //   HH: high 类的更高高点,swing_type="high"
+    // 所以:多单: near=HL(swing_type=low), far=HH(swing_type=high)
+    //     空单: near=LH(swing_type=high), far=LL(swing_type=low)
+    let (near_swing_type, far_swing_type) = if direction == "long" {
+        ("low", "high")
+    } else {
+        ("high", "low")
+    };
+
+    // 按时间倒序遍历
+    let mut near: Option<&SwingPoint> = None;
+    let mut far: Option<&SwingPoint> = None;
+    for sp in swing_points.iter().rev() {
+        if near.is_none()
+            && sp.classification == near_class
+            && sp.swing_type == near_swing_type
+        {
+            near = Some(sp);
+            continue;
+        }
+        if near.is_some() && far.is_none()
+            && sp.classification == far_class
+            && sp.swing_type == far_swing_type
+        {
+            far = Some(sp);
+            break;
+        }
+    }
+
+    let (near, far) = match (near, far) {
+        (Some(n), Some(f)) => (n, f),
+        _ => return None,
+    };
+
+    let (high, low, high_time, low_time, high_class, low_class) = if direction == "long" {
+        // 多单:far=HH(高), near=HL(低)
+        (far.price, near.price, far.time, near.time, far.classification.clone(), near.classification.clone())
+    } else {
+        // 空单:near=LH(高), far=LL(低)
+        (near.price, far.price, near.time, far.time, near.classification.clone(), far.classification.clone())
+    };
+
+    Some(SwingZone {
+        high,
+        low,
+        mid: (high + low) / 2.0,
+        high_time,
+        low_time,
+        high_class,
+        low_class,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -415,5 +487,55 @@ mod tests {
 
         let fvgs = detect_fvg(&candles, 0.1);
         assert!(fvgs.is_empty(), "无缺口不应产生 FVG");
+    }
+
+    #[test]
+    fn test_find_swing_zone_long() {
+        // 模拟上升结构:HH 81000 → HL 80200
+        let sps = vec![
+            SwingPoint { swing_type: "high".to_string(), price: 80000.0, time: 1, index: 5, classification: "LH".to_string() },
+            SwingPoint { swing_type: "low".to_string(), price: 79000.0, time: 2, index: 8, classification: "LL".to_string() },
+            SwingPoint { swing_type: "high".to_string(), price: 81000.0, time: 3, index: 12, classification: "HH".to_string() },
+            SwingPoint { swing_type: "low".to_string(), price: 80200.0, time: 4, index: 18, classification: "HL".to_string() },
+        ];
+        let z = find_swing_zone(&sps, "long").unwrap();
+        assert_eq!(z.high, 81000.0);  // HH
+        assert_eq!(z.low, 80200.0);   // HL
+        assert_eq!(z.mid, 80600.0);   // (81000+80200)/2
+        assert_eq!(z.high_class, "HH");
+        assert_eq!(z.low_class, "HL");
+    }
+
+    #[test]
+    fn test_find_swing_zone_short() {
+        // 模拟下降结构:LL 在前,LH 在后(算法找"LH 之前最近 LL")
+        let sps = vec![
+            SwingPoint { swing_type: "low".to_string(), price: 79000.0, time: 1, index: 5, classification: "LL".to_string() },
+            SwingPoint { swing_type: "high".to_string(), price: 80500.0, time: 2, index: 8, classification: "LH".to_string() },
+        ];
+        let z = find_swing_zone(&sps, "short").unwrap();
+        assert_eq!(z.high, 80500.0);  // LH
+        assert_eq!(z.low, 79000.0);   // LL
+        assert_eq!(z.mid, 79750.0);   // (80500+79000)/2
+        assert_eq!(z.high_class, "LH");
+        assert_eq!(z.low_class, "LL");
+    }
+
+    #[test]
+    fn test_find_swing_zone_no_pair() {
+        // 只有 HL,没有 HH
+        let sps = vec![
+            SwingPoint { swing_type: "low".to_string(), price: 80200.0, time: 1, index: 18, classification: "HL".to_string() },
+        ];
+        assert!(find_swing_zone(&sps, "long").is_none());
+    }
+
+    #[test]
+    fn test_find_swing_zone_invalid_direction() {
+        let sps = vec![
+            SwingPoint { swing_type: "high".to_string(), price: 81000.0, time: 1, index: 5, classification: "HH".to_string() },
+            SwingPoint { swing_type: "low".to_string(), price: 80200.0, time: 2, index: 8, classification: "HL".to_string() },
+        ];
+        assert!(find_swing_zone(&sps, "sideways").is_none());
     }
 }
