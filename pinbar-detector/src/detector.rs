@@ -56,7 +56,7 @@ pub fn detect_swing_points(candles: &[Candle], length: usize) -> Vec<SwingPoint>
 
 /// ta_pivothigh - TradingView 风格的 pivot high 检测
 /// 左侧 length 根K线最高价都 <= 当前高点
-/// 右侧 (length-1) 根K线最高价都 < 当前高点
+/// 右侧 length 根K线最高价都 < 当前高点（严格小于）
 fn ta_pivothigh(candles: &[Candle], i: usize, length: usize) -> Option<f64> {
     if i < length {
         return None;
@@ -71,8 +71,10 @@ fn ta_pivothigh(candles: &[Candle], i: usize, length: usize) -> Option<f64> {
         }
     }
 
-    // 右侧检查：(length-1) 根K线的最高价都必须 < 当前高点（严格小于）
-    for j in 1..length {
+    // 右侧检查：length 根K线的最高价都必须 < 当前高点（严格小于）
+    // 注意:TradingView 的 ta.pivothigh(length) 语义是左右各 length 根,
+    // 之前用 1..length 少检查了 1 根,会导致 pivot 位置比 TV 提前 1 根
+    for j in 1..=length {
         if i + j < candles.len() && candles[i + j].high >= high {
             return None;
         }
@@ -83,7 +85,7 @@ fn ta_pivothigh(candles: &[Candle], i: usize, length: usize) -> Option<f64> {
 
 /// ta_pivotlow - TradingView 风格的 pivot low 检测
 /// 左侧 length 根K线最低价都 >= 当前低点
-/// 右侧 (length-1) 根K线最低价都 > 当前低点
+/// 右侧 length 根K线最低价都 > 当前低点
 fn ta_pivotlow(candles: &[Candle], i: usize, length: usize) -> Option<f64> {
     if i < length {
         return None;
@@ -98,8 +100,8 @@ fn ta_pivotlow(candles: &[Candle], i: usize, length: usize) -> Option<f64> {
         }
     }
 
-    // 右侧检查：(length-1) 根K线的最低价都必须 > 当前低点（严格大于）
-    for j in 1..length {
+    // 右侧检查：length 根K线的最低价都必须 > 当前低点（严格大于）
+    for j in 1..=length {
         if i + j < candles.len() && candles[i + j].low <= low {
             return None;
         }

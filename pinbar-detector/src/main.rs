@@ -1406,17 +1406,38 @@ async fn main() -> anyhow::Result<()> {
                 let sps = pinbar_detector::detect_swing_points(candles, SWING_LENGTH);
                 let zone = pinbar_detector::find_swing_zone(&sps);
 
+                // 把秒级时间戳格式化成 UTC+8 字符串
+                let fmt_ts = |ts: i64| -> String {
+                    chrono::DateTime::from_timestamp(ts, 0)
+                        .map(|dt| {
+                            let offset = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+                            dt.with_timezone(&offset)
+                        })
+                        .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                        .unwrap_or_else(|| ts.to_string())
+                };
+
+                let first_ts = candles.first().map(|c| c.time).unwrap_or(0);
+                let last_ts = candles.last().map(|c| c.time).unwrap_or(0);
+                let last_close = candles.last().map(|c| c.close).unwrap_or(0.0);
+
                 let zone_msg = match zone {
                     Some(z) => format!(
                         "### 📐 服务就绪 - 最近 Swing\n\n\
 **监控**: {} @ {}\n\n\
-**最近 High ({}):** ${:.2} (time={})\n\n\
-**最近 Low ({}):** ${:.2} (time={})\n\n\
-**中线:** ${:.2}",
+**数据范围**: {} 根 K 线, {} → {}\n\
+**最新价**: ${:.2}\n\n\
+**最近 High ({}):** ${:.2} @ {}\n\n\
+**最近 Low ({}):** ${:.2} @ {}\n\n\
+**中线:** ${:.2}\n\n\
+*对照图表 swing point 标签*",
                         symbol, tf,
-                        z.high_class, z.high, z.high_time,
-                        z.low_class, z.low, z.low_time,
-                        z.mid
+                        candles.len(),
+                        fmt_ts(first_ts), fmt_ts(last_ts),
+                        last_close,
+                        z.high_class, z.high, fmt_ts(z.high_time),
+                        z.low_class, z.low, fmt_ts(z.low_time),
+                        z.mid,
                     ),
                     None => format!(
                         "### 📐 服务就绪 - Swing 数据不足\n\n**监控**: {} @ {}\n\n历史 K 线不足,无法计算 swing zone",
