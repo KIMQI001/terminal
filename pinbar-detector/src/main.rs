@@ -198,6 +198,16 @@ fn fmt_ts_inline(ts: i64) -> String {
         .unwrap_or_else(|| ts.to_string())
 }
 
+/// 检查入场价是否落在附近某个 OB 内部(btm <= price <= top)
+/// 返回命中的第一个未缓解 OB(如有多个,返回时间最近的)
+fn is_entry_in_ob(entry_price: f64, candles: &[pinbar_detector::Candle]) -> Option<pinbar_detector::OrderBlock> {
+    let obs = pinbar_detector::detect_order_blocks(candles);
+    let mut sorted = obs.clone();
+    sorted.sort_by(|a, b| b.time.cmp(&a.time));  // 按时间降序
+    sorted.into_iter()
+        .find(|ob| !ob.mitigated && entry_price >= ob.btm && entry_price <= ob.top)
+}
+
 /// 生成「最近 OB 列表」的 Markdown 段(类似前端 OBPanel 右侧 Zones)
 ///
 /// exclude_time: 过滤掉这条 OB(OB 报警自己时用,避免重复)
@@ -335,7 +345,10 @@ fn check_volume_alert(candles: &[Candle]) -> Option<(usize, f64, usize)> {
 /// 抽自 send_volume_alert,供 OB / 倍量报警共用。
 /// 不包含追踪止盈(如有需要,调用方自己追加)。
 ///
-/// 返回 true 表示成功下单(含入场单),false 表示跳过(同向已有仓位)
+/// `require_in_ob`: true 时,入场价不在任何 OB 内部 → 跳过
+///                  false 时,不检查(OB 报警自己用,因为自己 OB 不一定在 detect_order_blocks 结果里)
+///
+/// 返回 true 表示成功下单(含入场单),false 表示跳过(同向已有仓位 / 不在 OB 内)
 async fn place_order_with_sl_tp(
     config: &crate::binance::BinanceConfig,
     symbol: &str,
@@ -346,7 +359,21 @@ async fn place_order_with_sl_tp(
     take_profit_price: f64,
     quantity: f64,
     client_order_id_prefix: &str,
+    candles: &[pinbar_detector::Candle],  // 用于 OB 内判断
+    require_in_ob: bool,
 ) -> bool {
+    // 0. (可选)入场价必须落在附近某个 OB 内部
+    if require_in_ob {
+        match is_entry_in_ob(entry_price, candles) {
+            Some(ob) => info!("[OB Check] 入场价 ${:.2} 在 OB {} (top=${:.2} btm=${:.2}) 内部,继续下单",
+                entry_price, ob.ob_type, ob.top, ob.btm),
+            None => {
+                info!("[OB Check] 入场价 ${:.2} 不在附近 OB 内部,跳过下单", entry_price);
+                return false;
+            }
+        }
+    }
+
     // 1. 检查现有仓位 — 数总持仓(不区分方向,允许双仓 1多+1空)
     //    - 总持仓 = 0 → 第 1 单(POSITION_PCT)
     //    - 总持仓 = 1 → 第 2 单(SECOND_ORDER_PCT)
@@ -511,6 +538,8 @@ async fn send_volume_alert(
                         take_profit_price,
                         quantity,
                         &client_order_id_prefix,
+                        candles,
+                        true,  // 倍量:入场点必须在 OB 内部
                     ).await;
 
                     // 下追踪止盈(只有入场成功才下)
@@ -1608,6 +1637,8 @@ impl KlineCache {
                                 take_profit_price,
                                 quantity,
                                 &prefix,
+                                &self.candles,
+                                false,  // OB 报警:不检查(自己 OB 必然包含,但 detect_order_blocks 时序未必含)
                             ).await;
                         }
                         Err(e) => warn!("[OB] 获取余额失败: {}", e),
