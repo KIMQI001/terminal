@@ -66,6 +66,18 @@ fn get_position_pct() -> f64 {
         .clamp(0.0, 1.0)
 }
 
+/// 第 2 单仓位占比(同方向加仓,默认 0.8=80% 剩余余额)
+/// 第 1 单 = 余额 * POSITION_PCT(默认 30%)
+/// 第 2 单 = 第 1 单后的剩余余额 * SECOND_ORDER_PCT(默认 80%)
+/// 100u 账户:第 1 单用 30,剩 70;第 2 单用 70*80%=56,剩 14
+fn get_second_order_pct() -> f64 {
+    env::var("SECOND_ORDER_PCT")
+        .unwrap_or_else(|_| "0.8".to_string())
+        .parse::<f64>()
+        .unwrap_or(0.8)
+        .clamp(0.0, 1.0)
+}
+
 /// 杠杆倍数（从环境变量读取，默认100x，clamp 到 1~125）
 fn get_leverage() -> u32 {
     env::var("LEVERAGE")
@@ -288,7 +300,11 @@ async fn place_order_with_sl_tp(
     quantity: f64,
     client_order_id_prefix: &str,
 ) -> bool {
-    // 1. 检查现有仓位 — "只挂最新"语义:同/反向持仓都市价平,只留最新一张
+    // 1. 检查现有仓位
+    //    - 反向持仓:市价平仓(反手)
+    //    - 同向持仓:不**平**(加仓场景),只计数
+    //    - 同方向已有 ≥ 2 单 → 跳过(加仓上限)
+    let mut same_dir_count = 0;
     match crate::binance::get_positions(config, symbol).await {
         Ok(positions) => {
             for pos in positions.iter() {
@@ -303,18 +319,28 @@ async fn place_order_with_sl_tp(
                 } else {
                     false
                 };
-                let action = if is_opposite { "[反向平仓]" } else { "[同向清旧]" };
-                info!("{} {} {} (准备下新单: {})", action, pos.position_side, pos_amt, position_side);
-                match crate::binance::close_position_market(config, symbol, &pos.position_side, pos_amt).await {
-                    Ok(order_id) => info!("{}成功: orderId={}", action, order_id),
-                    Err(e) => warn!("{}失败: {}", action, e),
+                if is_opposite {
+                    info!("[反向平仓] {} {} (准备下新单: {})", pos.position_side, pos_amt, position_side);
+                    match crate::binance::close_position_market(config, symbol, &pos.position_side, pos_amt).await {
+                        Ok(order_id) => info!("反向平仓成功: orderId={}", order_id),
+                        Err(e) => warn!("反向平仓失败: {}", e),
+                    }
+                } else {
+                    same_dir_count += 1;
+                    info!("[同向加仓] {} 已有 {} 单", pos.position_side, same_dir_count);
                 }
             }
         }
         Err(e) => warn!("获取持仓失败: {}", e),
     }
 
-    // 2. 取消同前缀的挂单(OB 触发时只清 ob_ 自己的,不动 vol_ 或手动单)
+    // 2. 加仓上限:同方向最多 2 单
+    if same_dir_count >= 2 {
+        info!("[Risk] 已有 {} 个同方向持仓,跳过加仓(MAX 2)", same_dir_count);
+        return false;
+    }
+
+    // 3. 取消同前缀的挂单(OB 触发时只清 ob_ 自己的,不动 vol_ 或手动单)
     if let Err(e) = crate::binance::cancel_orders_by_prefix(config, symbol, client_order_id_prefix).await {
         warn!("取消挂单失败: {}", e);
     }
@@ -424,9 +450,20 @@ async fn send_volume_alert(
             // 获取可用余额（USDC）
             match crate::binance::get_balance(config, "USDC").await {
                 Ok(balance) => {
-                    let position_pct = get_position_pct();
+                    // 查同方向持仓数,决定第 1 单(30%)还是第 2 单(80%)
+                    let same_dir_count = match crate::binance::get_positions(config, symbol).await {
+                        Ok(positions) => positions.iter()
+                            .filter(|p| p.position_amt.abs() > 0.001 && p.position_side == position_side)
+                            .count(),
+                        Err(_) => 0,
+                    };
+                    let pct = if same_dir_count == 0 {
+                        get_position_pct()
+                    } else {
+                        get_second_order_pct()
+                    };
                     let leverage = get_leverage();
-                    let use_amount = balance * position_pct;
+                    let use_amount = balance * pct;
                     quantity = (use_amount * leverage as f64) / entry_price;
                     let client_order_id_prefix = format!("vol_{}", chrono::Utc::now().timestamp_millis());
 
@@ -1511,9 +1548,20 @@ impl KlineCache {
 
                     match crate::binance::get_balance(cfg, "USDC").await {
                         Ok(balance) => {
-                            let position_pct = get_position_pct();
+                            // 查同方向持仓数,决定第 1 单(30%)还是第 2 单(80%)
+                            let same_dir_count = match crate::binance::get_positions(cfg, symbol).await {
+                                Ok(positions) => positions.iter()
+                                    .filter(|p| p.position_amt.abs() > 0.001 && p.position_side == position_side)
+                                    .count(),
+                                Err(_) => 0,
+                            };
+                            let pct = if same_dir_count == 0 {
+                                get_position_pct()
+                            } else {
+                                get_second_order_pct()
+                            };
                             let leverage = get_leverage();
-                            let use_amount = balance * position_pct;
+                            let use_amount = balance * pct;
                             let quantity = (use_amount * leverage as f64) / entry_zone;
                             let prefix = format!("ob_{}", chrono::Utc::now().timestamp_millis());
 
