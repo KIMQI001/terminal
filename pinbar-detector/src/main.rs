@@ -57,24 +57,13 @@ fn get_stop_loss_points() -> f64 {
         .unwrap_or(200.0)
 }
 
-/// 开仓占账户余额比例 0.0~1.0（从环境变量读取，默认0.3=30%）
+/// 开仓占账户钱包总余额比例 0.0~1.0(从环境变量读取,默认0.45=45%)
+/// 每单都按 总钱包余额 × POSITION_PCT 算 use_amount
 fn get_position_pct() -> f64 {
     env::var("POSITION_PCT")
-        .unwrap_or_else(|_| "0.3".to_string())
+        .unwrap_or_else(|_| "0.45".to_string())
         .parse::<f64>()
-        .unwrap_or(0.3)
-        .clamp(0.0, 1.0)
-}
-
-/// 第 2 单仓位占比(同方向加仓,默认 0.8=80% 剩余余额)
-/// 第 1 单 = 余额 * POSITION_PCT(默认 30%)
-/// 第 2 单 = 第 1 单后的剩余余额 * SECOND_ORDER_PCT(默认 80%)
-/// 100u 账户:第 1 单用 30,剩 70;第 2 单用 70*80%=56,剩 14
-fn get_second_order_pct() -> f64 {
-    env::var("SECOND_ORDER_PCT")
-        .unwrap_or_else(|_| "0.8".to_string())
-        .parse::<f64>()
-        .unwrap_or(0.8)
+        .unwrap_or(0.45)
         .clamp(0.0, 1.0)
 }
 
@@ -439,11 +428,7 @@ async fn send_volume_alert(
                             .count(),
                         Err(_) => 0,
                     };
-                    let pct = if total_position_count == 0 {
-                        get_position_pct()
-                    } else {
-                        get_second_order_pct()
-                    };
+                    let pct = get_position_pct();
                     let leverage = get_leverage();
                     let use_amount = wallet_balance * pct;
                     quantity = (use_amount * leverage as f64) / entry_price;
@@ -1537,11 +1522,7 @@ impl KlineCache {
                                     .count(),
                                 Err(_) => 0,
                             };
-                            let pct = if total_position_count == 0 {
-                                get_position_pct()
-                            } else {
-                                get_second_order_pct()
-                            };
+                            let pct = get_position_pct();
                             let leverage = get_leverage();
                             let use_amount = wallet_balance * pct;
                             let quantity = (use_amount * leverage as f64) / entry_zone;
