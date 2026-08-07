@@ -515,6 +515,46 @@ async fn send_volume_alert(
         String::new()
     };
 
+    // 计算 swing zone(中线对比)
+    let swing_zone = {
+        let sps = pinbar_detector::detect_swing_points(candles, get_swing_length());
+        pinbar_detector::find_swing_zone(&sps)
+    };
+
+    let zone_section = match swing_zone {
+        Some(z) => {
+            // 多单(vol_is_bearish):入场在中线之下 → 顺势;空单:入场在中线之上 → 顺势
+            let (status_text, status_emoji) = if vol_is_bearish {
+                if entry_price < z.mid {
+                    ("中线之下(顺势折扣区)", "🟢")
+                } else {
+                    ("中线之上(逆势溢价区,谨慎)", "⚠️")
+                }
+            } else {
+                if entry_price > z.mid {
+                    ("中线之上(顺势溢价区)", "🟢")
+                } else {
+                    ("中线之下(逆势折扣区,谨慎)", "⚠️")
+                }
+            };
+            format!(
+                "
+
+**结构验证**:
+- **最近 High ({})**: ${:.2}
+- **最近 Low ({})**: ${:.2}
+- **中线**: ${:.2}
+- {} 入场 ${:.2} {}
+",
+                z.high_class, z.high,
+                z.low_class, z.low,
+                z.mid,
+                status_emoji, entry_price, status_text,
+            )
+        }
+        None => String::new(),
+    };
+
     let message = format!(
         "### 📊 15m 倍量反转信号
 
@@ -535,8 +575,7 @@ async fn send_volume_alert(
 - **L**: {:.2}
 - **C**: {:.2}
 - **方向**: {} {}
-
----",
+{}---",
         direction,
         direction_emoji,
         entry_price,
@@ -555,7 +594,8 @@ async fn send_volume_alert(
         small_candle.low,
         small_candle.close,
         small_emoji,
-        small_direction
+        small_direction,
+        zone_section
     );
 
     info!("发送钉钉通知: 15m 倍量报警");
@@ -1268,6 +1308,43 @@ impl KlineCache {
                 String::new()
             };
 
+            // 计算 swing zone(中线对比)
+            let swing_zone = {
+                let sps = pinbar_detector::detect_swing_points(&self.candles, get_swing_length());
+                pinbar_detector::find_swing_zone(&sps)
+            };
+
+            let zone_section = match swing_zone {
+                Some(z) => {
+                    let is_bullish = ob.ob_type == "bullish";
+                    let (status_text, status_emoji) = if is_bullish {
+                        if entry_zone < z.mid {
+                            ("入场区在中线之下(顺势折扣区)", "🟢")
+                        } else {
+                            ("入场区在中线之上(逆势溢价区,谨慎)", "⚠️")
+                        }
+                    } else {
+                        if entry_zone > z.mid {
+                            ("入场区在中线之上(顺势溢价区)", "🟢")
+                        } else {
+                            ("入场区在中线之下(逆势折扣区,谨慎)", "⚠️")
+                        }
+                    };
+                    format!(
+                        "\n**结构验证**:\n\
+- **最近 High ({})**: ${:.2}\n\
+- **最近 Low ({})**: ${:.2}\n\
+- **中线**: ${:.2}\n\
+- {} 22% 入场区 ${:.2} {}\n",
+                        z.high_class, z.high,
+                        z.low_class, z.low,
+                        z.mid,
+                        status_emoji, entry_zone, status_text,
+                    )
+                }
+                None => String::new(),
+            };
+
             let msg = format!(
                 "{} 15m OB 信号\n\n\
                 - **交易对**: {}\n\
@@ -1278,7 +1355,7 @@ impl KlineCache {
                 - **OB 下沿**: ${:.2}\n\
                 - **OB 大小**: ${:.2} ({:.3}%)\n\
                 - **22% 入场区**: ${:.2}\n\
-                - **当前价**: ${:.2}\n{}{}",
+                - **当前价**: ${:.2}\n{}{}{}",
                 title_emoji,
                 symbol,
                 self.timeframe,
@@ -1292,6 +1369,7 @@ impl KlineCache {
                 entry_zone,
                 current_price,
                 hl_section,
+                zone_section,
                 tip
             );
 
@@ -1403,7 +1481,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!("\n历史数据加载完成，开始监听实时 K 线...\n");
 
-    // 加载完后推送最近 swing points 列表(供检查准度)
+    // 加载完后推送最近 swing zone(只显示最近一个 HH + 一个 LL + 中线)
     for (symbol, tf) in &subscriptions {
         let key = format!("{}@{}", symbol, tf);
         if let Some(cache) = caches.get(&key) {
@@ -1412,7 +1490,6 @@ async fn main() -> anyhow::Result<()> {
                 let sps = pinbar_detector::detect_swing_points(candles, get_swing_length());
                 let zone = pinbar_detector::find_swing_zone(&sps);
 
-                // 把秒级时间戳格式化成 UTC+8 字符串
                 let fmt_ts = |ts: i64| -> String {
                     chrono::DateTime::from_timestamp(ts, 0)
                         .map(|dt| {
@@ -1423,56 +1500,30 @@ async fn main() -> anyhow::Result<()> {
                         .unwrap_or_else(|| ts.to_string())
                 };
 
-                let first_ts = candles.first().map(|c| c.time).unwrap_or(0);
-                let last_ts = candles.last().map(|c| c.time).unwrap_or(0);
                 let last_close = candles.last().map(|c| c.close).unwrap_or(0.0);
 
-                // 最近 5 个 high swing + 5 个 low swing(倒序)
-                let recent_highs: Vec<_> = sps.iter().rev().filter(|sp| sp.swing_type == "high").take(5).collect();
-                let recent_lows: Vec<_> = sps.iter().rev().filter(|sp| sp.swing_type == "low").take(5).collect();
-
-                let fmt_pivots = |label: &str, pivots: &[&pinbar_detector::SwingPoint]| -> String {
-                    if pivots.is_empty() {
-                        return format!("**{}**: 无", label);
-                    }
-                    let lines: Vec<String> = pivots.iter().enumerate().map(|(i, sp)| {
-                        format!("  {}. {} ${:.2} @ {}", i + 1, sp.classification, sp.price, fmt_ts(sp.time))
-                    }).collect();
-                    format!("**{}**:\n{}", label, lines.join("\n"))
-                };
-
-                let zone_text = match zone {
+                let zone_msg = match zone {
                     Some(z) => format!(
-                        "**最近 High ({})** ${:.2} @ {}\n\n\
-**最近 Low ({})** ${:.2} @ {}\n\n\
-**中线** ${:.2}",
+                        "### 📐 服务就绪 - 最近 Swing\n\n\
+**监控**: {} @ {}\n\n\
+**最新价**: ${:.2}\n\n\
+**最近 High ({})**: ${:.2} @ {}\n\n\
+**最近 Low ({})**: ${:.2} @ {}\n\n\
+**中线**: ${:.2}",
+                        symbol, tf,
+                        last_close,
                         z.high_class, z.high, fmt_ts(z.high_time),
                         z.low_class, z.low, fmt_ts(z.low_time),
                         z.mid,
                     ),
-                    None => "**Swing Zone**: 数据不足".to_string(),
+                    None => format!(
+                        "### 📐 服务就绪 - Swing 数据不足\n\n**监控**: {} @ {}",
+                        symbol, tf
+                    ),
                 };
 
-                let zone_msg = format!(
-                    "### 📐 服务就绪 - Swing Pivots 列表\n\n\
-**监控**: {} @ {}\n\n\
-**数据范围**: {} 根 K 线, {} → {}\n\
-**最新价**: ${:.2}\n\n\
-{}\n\n\
-{}\n\n\
-{}\n\n\
-*对照图表上的 HH/LL 标签*",
-                    symbol, tf,
-                    candles.len(),
-                    fmt_ts(first_ts), fmt_ts(last_ts),
-                    last_close,
-                    fmt_pivots("最近 5 个 High Swing", &recent_highs),
-                    fmt_pivots("最近 5 个 Low Swing", &recent_lows),
-                    zone_text,
-                );
-
-                info!("发送钉钉通知: Swing Pivots 列表");
-                if let Err(e) = notification::send_dingtalk_markdown("服务就绪 - Swing Pivots", &zone_msg).await {
+                info!("发送钉钉通知: 最近 Swing");
+                if let Err(e) = notification::send_dingtalk_markdown("服务就绪 - 最近 Swing", &zone_msg).await {
                     warn!("Swing 钉钉通知失败: {}", e);
                 }
             }
