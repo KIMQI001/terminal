@@ -15,6 +15,10 @@ export interface TradingLine {
   price: number;
   type: "entry" | "stopLoss" | "takeProfit";
   side: OrderSide;
+  /** 来源:面板点击 vs 双击图表(影响拖动/视觉) */
+  source?: "panel" | "chart";
+  /** 是否可拖动(双击图表产生的 entry 线) */
+  draggable?: boolean;
 }
 
 // 真实挂单数据

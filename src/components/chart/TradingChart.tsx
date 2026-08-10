@@ -14,7 +14,7 @@ import {
 import { useChartStore } from "@/stores/chartStore";
 import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useMeasurementStore } from "@/stores/measurementStore";
-import { useOrderStore } from "@/stores/orderStore";
+import { useOrderStore, type TradingLine } from "@/stores/orderStore";
 import { usePositionStore } from "@/stores/positionStore";
 import { useUserStore } from "@/stores/userStore";
 import { MeasurementTool } from "./MeasurementTool";
@@ -138,9 +138,17 @@ export function TradingChart() {
     clearMeasurement,
   } = useMeasurementStore();
 
-  const { tradingLines, realOrders, fetchOpenOrders } = useOrderStore();
+  const { tradingLines, realOrders, fetchOpenOrders, setPrefillData, openModal } = useOrderStore();
   const { positions, fetchPositions } = usePositionStore();
   const { user } = useUserStore();
+
+  // 双击图表下单:拖动价格线状态
+  const [dragState, setDragState] = useState<{
+    active: boolean;
+    lineIdx: number;
+    startY: number;
+    startPrice: number;
+  }>({ active: false, lineIdx: -1, startY: 0, startPrice: 0 });
 
   // 监听 Shift 键
   useEffect(() => {
@@ -1348,6 +1356,49 @@ export function TradingChart() {
     });
   }, [shouldDisableChartInteraction]);
 
+  // 双击图表下单的拖动逻辑:mousemove 时改 store + prefillData
+  useEffect(() => {
+    if (!dragState.active) return;
+
+    const handleMove = (e: MouseEvent) => {
+      if (!candleSeriesRef.current) return;
+      // 用 chartContainerRef 当前屏幕位置 + dy 算新价
+      const rect = chartContainerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const yNow = candleSeriesRef.current.priceToCoordinate(dragState.startPrice);
+      if (yNow == null) return;
+      const newY = yNow + (e.clientY - dragState.startY);
+      const newPrice = candleSeriesRef.current.coordinateToPrice(newY);
+      if (newPrice == null || newPrice <= 0) return;
+
+      // 更新 store 中的 tradingLines(实时跟随)
+      const current = useOrderStore.getState().tradingLines;
+      if (dragState.lineIdx >= current.length) return;
+      const updated = [...current];
+      updated[dragState.lineIdx] = { ...updated[dragState.lineIdx], price: newPrice };
+      useOrderStore.setState({ tradingLines: updated });
+
+      // 同步 Modal 里的 entry 输入框
+      const cur = useOrderStore.getState().prefillData;
+      if (cur) {
+        useOrderStore.setState({
+          prefillData: { ...cur, entry: newPrice },
+        });
+      }
+    };
+
+    const handleUp = () => {
+      setDragState((s) => ({ ...s, active: false }));
+    };
+
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, [dragState]);
+
   // 获取坐标点信息 - 始终返回屏幕坐标，支持时间外推
   const getPointFromEvent = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -1429,6 +1480,38 @@ export function TradingChart() {
     [phase, canStartMeasure, getPointFromEvent, startDrawing, clearMeasurement, timeframe]
   );
 
+  // 双击图表下单:TradingView 风格
+  //   - 双击位置价格 > 当前收盘价 → SELL/SHORT(开空)
+  //   - 双击位置价格 < 当前收盘价 → BUY/LONG(开多)
+  //   - 弹 TradeModal,entry 预填双击位置,SL/TP 留空
+  const handleDoubleClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const point = getPointFromEvent(e);
+      if (!point || point.price == null) return;
+
+      const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : point.price;
+      // 严格大于当前价 → 开空,小于等于 → 开多
+      const side: "buy" | "sell" = point.price > currentPrice ? "sell" : "buy";
+
+      // 设置 entry 价格线(覆盖之前的 chart 来源线,保留面板来源的)
+      const current = useOrderStore.getState().tradingLines;
+      const chartLines = current.filter((l) => l.source !== "chart");
+      const newLine: TradingLine = {
+        price: point.price,
+        type: "entry",
+        side,
+        source: "chart",
+        draggable: true,
+      };
+      useOrderStore.setState({ tradingLines: [...chartLines, newLine] });
+
+      // 弹 modal,预填 side + entry,SL/TP 让用户填
+      setPrefillData({ side, entry: point.price, stopLoss: 0, takeProfit: 0 });
+      openModal();
+    },
+    [candles, getPointFromEvent, setPrefillData, openModal]
+  );
+
   // mousemove: 更新测量（仅在 drawing 状态）
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -1488,7 +1571,17 @@ export function TradingChart() {
         className="w-full h-full relative"
         style={{ minHeight: "400px", cursor: getCursor() }}
         onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
         onMouseMove={handleMouseMove}
+      />
+      {/* 双击下单的可拖动 entry 线手柄(绝对定位在 chart container 内) */}
+      <DragHandles
+        containerRef={chartContainerRef}
+        seriesRef={candleSeriesRef}
+        tradingLines={tradingLines}
+        onDragStart={(lineIdx, startY, startPrice) =>
+          setDragState({ active: true, lineIdx, startY, startPrice })
+        }
       />
       <ICTOverlay
         chartRef={chartRef}
@@ -1509,5 +1602,54 @@ export function TradingChart() {
       </div>
       <MeasurementTool />
     </div>
+  );
+}
+
+/**
+ * 双击下单产生的 entry 价格线的可拖动手柄
+ * - 12px 高横向 hit area,覆盖整条价格线宽度
+ * - 鼠标悬停 cursor 变 ns-resize
+ * - onMouseDown 启动拖动(mousemove 在 TradingChart 内全局监听)
+ */
+function DragHandles({
+  containerRef,
+  seriesRef,
+  tradingLines,
+  onDragStart,
+}: {
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  seriesRef: any;
+  tradingLines: TradingLine[];
+  onDragStart: (lineIdx: number, startY: number, startPrice: number) => void;
+}) {
+  if (!tradingLines || tradingLines.length === 0) return null;
+
+  return (
+    <>
+        {tradingLines.map((line, idx) => {
+          if (!line.draggable) return null;
+          const y = seriesRef.current?.priceToCoordinate?.(line.price);
+          if (y == null) return null;
+          return (
+            <div
+              key={`drag-handle-${idx}`}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onDragStart(idx, e.clientY, line.price);
+              }}
+              style={{
+                position: "absolute",
+                top: y - 6,
+                left: 0,
+                right: 0,
+                height: 12,
+                cursor: "ns-resize",
+                zIndex: 5,
+              }}
+            />
+          );
+        })}
+      </>
   );
 }
