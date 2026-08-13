@@ -19,4 +19,6 @@ export interface SwingPoint {
   price: number;
   time: number;
   index: number;
+  /** "HH" | "HL" | "LH" | "LL" — FVG tier 计算需要 */
+  classification?: "HH" | "HL" | "LH" | "LL";
 }

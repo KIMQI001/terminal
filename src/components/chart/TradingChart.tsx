@@ -199,9 +199,10 @@ export function TradingChart() {
 
       const swingLength = getSwingLookback(timeframe);
 
-      // Swing points (LuxAlgo 风格，按 TF 缩放 length)
+      // Swing points (LuxAlgo 风格,按 TF 缩放 length) + 分类为 HH/HL/LH/LL
       const pivotResult = detectPivotsFull(candleData, swingLength);
-      setSwingPoints(pivotResult.pivots);
+      const classifiedPivots = classifyPivots(pivotResult.pivots);
+      setSwingPoints(classifiedPivots);
       setMissedPivots(pivotResult.missedPivots);
       setGhostLevels(pivotResult.ghostLevels);
 

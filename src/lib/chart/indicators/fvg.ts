@@ -118,16 +118,24 @@ export function detectFVGs(
   const live = fvgs.filter((fvg) => fvg.fillPercentage < 80).slice(-15);
 
   // 算 tier:从最近的 HH(FR)或 LL(FS)开始数段内连续同方向 FVG
-  // - bullish: 找最近的 LL(index < fvg.candleIndex),数 [LL.index, fvg.candleIndex) 区间内 bullish FVG 数
-  // - bearish: 类似 HH
+  // - bullish FVG (FS): 找最近的 LL(前一根 K index < fvg.candleIndex 且 classification="LL")
+  // - bearish FVG (FR): 找最近的 HH(同上,classification="HH")
+  // - 数 [refIndex+1, fvg.candleIndex) 区间内同方向 FVG 数 +1 = tier
   for (let i = 0; i < live.length; i++) {
     const fvg = live[i];
     // 找参考 swing point
     const wantType = fvg.type === 'bullish' ? 'low' : 'high';
+    const wantClass = fvg.type === 'bullish' ? 'LL' : 'HH';
     let refIndex = -1;
     for (let k = swingPoints.length - 1; k >= 0; k--) {
-      if (swingPoints[k].type === wantType && swingPoints[k].index < fvg.candleIndex) {
-        refIndex = swingPoints[k].index;
+      const sp = swingPoints[k];
+      if (sp.type === wantType && sp.index < fvg.candleIndex) {
+        // 有 classification 时,严格按 HH/LL 匹配
+        // 无 classification 时,降级用任意 high/low(向后兼容)
+        if (sp.classification && sp.classification !== wantClass) {
+          continue;
+        }
+        refIndex = sp.index;
         break;
       }
     }
