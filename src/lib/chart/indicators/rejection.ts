@@ -97,24 +97,35 @@ export function detectRejections(
   // 先按时间排序(sequence:index*2 + 0/1,保证同根K内下影在前)
   results.sort((a, b) => a.sequence - b.sequence);
 
-  // 算 tier:"上一个 wick" = **前一根 K 的 wick**(跨过同根 K 内的另一个 wick)
-  // 同根 K 内的 R+S 看作同时发生,不互相算"上一个"
+  // 算 tier:"上一个 wick" 跳过
+  //  1. 同根 K(index 相同)— 看作同时发生
+  //  2. 已擦除的 wick(isWickTested)— 图上看不见,也不该当 "上一个"
+  // 剩下的紧邻前一个 wick 才是真正的"上一个"
   for (let i = 0; i < results.length; i++) {
     if (i === 0) {
       results[i].tier = 1;
       continue;
     }
-    // 往前找第一个 index 不同的 wick(跨过同根 K 内的另一个 wick)
     let prevIdx = i - 1;
-    while (prevIdx >= 0 && results[prevIdx].index === results[i].index) {
-      prevIdx--;
+    while (prevIdx >= 0) {
+      const prev = results[prevIdx];
+      if (prev.index === results[i].index) {
+        // 同根 K — 跳过
+        prevIdx--;
+        continue;
+      }
+      if (isWickTested(prev, candles)) {
+        // 已擦除 — 跳过(图上看不见,不当 "上一个")
+        prevIdx--;
+        continue;
+      }
+      // 找到了
+      break;
     }
     if (prevIdx < 0) {
-      // 没有更早的 wick(都是同根 K 内的)— 全部 tier 1
       results[i].tier = 1;
       continue;
     }
-    // 同方向(都是 R 或都是 S)→ tier +1,不同方向 → tier 1
     if (results[i].type === results[prevIdx].type) {
       results[i].tier = results[prevIdx].tier + 1;
     } else {
