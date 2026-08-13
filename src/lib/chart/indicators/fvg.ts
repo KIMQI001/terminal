@@ -127,7 +127,6 @@ export function detectFVGs(
   for (let i = 0; i < live.length; i++) {
     const fvg = live[i];
     const wantType = fvg.type === 'bullish' ? 'low' : 'high';
-    const wantClass = fvg.type === 'bullish' ? 'LL' : 'HH';
 
     // 找 live 数组里前一个同方向 FVG
     let prev: typeof fvg | null = null;
@@ -144,38 +143,35 @@ export function detectFVGs(
       continue;
     }
 
-    // 检查 [prev.candleIndex, fvg.candleIndex) 区间内是否有新 strict HH/LL
-    // 找不到 strict(没有)就当作"没新 HH" → 不重置 → 顺序走
+    // 检查 [prev.candleIndex, fvg.candleIndex) 区间内是否有新的 high/low swing
+    // 段切换触发:任何 high swing(HH/LH 都算)对 FR,任何 low swing(HH/LL)对 FS
+    // — 你的数据里 strict HH 可能不出现,用任意 high 兜底
     let hasNewRef = false;
     let refFound: number | null = null;
+    let refClass: string | null = null;
     for (const sp of swingPoints) {
       if (
         sp.type === wantType &&
-        sp.classification === wantClass &&
         sp.index > prev.candleIndex &&
         sp.index < fvg.candleIndex
       ) {
         hasNewRef = true;
         refFound = sp.index;
+        refClass = sp.classification ?? '?';
         break;
       }
     }
 
-    // 有新 strict HH/LL → tier=1;否则 → tier=prev+1(顺序走)
+    // 区间内出现新 high/low → tier=1;否则 → tier=prev+1(顺序走)
     fvg.tier = hasNewRef ? 1 : prev.tier + 1;
 
-    // 调试 log(临时):每个 FVG 的 tier 决策细节
+    // 调试 log
     if (typeof window !== 'undefined' && (window as any).__fvgDebug) {
-      const totalSwings = swingPoints.length;
-      const strictMatches = swingPoints.filter(
-        (sp) => sp.type === wantType && sp.classification === wantClass
-      ).length;
       console.log(
         `[FVG tier] type=${fvg.type} idx=${fvg.candleIndex} ` +
         `prev=${prev.candleIndex} prev.tier=${prev.tier} ` +
-        `hasNewRef=${hasNewRef}` + (refFound !== null ? ` refFound@${refFound}` : '') +
-        ` → tier=${fvg.tier}` +
-        ` (swingPoints: ${totalSwings}, strict ${wantClass}: ${strictMatches})`
+        `hasNewRef=${hasNewRef}` + (refFound !== null ? ` ref@${refFound}(${refClass})` : '') +
+        ` → tier=${fvg.tier}`
       );
     }
   }
