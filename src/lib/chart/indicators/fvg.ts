@@ -8,7 +8,7 @@ import { FVG } from "@/types/indicator";
  */
 export function detectFVGs(
   candles: Candle[],
-  minGapPercent: number = 0.1
+  minGapPercent: number = 0.01
 ): FVG[] {
   const fvgs: FVG[] = [];
 

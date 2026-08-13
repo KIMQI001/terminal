@@ -112,7 +112,7 @@ fn get_protective_stop_points() -> f64 {
 const SWING_RANGE: usize = 5;
 
 /// FVG 最小 Gap 百分比（默认 0.1%，与前端 src/lib/chart/indicators/fvg.ts 保持一致）
-const FVG_MIN_GAP_PERCENT: f64 = 0.1;
+const FVG_MIN_GAP_PERCENT: f64 = 0.01;
 
 /// K线数据
 #[derive(Debug, Deserialize)]
