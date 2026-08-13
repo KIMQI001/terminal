@@ -122,6 +122,7 @@ export function detectFVGs(
   // - 如果前一个 FVG 之后到当前 FVG 之间出现新 strict HH(对 FR)/ strict LL(对 FS)
   //   → tier = 1(段切换)
   // - 否则 → tier = 前一个 FVG.tier + 1(顺序走)
+  //   包括:strict HH 找不到(当作没新 HH,继续顺序走)
   //   例:FR1 → FR2(中间无 HH)→ FR3(中间无 HH)→ 新 HH → 下个 FR1
   for (let i = 0; i < live.length; i++) {
     const fvg = live[i];
@@ -144,6 +145,7 @@ export function detectFVGs(
     }
 
     // 检查 [prev.candleIndex, fvg.candleIndex) 区间内是否有新 strict HH/LL
+    // 找不到 strict(没有)就当作"没新 HH" → 不重置 → 顺序走
     let hasNewRef = false;
     for (const sp of swingPoints) {
       if (
@@ -157,7 +159,7 @@ export function detectFVGs(
       }
     }
 
-    // 有新 strict HH/LL → tier=1;否则 → tier=prev+1
+    // 有新 strict HH/LL → tier=1;否则 → tier=prev+1(顺序走)
     fvg.tier = hasNewRef ? 1 : prev.tier + 1;
   }
 
