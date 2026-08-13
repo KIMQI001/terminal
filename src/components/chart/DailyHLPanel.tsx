@@ -143,7 +143,7 @@ export function DailyHLPanel() {
           attackSide === 'bear' && "bg-red-500",
           attackSide === 'none' && "bg-gray-300"
         )} />
-        <span>{attackSide === 'bull' ? '多方' : attackSide === 'bear' ? '空方' : '—'}</span>
+        <span>{attackSide === 'bull' ? 'L' : attackSide === 'bear' ? 'S' : '—'}</span>
       </Button>
 
       {/* Daily Range 按钮 */}
