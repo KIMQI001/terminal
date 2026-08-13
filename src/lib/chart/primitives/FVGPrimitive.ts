@@ -116,6 +116,12 @@ class FVGPaneRenderer implements ISeriesPrimitivePaneRenderer {
 
         ctx.strokeRect(startX, y, width, height);
         ctx.setLineDash([]);
+
+        // tier 标签(右侧):bullish → FS1, bearish → FR1
+        const tierLabel = `${fvg.type === 'bullish' ? 'FS' : 'FR'}${fvg.tier}`;
+        ctx.font = 'bold 9px monospace';
+        ctx.fillStyle = lineColor;  // 跟边框同色
+        ctx.fillText(tierLabel, endX - 22, Math.min(y, bottom) - 4);
       }
     });
   }

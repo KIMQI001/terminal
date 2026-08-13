@@ -21,6 +21,8 @@ export interface FVG {
   filled: boolean;
   fillPercentage: number;
   fib22: number;  // 0.22入场点
+  /** 层级:FS1/FS2/... 或 FR1/FR2/... — 同方向连续 +1,切换 reset 到 1(跳过已填充) */
+  tier: number;
 }
 
 /**

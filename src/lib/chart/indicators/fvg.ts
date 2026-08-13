@@ -55,6 +55,7 @@ export function detectFVGs(
           filled,
           fillPercentage,
           fib22,
+          tier: 1,  // 占位,后面统一算
         });
       }
     }
@@ -97,11 +98,36 @@ export function detectFVGs(
           filled,
           fillPercentage,
           fib22,
+          tier: 1,  // 占位,后面统一算
         });
       }
     }
   }
 
   // Return only recent FVGs with fill < 80%
-  return fvgs.filter((fvg) => fvg.fillPercentage < 80).slice(-15);
+  const live = fvgs.filter((fvg) => fvg.fillPercentage < 80).slice(-15);
+
+  // 算 tier:看上一个未填充的同方向 FVG,同方向 +1,切换 reset 到 1
+  for (let i = 0; i < live.length; i++) {
+    if (i === 0) {
+      live[i].tier = 1;
+      continue;
+    }
+    let prevIdx = i - 1;
+    while (prevIdx >= 0) {
+      const prev = live[prevIdx];
+      // 跳过不同方向(只是切换参考点,不算同方向连续)
+      // 这里允许跨方向(把每个 FVG 的"上一个"当作切换参考)
+      if (prev.type === live[i].type) {
+        live[i].tier = prev.tier + 1;
+        break;
+      } else {
+        live[i].tier = 1;
+        break;
+      }
+    }
+    if (prevIdx < 0) live[i].tier = 1;
+  }
+
+  return live;
 }
