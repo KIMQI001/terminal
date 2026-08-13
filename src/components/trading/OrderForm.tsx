@@ -15,7 +15,7 @@ const orderTypes: { value: OrderType; label: string }[] = [
 ];
 
 const leverageOptions = [5, 20, 50, 100];
-const PERCENTAGE_PRESETS = [25, 33, 50];
+const PERCENTAGE_PRESETS = [50, 80, 90];
 
 export function OrderForm() {
   const { symbol, candles } = useChartStore();
@@ -288,7 +288,7 @@ export function OrderForm() {
           )}
         </div>
 
-        {/* 百分比预设按钮（固定 25 / 33 / 50） */}
+        {/* 百分比预设按钮（固定 50 / 80 / 90） */}
         <div className={`grid gap-1`} style={{ gridTemplateColumns: `repeat(${PERCENTAGE_PRESETS.length}, minmax(0, 1fr))` }}>
           {PERCENTAGE_PRESETS.map((pct) => (
             <button
