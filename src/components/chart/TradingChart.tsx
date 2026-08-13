@@ -31,11 +31,13 @@ import { detectSwingPoints, detectPivotsFull, detectAllPivots, classifyPivots } 
 import { detectOrderBlocks } from "@/lib/chart/indicators/orderBlocks";
 import { detectEngulfingPinbar } from "@/lib/chart/indicators/engulfingPinbar";
 import { detectFVGs } from "@/lib/chart/indicators/fvg";
+import { detectRejections } from "@/lib/chart/indicators/rejection";
 import { detectStructure } from "@/lib/chart/indicators/structure";
 import { detectLiquidityZones } from "@/lib/chart/indicators/liquidity";
 import { Candle } from "@/types/chart";
 import {
   OrderBlockPrimitive,
+  RejectionPrimitive,
   FVGPrimitive,
   LiquidityPrimitive,
   KillzonePrimitive,
@@ -65,6 +67,7 @@ export function TradingChart() {
 
   // ICT Primitives
   const orderBlockPrimitiveRef = useRef<OrderBlockPrimitive | null>(null);
+  const rejectionPrimitiveRef = useRef<RejectionPrimitive | null>(null);
   const fvgPrimitiveRef = useRef<FVGPrimitive | null>(null);
   const liquidityPrimitiveRef = useRef<LiquidityPrimitive | null>(null);
   const killzonePrimitiveRef = useRef<KillzonePrimitive | null>(null);
@@ -435,6 +438,7 @@ export function TradingChart() {
 
     // Initialize ICT Primitives
     const obPrimitive = new OrderBlockPrimitive();
+    const rejectionPrimitive = new RejectionPrimitive();
     const fvgPrimitive = new FVGPrimitive();
     const liquidityPrimitive = new LiquidityPrimitive();
     const killzonePrimitive = new KillzonePrimitive();
@@ -452,8 +456,10 @@ export function TradingChart() {
     candleSeries.attachPrimitive(fvgPrimitive);
     candleSeries.attachPrimitive(liquidityPrimitive);
     candleSeries.attachPrimitive(liquidationHillPrimitive);
+    candleSeries.attachPrimitive(rejectionPrimitive);
 
     orderBlockPrimitiveRef.current = obPrimitive;
+    rejectionPrimitiveRef.current = rejectionPrimitive;
     fvgPrimitiveRef.current = fvgPrimitive;
     liquidityPrimitiveRef.current = liquidityPrimitive;
     killzonePrimitiveRef.current = killzonePrimitive;
@@ -1032,6 +1038,16 @@ export function TradingChart() {
         otePrimitiveRef.current.setData(oteZones);
       } else {
         otePrimitiveRef.current.setData([]);
+      }
+    }
+
+    // Update Rejection Primitive
+    if (rejectionPrimitiveRef.current) {
+      if (enabled.rejections) {
+        const rejections = detectRejections(candles);
+        rejectionPrimitiveRef.current.setData(rejections);
+      } else {
+        rejectionPrimitiveRef.current.setData([]);
       }
     }
 

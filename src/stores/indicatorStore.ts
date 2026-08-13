@@ -152,6 +152,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
     breakerBlocks: false,
     inducement: false,
     equilibrium: true,
+    rejections: false,
   };
   return {
     enabled: { ...defaultEnabled, ...persistedEnabled },

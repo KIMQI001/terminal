@@ -23,6 +23,32 @@ export interface FVG {
   fib22: number;  // 0.22入场点
 }
 
+/**
+ * 拒绝 K 线(Rejection Candle)
+ * - 看涨(bullish):长下影 + 小实体 + 短上影 — 价格被低位拒绝,可能反弹
+ * - 看跌(bearish):长上影 + 小实体 + 短下影 — 价格被高位拒绝,可能回落
+ *
+ * 字段说明:
+ * - high/low:wick 区域(包含主体一端 + 长影线)的上下界
+ * - mid:wick 区域中线 =(high+low)/2,用作 ray 线的 y
+ * - wickSize:长影线长度(看涨=bodyTop-candle.low,看跌=candle.high-bodyBottom)
+ * - bodySize:实体大小
+ * - wickBodyRatio:wick/body 比例,衡量拒绝强度
+ */
+export interface Rejection {
+  type: "bullish" | "bearish";
+  time: number;
+  index: number;
+  high: number;
+  low: number;
+  mid: number;
+  wickSize: number;
+  bodySize: number;
+  wickBodyRatio: number;
+  candleHigh: number;
+  candleLow: number;
+}
+
 export interface BOS {
   type: "bullish" | "bearish";
   level: number;
@@ -64,4 +90,5 @@ export interface IndicatorState {
   breakerBlocks: boolean;
   inducement: boolean;
   equilibrium: boolean;
+  rejections: boolean;
 }
