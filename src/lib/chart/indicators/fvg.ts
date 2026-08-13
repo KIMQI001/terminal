@@ -117,34 +117,23 @@ export function detectFVGs(
   // Return only recent FVGs with fill < 80%
   const live = fvgs.filter((fvg) => fvg.fillPercentage < 80).slice(-15);
 
-  // 算 tier:从最近的 HH(FR)或 LL(FS)开始数段内连续同方向 FVG
-  // - bullish FVG (FS): 找最近的 LL(前一根 K index < fvg.candleIndex 且 classification="LL")
-  // - bearish FVG (FR): 找最近的 HH(同上,classification="HH")
+  // 算 tier:从最近的 strict HH(FR)或 strict LL(FS)开始数段内连续同方向 FVG
+  // - bullish FVG (FS): 找最近的 strict LL(前一根 K index < fvg.candleIndex 且 classification="LL")
+  // - bearish FVG (FR): 找最近的 strict HH(同上,classification="HH")
   // - 数 [refIndex+1, fvg.candleIndex) 区间内同方向 FVG 数 +1 = tier
-  //
-  // 兜底:有 classification 但找不到严格匹配(段内只有 LH/HL)时,
-  // 退一步用最近同类型 swing point(降级处理,tier 仍合理)
+  // - 段切换:新 strict HH 出现后第一个 FR 重置为 FR1
+  // - 找不到 strict HH/LL(早期数据 / 没出现新高)→ tier = 1(新段,无法归类)
   for (let i = 0; i < live.length; i++) {
     const fvg = live[i];
     const wantType = fvg.type === 'bullish' ? 'low' : 'high';
     const wantClass = fvg.type === 'bullish' ? 'LL' : 'HH';
 
+    // 找最近的 strict HH/LL
     let refIndex = -1;
-    // 优先:找最近的 strict HH/LL(有 classification 的)
     for (let k = swingPoints.length - 1; k >= 0; k--) {
       const sp = swingPoints[k];
       if (sp.type === wantType && sp.index < fvg.candleIndex) {
         if (sp.classification === wantClass) {
-          refIndex = sp.index;
-          break;
-        }
-      }
-    }
-    // 兜底:找不到 strict,降级用最近的同类型 swing
-    if (refIndex === -1) {
-      for (let k = swingPoints.length - 1; k >= 0; k--) {
-        const sp = swingPoints[k];
-        if (sp.type === wantType && sp.index < fvg.candleIndex) {
           refIndex = sp.index;
           break;
         }
