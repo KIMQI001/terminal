@@ -74,10 +74,10 @@ class RejectionPaneRenderer implements ISeriesPrimitivePaneRenderer {
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // 左侧 "B" / "S" 标签(bullish / bearish)
+        // 左侧 "S" / "R" 标签(支撑 Support / 阻力 Resistance)
         ctx.font = 'bold 10px monospace';
         ctx.fillStyle = textColor;
-        ctx.fillText(isBullish ? 'B' : 'S', startX + 4, yLevel + 3);
+        ctx.fillText(isBullish ? 'S' : 'R', startX + 4, yLevel + 3);
       }
     });
   }
