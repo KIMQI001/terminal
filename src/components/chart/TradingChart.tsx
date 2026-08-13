@@ -1045,7 +1045,7 @@ export function TradingChart() {
     if (rejectionPrimitiveRef.current) {
       if (enabled.rejections) {
         const rejections = detectRejections(candles);
-        rejectionPrimitiveRef.current.setData(rejections);
+        rejectionPrimitiveRef.current.setData(rejections, candles);
       } else {
         rejectionPrimitiveRef.current.setData([]);
       }

@@ -1,112 +1,110 @@
 /**
- * 拒绝 K 线(Rejection Candle)检测器
- *
- * 与 Engulfing Pinbar 不同:engulfingPinbar 要求"吞没前一根",
- * rejection 只要求单根 K 线本身具备"拒绝"形态(长影线 + 小实体)。
+ * Rejection Zone 检测器
  *
  * 规则:
- * - 看涨: 长下影 + 小实体 + 短(或无)上影
- *   - 下影长度 >= 2 × 实体
- *   - 上影长度 <= 0.5 × 实体
- *   - 实体占整 K 比例 < 0.4
- * - 看跌: 长上影 + 小实体 + 短(或无)下影(对称条件)
+ * - 长 wick 判定(wickCandidates):
+ *   - range = high - low
+ *   - 上影(阻力):(high - bodyTop) / range >= minWickRatio
+ *   - 下影(支撑):(bodyBottom - low) / range >= minWickRatio
+ *   - 一根 K 可以同时给两个候选(长腿十字)
+ *
+ * - actionable level:
+ *   - 阻力:level = (bodyTop + high) / 2, zone = [bodyTop, high]
+ *   - 支撑:level = (low + bodyBottom) / 2, zone = [low, bodyBottom]
+ *   - level 是 wick 段的中点(不是 high/low 本身)
+ *
+ * - 实时语义:最后一根(进行中)K 不作为 wick 来源(还在形成),
+ *   但它会作为 tester 被查询(在 primitive 渲染时实时算 isTested)
+ *
+ * 生存过滤(isTested):后续任何 K 的 range 包住这个 level
+ *   (low <= level <= high)→ 已被测试过,该 wick 失效(primitive 里擦掉)
  */
 
 import { Candle } from "@/types/chart";
 import { Rejection } from "@/types/indicator";
 
-/** 默认阈值:wick/body 最小比例,低于此不算"长影线" */
-const DEFAULT_MIN_WICK_BODY_RATIO = 2.0;
-/** 默认阈值:反向影线最大占实体比例 */
-const DEFAULT_MAX_OPPOSITE_WICK_RATIO = 0.5;
-/** 默认阈值:实体占整 K 最大比例 */
-const DEFAULT_MAX_BODY_RATIO = 0.4;
+/** 默认:wick 占 range 最小比例 0.4 */
+const DEFAULT_MIN_WICK_RATIO = 0.4;
 
 export interface RejectionOptions {
-  minWickBodyRatio?: number;
-  maxOppositeWickRatio?: number;
-  maxBodyRatio?: number;
+  minWickRatio?: number;
 }
 
 /**
- * 检测拒绝 K 线
- *
- * @param candles - K线数据
- * @param options - 阈值参数(可选,默认见 DEFAULT_* 常量)
+ * 检测 Rejection zones
+ * - 最后一根 K 不作为 wick 来源(还在形成)
+ * - 一根 K 可以同时给两个候选(上影 + 下影)
  */
 export function detectRejections(
   candles: Candle[],
   options: RejectionOptions = {}
 ): Rejection[] {
-  const minWickBodyRatio = options.minWickBodyRatio ?? DEFAULT_MIN_WICK_BODY_RATIO;
-  const maxOppositeWickRatio = options.maxOppositeWickRatio ?? DEFAULT_MAX_OPPOSITE_WICK_RATIO;
-  const maxBodyRatio = options.maxBodyRatio ?? DEFAULT_MAX_BODY_RATIO;
-
+  const minWickRatio = options.minWickRatio ?? DEFAULT_MIN_WICK_RATIO;
   const results: Rejection[] = [];
 
-  for (let i = 0; i < candles.length; i++) {
+  // 最后一根不作为 wick 来源
+  for (let i = 0; i < candles.length - 1; i++) {
     const candle = candles[i];
     const bodyTop = Math.max(candle.open, candle.close);
     const bodyBottom = Math.min(candle.open, candle.close);
-    const bodySize = bodyTop - bodyBottom;
-    const totalRange = candle.high - candle.low;
+    const range = candle.high - candle.low;
+    if (range <= 0) continue;
 
-    // 跳过十字星(bodySize=0)
-    if (bodySize <= 0 || totalRange <= 0) continue;
+    const upperWickSize = candle.high - bodyTop;
+    const lowerWickSize = bodyBottom - candle.low;
+    const upperWickRatio = upperWickSize / range;
+    const lowerWickRatio = lowerWickSize / range;
 
-    const upperWick = candle.high - bodyTop;
-    const lowerWick = bodyBottom - candle.low;
-
-    const bodyRatio = bodySize / totalRange;
-
-    // === 看涨拒绝(长下影) ===
-    // 条件:下影够长 / 上影够短 / 实体占比小
-    if (
-      lowerWick >= minWickBodyRatio * bodySize &&
-      upperWick <= maxOppositeWickRatio * bodySize &&
-      bodyRatio <= maxBodyRatio
-    ) {
-      const wickSize = lowerWick;
+    // 上影 = 阻力候选(bearish action level:卖出区)
+    if (upperWickRatio >= minWickRatio) {
       results.push({
-        type: "bullish",
+        type: "bearish",
         time: candle.time,
         index: i,
-        // wick 区域:从 candle.low 到 bodyTop(包含整根下影 + 实体上沿)
-        high: bodyTop,
-        low: candle.low,
-        mid: (bodyTop + candle.low) / 2,
-        wickSize,
-        bodySize,
-        wickBodyRatio: wickSize / bodySize,
+        level: (bodyTop + candle.high) / 2,
+        zoneHigh: candle.high,
+        zoneLow: bodyTop,
+        wickSize: upperWickSize,
+        ratio: upperWickRatio,
         candleHigh: candle.high,
         candleLow: candle.low,
       });
     }
 
-    // === 看跌拒绝(长上影) ===
-    if (
-      upperWick >= minWickBodyRatio * bodySize &&
-      lowerWick <= maxOppositeWickRatio * bodySize &&
-      bodyRatio <= maxBodyRatio
-    ) {
-      const wickSize = upperWick;
+    // 下影 = 支撑候选(bullish action level:买入区)
+    if (lowerWickRatio >= minWickRatio) {
       results.push({
-        type: "bearish",
+        type: "bullish",
         time: candle.time,
         index: i,
-        // wick 区域:从 bodyBottom 到 candle.high
-        high: candle.high,
-        low: bodyBottom,
-        mid: (candle.high + bodyBottom) / 2,
-        wickSize,
-        bodySize,
-        wickBodyRatio: wickSize / bodySize,
+        level: (candle.low + bodyBottom) / 2,
+        zoneHigh: bodyBottom,
+        zoneLow: candle.low,
+        wickSize: lowerWickSize,
+        ratio: lowerWickRatio,
         candleHigh: candle.high,
         candleLow: candle.low,
       });
     }
   }
 
-  // 只保留最近的 30 条
-  return results.slice(-30);
+  return results;
+}
+
+/**
+ * 实时判断 wick 是否被"测试过"(后续某根 K 的 range 包住 level)
+ * - 最后一根 K(进行中)也算作 tester → 当前 tick 一碰到老 level,该 zone 立刻失效
+ * - 但最后一根不作为 wick 来源
+ */
+export function isWickTested(
+  rejection: Rejection,
+  candles: Candle[]
+): boolean {
+  for (let j = rejection.index + 1; j < candles.length; j++) {
+    const c = candles[j];
+    if (c.low <= rejection.level && c.high >= rejection.level) {
+      return true;
+    }
+  }
+  return false;
 }

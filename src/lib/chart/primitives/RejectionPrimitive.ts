@@ -1,11 +1,15 @@
 /**
- * Rejection Primitive for Lightweight Charts v4
+ * Rejection Zone Primitive for Lightweight Charts v4
  *
- * 绘制拒绝 K 线:
- * - Wick 区域:半透明矩形(看涨绿,看跌红),从该K线位置画到当前最新K线
- * - 中线射线:wick 区域中线水平实线,从K线位置延伸到图表右边缘
+ * 绘制 wick 中点的"actionable level"射线:
+ * - bullish(下影/支撑):浅蓝,level = (low + bodyBottom) / 2
+ * - bearish(上影/阻力):浅橙,level = (bodyTop + high) / 2
  *
- * 类比 OrderBlock:wick 区域相当于 OB 的 box;中线射线相当于 EQ 的中线
+ * 实时语义:
+ * - 后续任一 K 的 range 包住 level(low <= level <= high)→ 该 zone 已被测试过
+ *   → 立即擦掉(从 chart 消失)
+ * - 最后一根 K(进行中)也算 tester → 当前 tick 一碰 level,该 zone 立刻消失
+ * - 最后一根不作为 wick 来源
  */
 
 import {
@@ -20,9 +24,12 @@ import {
 import type { IChartApiBase } from 'lightweight-charts';
 import { CanvasRenderingTarget2D } from 'fancy-canvas';
 import { Rejection } from '@/types/indicator';
+import { Candle } from '@/types/chart';
+import { isWickTested } from '@/lib/chart/indicators/rejection';
 
 interface RejectionRendererData {
   rejections: Rejection[];
+  candles: Candle[];
   priceToCoordinate: (price: number) => Coordinate | null;
   timeToCoordinate: (time: Time) => Coordinate | null;
   chartWidth: number;
@@ -38,49 +45,39 @@ class RejectionPaneRenderer implements ISeriesPrimitivePaneRenderer {
   draw(target: CanvasRenderingTarget2D): void {
     if (!this._data || this._data.rejections.length === 0) return;
 
-    const { rejections, priceToCoordinate, timeToCoordinate, chartWidth } = this._data;
+    const { rejections, candles, priceToCoordinate, timeToCoordinate, chartWidth } = this._data;
 
     target.useMediaCoordinateSpace(({ context: ctx }) => {
       for (const r of rejections) {
-        const yTop = priceToCoordinate(r.high);
-        const yBottom = priceToCoordinate(r.low);
-        const yMid = priceToCoordinate(r.mid);
-        const startX = timeToCoordinate(r.time as Time);
+        // 实时检测:被后续 K 测试过 → 不画
+        if (isWickTested(r, candles)) continue;
 
-        if (yTop === null || yBottom === null || yMid === null || startX === null) continue;
+        const yLevel = priceToCoordinate(r.level);
+        const startX = timeToCoordinate(r.time as Time);
+        if (yLevel === null || startX === null) continue;
 
         const endX = chartWidth;
-        const width = endX - startX;
-        const height = Math.abs(yBottom - yTop);
-        if (width <= 0 || height <= 0) continue;
+        if (endX <= startX) continue;
 
         const isBullish = r.type === 'bullish';
-        const fillColor = isBullish ? 'rgba(34, 197, 94, 0.18)' : 'rgba(239, 68, 68, 0.18)';
-        const borderColor = isBullish ? 'rgba(34, 197, 94, 0.55)' : 'rgba(239, 68, 68, 0.55)';
-        const lineColor = isBullish ? 'rgba(34, 197, 94, 0.85)' : 'rgba(239, 68, 68, 0.85)';
+        // 浅蓝(下影/支撑)/ 浅橙(上影/阻力)
+        const lineColor = isBullish ? 'rgba(96, 165, 250, 0.9)' : 'rgba(251, 146, 60, 0.9)';
+        const textColor = isBullish ? 'rgba(96, 165, 250, 0.95)' : 'rgba(251, 146, 60, 0.95)';
 
-        // 1. wick 区域背景(矩形)
-        ctx.fillStyle = fillColor;
-        ctx.fillRect(startX, Math.min(yTop, yBottom), width, height);
-
-        // 2. wick 区域边框
-        ctx.strokeStyle = borderColor;
-        ctx.lineWidth = 1;
-        ctx.strokeRect(startX, Math.min(yTop, yBottom), width, height);
-
-        // 3. 中线射线(从K线到chart右边缘的实线)
+        // 中线射线(虚线)
         ctx.beginPath();
-        ctx.moveTo(startX, yMid);
-        ctx.lineTo(endX, yMid);
+        ctx.moveTo(startX, yLevel);
+        ctx.lineTo(endX, yLevel);
         ctx.strokeStyle = lineColor;
         ctx.lineWidth = 1;
-        ctx.setLineDash([]);  // 实线
+        ctx.setLineDash([6, 4]);
         ctx.stroke();
+        ctx.setLineDash([]);
 
-        // 4. K 线左侧 "R" 标签(在 mid 高度)
+        // 左侧 "B" / "S" 标签(bullish / bearish)
         ctx.font = 'bold 10px monospace';
-        ctx.fillStyle = isBullish ? 'rgba(34, 197, 94, 0.9)' : 'rgba(239, 68, 68, 0.9)';
-        ctx.fillText('R', startX + 4, yMid + 3);
+        ctx.fillStyle = textColor;
+        ctx.fillText(isBullish ? 'B' : 'S', startX + 4, yLevel + 3);
       }
     });
   }
@@ -111,6 +108,7 @@ class RejectionPaneView implements ISeriesPrimitivePaneView {
 export class RejectionPrimitive implements ISeriesPrimitive<Time> {
   private _paneView: RejectionPaneView;
   private _rejections: Rejection[] = [];
+  private _candles: Candle[] = [];
   private _chart: IChartApiBase<Time> | null = null;
   private _series: SeriesAttachedParameter<Time>['series'] | null = null;
   private _requestUpdate?: () => void;
@@ -138,6 +136,7 @@ export class RejectionPrimitive implements ISeriesPrimitive<Time> {
 
     const data: RejectionRendererData = {
       rejections: this._rejections,
+      candles: this._candles,
       priceToCoordinate: (price: number) => this._series!.priceToCoordinate(price),
       timeToCoordinate: (time: Time) => timeScale.timeToCoordinate(time),
       chartWidth: timeScale.width(),
@@ -151,18 +150,16 @@ export class RejectionPrimitive implements ISeriesPrimitive<Time> {
   }
 
   /**
-   * Update Rejections data
+   * Update Rejections + K线(用于实时 isTested 检测)
    */
-  setData(rejections: Rejection[]): void {
+  setData(rejections: Rejection[], candles: Candle[] = []): void {
     this._rejections = rejections;
+    this._candles = candles;
     if (this._requestUpdate) {
       this._requestUpdate();
     }
   }
 
-  /**
-   * Get current Rejections
-   */
   getData(): Rejection[] {
     return this._rejections;
   }

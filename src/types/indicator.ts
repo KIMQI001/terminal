@@ -24,27 +24,26 @@ export interface FVG {
 }
 
 /**
- * 拒绝 K 线(Rejection Candle)
- * - 看涨(bullish):长下影 + 小实体 + 短上影 — 价格被低位拒绝,可能反弹
- * - 看跌(bearish):长上影 + 小实体 + 短下影 — 价格被高位拒绝,可能回落
+ * Rejection Zone(供给/需求区)
+ * - bullish(下影/支撑):level 是下影中点,zone = [low, bodyBottom]
+ * - bearish(上影/阻力):level 是上影中点,zone = [bodyTop, high]
  *
  * 字段说明:
- * - high/low:wick 区域(包含主体一端 + 长影线)的上下界
- * - mid:wick 区域中线 =(high+low)/2,用作 ray 线的 y
- * - wickSize:长影线长度(看涨=bodyTop-candle.low,看跌=candle.high-bodyBottom)
- * - bodySize:实体大小
- * - wickBodyRatio:wick/body 比例,衡量拒绝强度
+ * - level:wick 段中点(用作 ray 线 y)
+ * - zoneHigh/zoneLow:wick 段上下界
+ * - wickSize:影线长度
+ * - ratio:wick 占整 K range 的比例(>= 0.4 触发检测)
+ * - candleHigh/candleLow:来源 K 线的 high/low(供 zone 计算)
  */
 export interface Rejection {
   type: "bullish" | "bearish";
   time: number;
   index: number;
-  high: number;
-  low: number;
-  mid: number;
+  level: number;
+  zoneHigh: number;
+  zoneLow: number;
   wickSize: number;
-  bodySize: number;
-  wickBodyRatio: number;
+  ratio: number;
   candleHigh: number;
   candleLow: number;
 }
