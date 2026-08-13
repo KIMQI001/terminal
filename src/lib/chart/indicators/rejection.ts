@@ -68,6 +68,7 @@ export function detectRejections(
         ratio: upperWickRatio,
         candleHigh: candle.high,
         candleLow: candle.low,
+        tier: 1,  // 占位,后面统一算
       });
     }
 
@@ -84,7 +85,21 @@ export function detectRejections(
         ratio: lowerWickRatio,
         candleHigh: candle.high,
         candleLow: candle.low,
+        tier: 1,  // 占位,后面统一算
       });
+    }
+  }
+
+  // 算 tier:看上一个 wick 类型,同方向 +1,不同方向 reset 到 1
+  for (let i = 0; i < results.length; i++) {
+    if (i === 0) {
+      results[i].tier = 1;
+    } else if (results[i].type === results[i - 1].type) {
+      // 同方向(都是 R 或都是 S)
+      results[i].tier = results[i - 1].tier + 1;
+    } else {
+      // 切换方向(从 S 变 R 或 从 R 变 S)
+      results[i].tier = 1;
     }
   }
 

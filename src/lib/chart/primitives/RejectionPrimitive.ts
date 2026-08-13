@@ -74,10 +74,10 @@ class RejectionPaneRenderer implements ISeriesPrimitivePaneRenderer {
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // 左侧 "S" / "R" 标签(支撑 Support / 阻力 Resistance)
+        // 左侧 "S1/R1" "S2/R2" 标签(支撑/阻力 + 层级)
         ctx.font = 'bold 10px monospace';
         ctx.fillStyle = textColor;
-        ctx.fillText(isBullish ? 'S' : 'R', startX + 4, yLevel + 3);
+        ctx.fillText(isBullish ? `S${r.tier}` : `R${r.tier}`, startX + 4, yLevel + 3);
       }
     });
   }

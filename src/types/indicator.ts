@@ -46,6 +46,8 @@ export interface Rejection {
   ratio: number;
   candleHigh: number;
   candleLow: number;
+  /** 层级:R1/R2/... 或 S1/S2/... — 看上一个 wick 类型,同方向 +1,不同方向 reset 到 1 */
+  tier: number;
 }
 
 export interface BOS {
