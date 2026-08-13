@@ -124,9 +124,13 @@ export function detectFVGs(
   // - 否则 → tier = 前一个 FVG.tier + 1(顺序走)
   //   包括:strict HH 找不到(当作没新 HH,继续顺序走)
   //   例:FR1 → FR2(中间无 HH)→ FR3(中间无 HH)→ 新 HH → 下个 FR1
+  // 算 tier:看 live 数组里前一个同方向 FVG,纯累加
+  // - 找 live 数组里前一个同方向 FVG
+  // - 没有前一个 → tier = 1
+  // - 有前一个 → tier = prev.tier + 1(顺序走,不管 HH/LH)
+  // 不做段切换(用户先确认累加行为再决定加 HH 重置)
   for (let i = 0; i < live.length; i++) {
     const fvg = live[i];
-    const wantType = fvg.type === 'bullish' ? 'low' : 'high';
 
     // 找 live 数组里前一个同方向 FVG
     let prev: typeof fvg | null = null;
@@ -137,41 +141,13 @@ export function detectFVGs(
       }
     }
 
-    if (!prev) {
-      // 第一个 FVG,或前面没有同方向 FVG
-      fvg.tier = 1;
-      continue;
-    }
-
-    // 检查 [prev.candleIndex, fvg.candleIndex) 区间内是否有新的 high/low swing
-    // 段切换触发:任何 high swing(HH/LH 都算)对 FR,任何 low swing(HH/LL)对 FS
-    // — 你的数据里 strict HH 可能不出现,用任意 high 兜底
-    let hasNewRef = false;
-    let refFound: number | null = null;
-    let refClass: string | null = null;
-    for (const sp of swingPoints) {
-      if (
-        sp.type === wantType &&
-        sp.index > prev.candleIndex &&
-        sp.index < fvg.candleIndex
-      ) {
-        hasNewRef = true;
-        refFound = sp.index;
-        refClass = sp.classification ?? '?';
-        break;
-      }
-    }
-
-    // 区间内出现新 high/low → tier=1;否则 → tier=prev+1(顺序走)
-    fvg.tier = hasNewRef ? 1 : prev.tier + 1;
+    fvg.tier = prev ? prev.tier + 1 : 1;
 
     // 调试 log
     if (typeof window !== 'undefined' && (window as any).__fvgDebug) {
       console.log(
         `[FVG tier] type=${fvg.type} idx=${fvg.candleIndex} ` +
-        `prev=${prev.candleIndex} prev.tier=${prev.tier} ` +
-        `hasNewRef=${hasNewRef}` + (refFound !== null ? ` ref@${refFound}(${refClass})` : '') +
-        ` → tier=${fvg.tier}`
+        `prev=${prev?.candleIndex ?? 'none'} prev.tier=${prev?.tier ?? 'none'} → tier=${fvg.tier}`
       );
     }
   }
