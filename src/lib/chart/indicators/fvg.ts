@@ -124,13 +124,16 @@ export function detectFVGs(
   // - 否则 → tier = 前一个 FVG.tier + 1(顺序走)
   //   包括:strict HH 找不到(当作没新 HH,继续顺序走)
   //   例:FR1 → FR2(中间无 HH)→ FR3(中间无 HH)→ 新 HH → 下个 FR1
-  // 算 tier:看 live 数组里前一个同方向 FVG,纯累加
+  // 算 tier:看上一个同方向 FVG + 段切换(strict HH/LL 出现)
   // - 找 live 数组里前一个同方向 FVG
   // - 没有前一个 → tier = 1
-  // - 有前一个 → tier = prev.tier + 1(顺序走,不管 HH/LH)
-  // 不做段切换(用户先确认累加行为再决定加 HH 重置)
+  // - 有前一个 → 检查 [prev.candleIndex, fvg.candleIndex) 区间内是否出现新 strict HH(对 FR)
+  //   或 strict LL(对 FS)→ 段切换,tier = 1
+  // - 否则 → 顺序走,tier = prev.tier + 1
   for (let i = 0; i < live.length; i++) {
     const fvg = live[i];
+    const wantType = fvg.type === 'bullish' ? 'low' : 'high';
+    const wantClass = fvg.type === 'bullish' ? 'LL' : 'HH';
 
     // 找 live 数组里前一个同方向 FVG
     let prev: typeof fvg | null = null;
@@ -141,13 +144,33 @@ export function detectFVGs(
       }
     }
 
-    fvg.tier = prev ? prev.tier + 1 : 1;
+    if (!prev) {
+      fvg.tier = 1;
+    } else {
+      // 检查 [prev.candleIndex, fvg.candleIndex) 区间内是否有新 strict HH/LL
+      let hasNewRef = false;
+      for (const sp of swingPoints) {
+        if (
+          sp.type === wantType &&
+          sp.classification === wantClass &&
+          sp.index > prev.candleIndex &&
+          sp.index < fvg.candleIndex
+        ) {
+          hasNewRef = true;
+          break;
+        }
+      }
+      fvg.tier = hasNewRef ? 1 : prev.tier + 1;
+    }
 
-    // 调试 log
-    if (typeof window !== 'undefined' && (window as any).__fvgDebug) {
+    // 强制调试 log(刷新后 console 必打印)
+    if (typeof window !== 'undefined') {
       console.log(
         `[FVG tier] type=${fvg.type} idx=${fvg.candleIndex} ` +
-        `prev=${prev?.candleIndex ?? 'none'} prev.tier=${prev?.tier ?? 'none'} → tier=${fvg.tier}`
+        `prev=${prev?.candleIndex ?? 'none'} prev.tier=${prev?.tier ?? 'none'} → tier=${fvg.tier}` +
+        ` (swingPoints total=${swingPoints.length}, ` +
+        `strictHH=${swingPoints.filter(s => s.classification === 'HH').length}, ` +
+        `strictLL=${swingPoints.filter(s => s.classification === 'LL').length})`
       );
     }
   }
