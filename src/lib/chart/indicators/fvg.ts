@@ -147,6 +147,7 @@ export function detectFVGs(
     // 检查 [prev.candleIndex, fvg.candleIndex) 区间内是否有新 strict HH/LL
     // 找不到 strict(没有)就当作"没新 HH" → 不重置 → 顺序走
     let hasNewRef = false;
+    let refFound: number | null = null;
     for (const sp of swingPoints) {
       if (
         sp.type === wantType &&
@@ -155,12 +156,28 @@ export function detectFVGs(
         sp.index < fvg.candleIndex
       ) {
         hasNewRef = true;
+        refFound = sp.index;
         break;
       }
     }
 
     // 有新 strict HH/LL → tier=1;否则 → tier=prev+1(顺序走)
     fvg.tier = hasNewRef ? 1 : prev.tier + 1;
+
+    // 调试 log(临时):每个 FVG 的 tier 决策细节
+    if (typeof window !== 'undefined' && (window as any).__fvgDebug) {
+      const totalSwings = swingPoints.length;
+      const strictMatches = swingPoints.filter(
+        (sp) => sp.type === wantType && sp.classification === wantClass
+      ).length;
+      console.log(
+        `[FVG tier] type=${fvg.type} idx=${fvg.candleIndex} ` +
+        `prev=${prev.candleIndex} prev.tier=${prev.tier} ` +
+        `hasNewRef=${hasNewRef}` + (refFound !== null ? ` refFound@${refFound}` : '') +
+        ` → tier=${fvg.tier}` +
+        ` (swingPoints: ${totalSwings}, strict ${wantClass}: ${strictMatches})`
+      );
+    }
   }
 
   return live;
