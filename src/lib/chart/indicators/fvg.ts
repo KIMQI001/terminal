@@ -121,32 +121,46 @@ export function detectFVGs(
   // - bullish FVG (FS): 找最近的 LL(前一根 K index < fvg.candleIndex 且 classification="LL")
   // - bearish FVG (FR): 找最近的 HH(同上,classification="HH")
   // - 数 [refIndex+1, fvg.candleIndex) 区间内同方向 FVG 数 +1 = tier
+  //
+  // 兜底:有 classification 但找不到严格匹配(段内只有 LH/HL)时,
+  // 退一步用最近同类型 swing point(降级处理,tier 仍合理)
   for (let i = 0; i < live.length; i++) {
     const fvg = live[i];
-    // 找参考 swing point
     const wantType = fvg.type === 'bullish' ? 'low' : 'high';
     const wantClass = fvg.type === 'bullish' ? 'LL' : 'HH';
+
     let refIndex = -1;
+    // 优先:找最近的 strict HH/LL(有 classification 的)
     for (let k = swingPoints.length - 1; k >= 0; k--) {
       const sp = swingPoints[k];
       if (sp.type === wantType && sp.index < fvg.candleIndex) {
-        // 有 classification 时,严格按 HH/LL 匹配
-        // 无 classification 时,降级用任意 high/low(向后兼容)
-        if (sp.classification && sp.classification !== wantClass) {
-          continue;
+        if (sp.classification === wantClass) {
+          refIndex = sp.index;
+          break;
         }
-        refIndex = sp.index;
-        break;
       }
     }
+    // 兜底:找不到 strict,降级用最近的同类型 swing
+    if (refIndex === -1) {
+      for (let k = swingPoints.length - 1; k >= 0; k--) {
+        const sp = swingPoints[k];
+        if (sp.type === wantType && sp.index < fvg.candleIndex) {
+          refIndex = sp.index;
+          break;
+        }
+      }
+    }
+
     // 数 [refIndex+1, fvg.candleIndex) 区间内同方向 FVG 数
     let count = 0;
-    const start = refIndex + 1;
-    for (let k = 0; k < live.length; k++) {
-      const other = live[k];
-      if (other === fvg) break;  // 遇到自己,停止(只数自己之前的)
-      if (other.candleIndex >= start && other.candleIndex < fvg.candleIndex && other.type === fvg.type) {
-        count++;
+    if (refIndex !== -1) {
+      const start = refIndex + 1;
+      for (let k = 0; k < live.length; k++) {
+        const other = live[k];
+        if (other === fvg) break;  // 遇到自己,停止(只数自己之前的)
+        if (other.candleIndex >= start && other.candleIndex < fvg.candleIndex && other.type === fvg.type) {
+          count++;
+        }
       }
     }
     fvg.tier = count + 1;
