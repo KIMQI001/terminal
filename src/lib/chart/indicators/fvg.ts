@@ -117,42 +117,48 @@ export function detectFVGs(
   // Return only recent FVGs with fill < 80%
   const live = fvgs.filter((fvg) => fvg.fillPercentage < 80).slice(-15);
 
-  // 算 tier:从最近的 strict HH(FR)或 strict LL(FS)开始数段内连续同方向 FVG
-  // - bullish FVG (FS): 找最近的 strict LL(前一根 K index < fvg.candleIndex 且 classification="LL")
-  // - bearish FVG (FR): 找最近的 strict HH(同上,classification="HH")
-  // - 数 [refIndex+1, fvg.candleIndex) 区间内同方向 FVG 数 +1 = tier
-  // - 段切换:新 strict HH 出现后第一个 FR 重置为 FR1
-  // - 找不到 strict HH/LL(早期数据 / 没出现新高)→ tier = 1(新段,无法归类)
+  // 算 tier:看上一个未填充的同方向 FVG
+  // - 找 live 数组里前一个同方向 FVG(按时间顺序)
+  // - 如果前一个 FVG 之后到当前 FVG 之间出现新 strict HH(对 FR)/ strict LL(对 FS)
+  //   → tier = 1(段切换)
+  // - 否则 → tier = 前一个 FVG.tier + 1(顺序走)
+  //   例:FR1 → FR2(中间无 HH)→ FR3(中间无 HH)→ 新 HH → 下个 FR1
   for (let i = 0; i < live.length; i++) {
     const fvg = live[i];
     const wantType = fvg.type === 'bullish' ? 'low' : 'high';
     const wantClass = fvg.type === 'bullish' ? 'LL' : 'HH';
 
-    // 找最近的 strict HH/LL
-    let refIndex = -1;
-    for (let k = swingPoints.length - 1; k >= 0; k--) {
-      const sp = swingPoints[k];
-      if (sp.type === wantType && sp.index < fvg.candleIndex) {
-        if (sp.classification === wantClass) {
-          refIndex = sp.index;
-          break;
-        }
+    // 找 live 数组里前一个同方向 FVG
+    let prev: typeof fvg | null = null;
+    for (let k = i - 1; k >= 0; k--) {
+      if (live[k].type === fvg.type) {
+        prev = live[k];
+        break;
       }
     }
 
-    // 数 [refIndex+1, fvg.candleIndex) 区间内同方向 FVG 数
-    let count = 0;
-    if (refIndex !== -1) {
-      const start = refIndex + 1;
-      for (let k = 0; k < live.length; k++) {
-        const other = live[k];
-        if (other === fvg) break;  // 遇到自己,停止(只数自己之前的)
-        if (other.candleIndex >= start && other.candleIndex < fvg.candleIndex && other.type === fvg.type) {
-          count++;
-        }
+    if (!prev) {
+      // 第一个 FVG,或前面没有同方向 FVG
+      fvg.tier = 1;
+      continue;
+    }
+
+    // 检查 [prev.candleIndex, fvg.candleIndex) 区间内是否有新 strict HH/LL
+    let hasNewRef = false;
+    for (const sp of swingPoints) {
+      if (
+        sp.type === wantType &&
+        sp.classification === wantClass &&
+        sp.index > prev.candleIndex &&
+        sp.index < fvg.candleIndex
+      ) {
+        hasNewRef = true;
+        break;
       }
     }
-    fvg.tier = count + 1;
+
+    // 有新 strict HH/LL → tier=1;否则 → tier=prev+1
+    fvg.tier = hasNewRef ? 1 : prev.tier + 1;
   }
 
   return live;
