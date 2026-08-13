@@ -7,7 +7,6 @@ import { TradingChart } from "@/components/chart/TradingChart";
 import { TradePanel } from "@/components/trading/TradePanel";
 import { AuthGuard } from "@/components/auth/AuthGuard";
 import { ChatPanel } from "@/components/ai/ChatPanel";
-import { InlineAIDisplay } from "@/components/ai/InlineAIDisplay";
 import { useChatStore } from "@/stores/chatStore";
 import { MessageSquare } from "lucide-react";
 
@@ -48,7 +47,6 @@ export default function Home() {
         <main className="flex-1 flex overflow-hidden">
           <div className="flex-1 overflow-hidden">
             <TradingChart />
-            <InlineAIDisplay />
           </div>
           <TradePanel />
         </main>
