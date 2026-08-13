@@ -21,7 +21,9 @@ export interface FVG {
   filled: boolean;
   fillPercentage: number;
   fib22: number;  // 0.22入场点
-  /** 层级:FS1/FS2/... 或 FR1/FR2/... — 同方向连续 +1,切换 reset 到 1(跳过已填充) */
+  /** 中间 K 索引(用于跨过 swing point 算 tier) */
+  candleIndex: number;
+  /** 层级:FS1/FS2/... 或 FR1/FR2/... — 从最近的 HH(FR)或 LL(FS)开始算段内连续 FVG 数 */
   tier: number;
 }
 

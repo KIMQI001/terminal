@@ -215,8 +215,8 @@ export function TradingChart() {
         setMultiTimeframeOB(timeframe, sortedObs[0] || null);
       }
 
-      // FVG 始终计算（面板需要数据）
-      const fvgs = detectFVGs(candleData);
+      // FVG 始终计算(面板需要数据)— tier 基于 swing points
+      const fvgs = detectFVGs(candleData, { swingPoints });
       setFVGs(fvgs);
       // 保存到多周期 FVG 存储（只保存最新的一个）
       const targetTimeframes2 = ['5m', '15m', '1h', '4h', '1d'] as const;
@@ -773,8 +773,8 @@ export function TradingChart() {
           const otes = detectOTEZones(swings, lastPrice, data);
           setMultiTimeframeOTE(tf, otes[0] || null);
 
-          // FVG
-          const fvgs = detectFVGs(data);
+          // FVG(tier 基于当前周期的 swing points)
+          const fvgs = detectFVGs(data, { swingPoints: swings });
           setMultiTimeframeFVG(tf, fvgs[fvgs.length - 1] || null);
 
           // OB

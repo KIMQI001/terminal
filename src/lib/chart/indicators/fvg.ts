@@ -1,5 +1,11 @@
-import { Candle } from "@/types/chart";
+import { Candle, SwingPoint } from "@/types/chart";
 import { FVG } from "@/types/indicator";
+
+export interface FVGOptions {
+  minGapPercent?: number;
+  /** 用于 tier 计算:FR 从最近的 HH 算,FS 从最近的 LL 算 */
+  swingPoints?: SwingPoint[];
+}
 
 /**
  * Detect Fair Value Gaps (FVG) in price data
@@ -8,8 +14,10 @@ import { FVG } from "@/types/indicator";
  */
 export function detectFVGs(
   candles: Candle[],
-  minGapPercent: number = 0.01
+  options: FVGOptions = {}
 ): FVG[] {
+  const minGapPercent = options.minGapPercent ?? 0.01;
+  const swingPoints = options.swingPoints ?? [];
   const fvgs: FVG[] = [];
 
   for (let i = 2; i < candles.length; i++) {
@@ -55,6 +63,7 @@ export function detectFVGs(
           filled,
           fillPercentage,
           fib22,
+          candleIndex: i,
           tier: 1,  // 占位,后面统一算
         });
       }
@@ -98,6 +107,7 @@ export function detectFVGs(
           filled,
           fillPercentage,
           fib22,
+          candleIndex: i,
           tier: 1,  // 占位,后面统一算
         });
       }
@@ -107,26 +117,31 @@ export function detectFVGs(
   // Return only recent FVGs with fill < 80%
   const live = fvgs.filter((fvg) => fvg.fillPercentage < 80).slice(-15);
 
-  // 算 tier:看上一个未填充的同方向 FVG,同方向 +1,切换 reset 到 1
+  // 算 tier:从最近的 HH(FR)或 LL(FS)开始数段内连续同方向 FVG
+  // - bullish: 找最近的 LL(index < fvg.candleIndex),数 [LL.index, fvg.candleIndex) 区间内 bullish FVG 数
+  // - bearish: 类似 HH
   for (let i = 0; i < live.length; i++) {
-    if (i === 0) {
-      live[i].tier = 1;
-      continue;
-    }
-    let prevIdx = i - 1;
-    while (prevIdx >= 0) {
-      const prev = live[prevIdx];
-      // 跳过不同方向(只是切换参考点,不算同方向连续)
-      // 这里允许跨方向(把每个 FVG 的"上一个"当作切换参考)
-      if (prev.type === live[i].type) {
-        live[i].tier = prev.tier + 1;
-        break;
-      } else {
-        live[i].tier = 1;
+    const fvg = live[i];
+    // 找参考 swing point
+    const wantType = fvg.type === 'bullish' ? 'low' : 'high';
+    let refIndex = -1;
+    for (let k = swingPoints.length - 1; k >= 0; k--) {
+      if (swingPoints[k].type === wantType && swingPoints[k].index < fvg.candleIndex) {
+        refIndex = swingPoints[k].index;
         break;
       }
     }
-    if (prevIdx < 0) live[i].tier = 1;
+    // 数 [refIndex+1, fvg.candleIndex) 区间内同方向 FVG 数
+    let count = 0;
+    const start = refIndex + 1;
+    for (let k = 0; k < live.length; k++) {
+      const other = live[k];
+      if (other === fvg) break;  // 遇到自己,停止(只数自己之前的)
+      if (other.candleIndex >= start && other.candleIndex < fvg.candleIndex && other.type === fvg.type) {
+        count++;
+      }
+    }
+    fvg.tier = count + 1;
   }
 
   return live;
