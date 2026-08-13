@@ -46,8 +46,10 @@ export interface Rejection {
   ratio: number;
   candleHigh: number;
   candleLow: number;
-  /** 层级:R1/R2/... 或 S1/S2/... — 看上一个 wick 类型,同方向 +1,不同方向 reset 到 1 */
+  /** 层级:R1/R2/... 或 S1/S2/... — 看上一个 wick(跨过同根 K),同方向 +1,不同方向 reset 到 1 */
   tier: number;
+  /** 检测顺序:K index*2 + (S=0/R=1) — 用于排序保证时序 */
+  sequence: number;
 }
 
 export interface BOS {

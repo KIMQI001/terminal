@@ -57,6 +57,7 @@ export function detectRejections(
 
     // 上影 = 阻力候选(bearish action level:卖出区)
     if (upperWickRatio >= minWickRatio) {
+      // sequence:index*2 + 1 — 同根 K 内下影(0)在前,上影(1)在后
       results.push({
         type: "bearish",
         time: candle.time,
@@ -68,12 +69,14 @@ export function detectRejections(
         ratio: upperWickRatio,
         candleHigh: candle.high,
         candleLow: candle.low,
-        tier: 1,  // 占位,后面统一算
+        sequence: i * 2 + 1,
+        tier: 1,
       });
     }
 
     // 下影 = 支撑候选(bullish action level:买入区)
     if (lowerWickRatio >= minWickRatio) {
+      // sequence:index*2 + 0 — 下影先于上影
       results.push({
         type: "bullish",
         time: candle.time,
@@ -85,20 +88,36 @@ export function detectRejections(
         ratio: lowerWickRatio,
         candleHigh: candle.high,
         candleLow: candle.low,
-        tier: 1,  // 占位,后面统一算
+        sequence: i * 2 + 0,
+        tier: 1,
       });
     }
   }
 
-  // 算 tier:看上一个 wick 类型,同方向 +1,不同方向 reset 到 1
+  // 先按时间排序(sequence:index*2 + 0/1,保证同根K内下影在前)
+  results.sort((a, b) => a.sequence - b.sequence);
+
+  // 算 tier:"上一个 wick" = **前一根 K 的 wick**(跨过同根 K 内的另一个 wick)
+  // 同根 K 内的 R+S 看作同时发生,不互相算"上一个"
   for (let i = 0; i < results.length; i++) {
     if (i === 0) {
       results[i].tier = 1;
-    } else if (results[i].type === results[i - 1].type) {
-      // 同方向(都是 R 或都是 S)
-      results[i].tier = results[i - 1].tier + 1;
+      continue;
+    }
+    // 往前找第一个 index 不同的 wick(跨过同根 K 内的另一个 wick)
+    let prevIdx = i - 1;
+    while (prevIdx >= 0 && results[prevIdx].index === results[i].index) {
+      prevIdx--;
+    }
+    if (prevIdx < 0) {
+      // 没有更早的 wick(都是同根 K 内的)— 全部 tier 1
+      results[i].tier = 1;
+      continue;
+    }
+    // 同方向(都是 R 或都是 S)→ tier +1,不同方向 → tier 1
+    if (results[i].type === results[prevIdx].type) {
+      results[i].tier = results[prevIdx].tier + 1;
     } else {
-      // 切换方向(从 S 变 R 或 从 R 变 S)
       results[i].tier = 1;
     }
   }
