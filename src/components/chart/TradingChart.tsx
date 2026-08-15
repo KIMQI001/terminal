@@ -1373,11 +1373,12 @@ export function TradingChart() {
     });
   }, [shouldDisableChartInteraction]);
 
-  // 双击图表下单的拖动逻辑:mousemove 时改 store + prefillData
+  // 双击图表下单的拖动逻辑:pointermove 时改 store + prefillData
+  //   用 PointerEvent 统一鼠标和触摸(iPad/手机)
   useEffect(() => {
     if (!dragState.active) return;
 
-    const handleMove = (e: MouseEvent) => {
+    const handleMove = (e: PointerEvent) => {
       if (!candleSeriesRef.current) return;
       // 用 chartContainerRef 当前屏幕位置 + dy 算新价
       const rect = chartContainerRef.current?.getBoundingClientRect();
@@ -1408,11 +1409,15 @@ export function TradingChart() {
       setDragState((s) => ({ ...s, active: false }));
     };
 
-    window.addEventListener("mousemove", handleMove);
-    window.addEventListener("mouseup", handleUp);
+    // pointer 事件统一处理鼠标/触摸/笔;iPad 用 setPointerCapture 后
+    // 这里仍要监听 window,确保离开 chart container 也能继续追踪
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
     return () => {
-      window.removeEventListener("mousemove", handleMove);
-      window.removeEventListener("mouseup", handleUp);
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
     };
   }, [dragState]);
 
@@ -1586,7 +1591,9 @@ export function TradingChart() {
       <div
         ref={chartContainerRef}
         className="w-full h-full relative"
-        style={{ minHeight: "400px", cursor: getCursor() }}
+        // touch-action: manipulation 禁用 iOS Safari 300ms 双击延迟,
+        // 同时保留 lightweight-charts 的 pan/pinch zoom
+        style={{ minHeight: "400px", cursor: getCursor(), touchAction: "manipulation" }}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
         onMouseMove={handleMouseMove}
@@ -1650,9 +1657,17 @@ function DragHandles({
           return (
             <div
               key={`drag-handle-${idx}`}
-              onMouseDown={(e) => {
+              // onPointerDown 统一鼠标/触摸;iPad 用 setPointerCapture
+              // 锁住 pointer,确保拖动期间即使手离开元素仍能收到 pointermove
+              onPointerDown={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                const target = e.currentTarget as HTMLElement;
+                try {
+                  target.setPointerCapture(e.pointerId);
+                } catch {
+                  // setPointerCapture 在某些环境下可能抛错,忽略
+                }
                 onDragStart(idx, e.clientY, line.price);
               }}
               style={{
@@ -1663,6 +1678,9 @@ function DragHandles({
                 height: 12,
                 cursor: "ns-resize",
                 zIndex: 5,
+                // 触摸设备上 12px 太小,放大到 24px 方便手指点击
+                minHeight: 24,
+                touchAction: "none",
               }}
             />
           );
