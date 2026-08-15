@@ -153,6 +153,13 @@ export function TradingChart() {
     startPrice: number;
   }>({ active: false, lineIdx: -1, startY: 0, startPrice: 0 });
 
+  // iPad/触摸双击检测:记录上次 tap 的时间和位置(用 ref 不触发重渲染)
+  const lastTapRef = useRef<{ time: number; x: number; y: number }>({
+    time: 0,
+    x: 0,
+    y: 0,
+  });
+
   // 监听 Shift 键
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1478,6 +1485,11 @@ export function TradingChart() {
   // 第一次点击开始测量，第二次点击直接清除（测量数据在移动时实时显示）
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
+      // iPad/触摸路径:触摸产生的 click 是触摸事件触发的延迟 click,
+      // 触摸路径已自己处理(touchend 检双击/单击),
+      // 这里不再响应,避免触摸路径与鼠标路径冲突
+      if (lastTapRef.current.time > 0) return;
+
       const point = getPointFromEvent(e);
       if (!point) return;
 
@@ -1502,13 +1514,12 @@ export function TradingChart() {
     [phase, canStartMeasure, getPointFromEvent, startDrawing, clearMeasurement, timeframe]
   );
 
-  // 双击图表下单:TradingView 风格
+  // 双击图表下单的核心逻辑(从坐标下单,不绑定具体事件类型)
   //   - 双击位置价格 > 当前收盘价 → SELL/SHORT(开空)
   //   - 双击位置价格 < 当前收盘价 → BUY/LONG(开多)
   //   - 弹 TradeModal,entry 预填双击位置,SL/TP 留空
-  const handleDoubleClick = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      const point = getPointFromEvent(e);
+  const placeOrderAtPoint = useCallback(
+    (point: { price: number | null; time: number | null; x: number; y: number } | null | undefined) => {
       if (!point || point.price == null) return;
 
       const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : point.price;
@@ -1531,7 +1542,53 @@ export function TradingChart() {
       setPrefillData({ side, entry: point.price, stopLoss: 0, takeProfit: 0 });
       openModal();
     },
-    [candles, getPointFromEvent, setPrefillData, openModal]
+    [candles, setPrefillData, openModal]
+  );
+
+  // 鼠标双击下单:桌面路径
+  const handleDoubleClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      placeOrderAtPoint(getPointFromEvent(e));
+    },
+    [getPointFromEvent, placeOrderAtPoint]
+  );
+
+  // iPad/触摸双击检测:不依赖浏览器 dblclick 事件(iOS Safari 上不可靠)
+  //   - 两次 tap 在 350ms 内、距离 < 20px 视为双击
+  //   - 第二次 tap 触发 placeOrderAtPoint
+  // lastTapRef 已在组件顶部声明(与其他 useRef 一起)
+
+  const handleTouchEnd = useCallback(
+    (e: React.TouchEvent<HTMLDivElement>) => {
+      // 多指操作或无 changedTouches 时忽略
+      if (e.touches.length > 0 || e.changedTouches.length === 0) return;
+      const touch = e.changedTouches[0];
+
+      const now = Date.now();
+      const last = lastTapRef.current;
+      const dx = touch.clientX - last.x;
+      const dy = touch.clientY - last.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      // 第二次 tap 在时间/距离窗口内 → 视为双击
+      if (now - last.time < 350 && dist < 20) {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        const price = candleSeriesRef.current?.coordinateToPrice(y);
+        if (price != null && price > 0) {
+          placeOrderAtPoint({ price, time: null, x, y });
+        }
+        // 重置 + 阻止后续 click 触发测距(测距由鼠标路径处理)
+        lastTapRef.current = { time: 0, x: 0, y: 0 };
+        e.preventDefault();
+        return;
+      }
+
+      // 第一次 tap,记录
+      lastTapRef.current = { time: now, x: touch.clientX, y: touch.clientY };
+    },
+    [placeOrderAtPoint]
   );
 
   // mousemove: 更新测量（仅在 drawing 状态）
@@ -1597,6 +1654,8 @@ export function TradingChart() {
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
         onMouseMove={handleMouseMove}
+        // iPad/触摸路径:手动双击检测,不依赖浏览器 dblclick
+        onTouchEnd={handleTouchEnd}
       />
       {/* 双击下单的可拖动 entry 线手柄(绝对定位在 chart container 内) */}
       <DragHandles
