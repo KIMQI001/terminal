@@ -218,18 +218,6 @@ export function TradingChart() {
 
       // OB 始终计算（面板需要数据）
       const obs = detectOrderBlocks(candleData);
-
-      // Proximity Signal(开关开启时算)
-      if (enabled.proximitySignals) {
-        const bandUsd = getProximityBandUsd();
-        const proxRejections = detectRejections(candleData);
-        const proxSignals = detectProximitySignals(
-          candleData, newFvgs, obs, proxRejections, bandUsd
-        );
-        setProximitySignals(proxSignals);
-      } else {
-        setProximitySignals([]);
-      }
       setOrderBlocks(obs);
       // 保存到多周期 OB 存储（按时间排序取最新的一个）
       const targetTimeframes = ['5m', '15m', '1h', '4h', '1d'] as const;
@@ -311,8 +299,20 @@ export function TradingChart() {
         const inducements = detectInducements(candleData, pivotResult.pivots);
         setInducements(inducements);
       }
+
+      // Proximity Signal(放在最后,确保 newFvgs/obs 已声明)
+      if (enabled.proximitySignals) {
+        const bandUsd = getProximityBandUsd();
+        const proxRejections = detectRejections(candleData);
+        const proxSignals = detectProximitySignals(
+          candleData, newFvgs, obs, proxRejections, bandUsd
+        );
+        setProximitySignals(proxSignals);
+      } else {
+        setProximitySignals([]);
+      }
     },
-    [enabled, timeframe, setSwingPoints, setMissedPivots, setGhostLevels, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setEquilibriumLevels, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend, setMultiTimeframeEquilibrium]
+    [enabled, timeframe, setSwingPoints, setMissedPivots, setGhostLevels, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setEquilibriumLevels, setProximitySignals, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend, setMultiTimeframeEquilibrium]
   );
 
   // Initialize chart
