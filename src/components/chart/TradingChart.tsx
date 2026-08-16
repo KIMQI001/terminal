@@ -32,6 +32,7 @@ import { detectOrderBlocks } from "@/lib/chart/indicators/orderBlocks";
 import { detectEngulfingPinbar } from "@/lib/chart/indicators/engulfingPinbar";
 import { detectFVGs } from "@/lib/chart/indicators/fvg";
 import { detectRejections } from "@/lib/chart/indicators/rejection";
+import { detectProximitySignals, getProximityBandUsd, PROXIMITY_KLINE_COLOR } from "@/lib/chart/indicators/proximitySignal";
 import { detectStructure } from "@/lib/chart/indicators/structure";
 import { detectLiquidityZones } from "@/lib/chart/indicators/liquidity";
 import { Candle } from "@/types/chart";
@@ -106,6 +107,7 @@ export function TradingChart() {
     missedPivots,
     ghostLevels,
     orderBlocks,
+    proximitySignals,
     fvgs,
     liquidityZones,
     oteZones,
@@ -128,6 +130,7 @@ export function TradingChart() {
     setMultiTimeframeOB,
     setMultiTimeframeTrend,
     setMultiTimeframeEquilibrium,
+    setProximitySignals,
     setInitialBalance,
     setAsiaBias,
     setEuropeBias,
@@ -215,6 +218,18 @@ export function TradingChart() {
 
       // OB 始终计算（面板需要数据）
       const obs = detectOrderBlocks(candleData);
+
+      // Proximity Signal(开关开启时算)
+      if (enabled.proximitySignals) {
+        const bandUsd = getProximityBandUsd();
+        const proxRejections = detectRejections(candleData);
+        const proxSignals = detectProximitySignals(
+          candleData, fvgs, obs, proxRejections, bandUsd
+        );
+        setProximitySignals(proxSignals);
+      } else {
+        setProximitySignals([]);
+      }
       setOrderBlocks(obs);
       // 保存到多周期 OB 存储（按时间排序取最新的一个）
       const targetTimeframes = ['5m', '15m', '1h', '4h', '1d'] as const;
@@ -545,6 +560,7 @@ export function TradingChart() {
           const pinbarTimes = new Set(pinbars.map(p => p.time));
 
           // 构建带颜色的蜡烛数据
+          const proxTimes = new Set(proximitySignals.map(s => s.time));
           const chartData: CandlestickData<Time>[] = data.map((c) => {
             const isPinbar = pinbarTimes.has(c.time);
             const pinbar = pinbars.find(p => p.time === c.time);
@@ -552,6 +568,24 @@ export function TradingChart() {
             if (isPinbar && pinbar) {
               // Engulfing Pinbar 蜡烛染色
               const color = pinbar.type === "bullish" ? "#3b82f6" : "#f97316"; // 蓝=涨, 橙=跌
+              return {
+                time: c.time as Time,
+                open: c.open,
+                high: c.high,
+                low: c.low,
+                close: c.close,
+                color: color,
+                borderColor: color,
+                wickColor: color,
+              };
+            }
+
+            // Proximity Signal:触发的 K 整根染色(浅紫/深蓝)
+            const proxSig = proximitySignals.find(s => s.time === c.time);
+            if (proxSig) {
+              const color = proxSig.side === "bullish"
+                ? PROXIMITY_KLINE_COLOR.bullish
+                : PROXIMITY_KLINE_COLOR.bearish;
               return {
                 time: c.time as Time,
                 open: c.open,
@@ -1079,7 +1113,7 @@ export function TradingChart() {
         enabled.equilibrium ? equilibriumLevels : []
       );
     }
-  }, [orderBlocks, fvgs, liquidityZones, oteZones, breakerBlocks, equilibriumLevels, liquidationData, enabled.orderBlocks, enabled.fvg, enabled.liquidityZones, enabled.killzones, enabled.ote, enabled.breakerBlocks, enabled.equilibrium, timeframe]);
+  }, [orderBlocks, fvgs, proximitySignals, liquidityZones, oteZones, breakerBlocks, equilibriumLevels, liquidationData, enabled.orderBlocks, enabled.fvg, enabled.proximitySignals, enabled.liquidityZones, enabled.killzones, enabled.ote, enabled.breakerBlocks, enabled.equilibrium, timeframe]);
 
   // Update Swing Points Markers (蜡烛图模式)
   useEffect(() => {

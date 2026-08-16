@@ -98,4 +98,5 @@ export interface IndicatorState {
   inducement: boolean;
   equilibrium: boolean;
   rejections: boolean;
+  proximitySignals: boolean;
 }

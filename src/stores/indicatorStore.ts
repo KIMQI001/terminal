@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { IndicatorState, OrderBlock, FVG, BOS, CHoCH, LiquidityZone } from "@/types/indicator";
+import { ProximitySignal } from "@/types/proximitySignal";
 import { SwingPoint, Timeframe } from "@/types/chart";
 
 // localStorage 持久化 key
@@ -91,6 +92,7 @@ interface IndicatorStoreState {
   missedPivots: MissedPivot[];
   ghostLevels: GhostLevel[];
   engulfingPinbars: EngulfingPinbar[];
+  proximitySignals: ProximitySignal[];
   orderBlocks: OrderBlock[];
   fvgs: FVG[];
   bosSignals: BOS[];
@@ -114,6 +116,7 @@ interface IndicatorStoreState {
   setMissedPivots: (pivots: MissedPivot[]) => void;
   setGhostLevels: (levels: GhostLevel[]) => void;
   setEngulfingPinbars: (pinbars: EngulfingPinbar[]) => void;
+  setProximitySignals: (signals: ProximitySignal[]) => void;
   setOrderBlocks: (blocks: OrderBlock[]) => void;
   setFVGs: (fvgs: FVG[]) => void;
   setBOSSignals: (signals: BOS[]) => void;
@@ -153,6 +156,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
     inducement: false,
     equilibrium: true,
     rejections: false,
+    proximitySignals: false,
   };
   return {
     enabled: { ...defaultEnabled, ...persistedEnabled },
@@ -161,6 +165,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
   missedPivots: [],
   ghostLevels: [],
   engulfingPinbars: [],
+  proximitySignals: [],
   orderBlocks: [],
   fvgs: [],
   bosSignals: [],
@@ -225,6 +230,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
   setMissedPivots: (pivots) => set({ missedPivots: pivots }),
   setGhostLevels: (levels) => set({ ghostLevels: levels }),
   setEngulfingPinbars: (pinbars) => set({ engulfingPinbars: pinbars }),
+  setProximitySignals: (signals) => set({ proximitySignals: signals }),
   setOrderBlocks: (blocks) => set({ orderBlocks: blocks }),
   setFVGs: (fvgs) => set({ fvgs }),
   setBOSSignals: (signals) => set({ bosSignals: signals }),
@@ -278,6 +284,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
       missedPivots: [],
       ghostLevels: [],
       engulfingPinbars: [],
+  proximitySignals: [],
       orderBlocks: [],
       fvgs: [],
       bosSignals: [],

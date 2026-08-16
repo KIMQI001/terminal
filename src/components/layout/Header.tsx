@@ -42,6 +42,7 @@ const indicators: { key: keyof IndicatorState; label: string }[] = [
   { key: "breakerBlocks", label: "Breaker" },
   { key: "inducement", label: "Inducement" },
   { key: "rejections", label: "Rejections" },
+  { key: "proximitySignals", label: "Proximity Signal" },
 ];
 
 export function Header() {
