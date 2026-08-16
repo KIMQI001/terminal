@@ -224,7 +224,7 @@ export function TradingChart() {
         const bandUsd = getProximityBandUsd();
         const proxRejections = detectRejections(candleData);
         const proxSignals = detectProximitySignals(
-          candleData, fvgs, obs, proxRejections, bandUsd
+          candleData, newFvgs, obs, proxRejections, bandUsd
         );
         setProximitySignals(proxSignals);
       } else {
@@ -239,12 +239,12 @@ export function TradingChart() {
       }
 
       // FVG 始终计算(面板需要数据)— tier 基于 swing points
-      const fvgs = detectFVGs(candleData, { swingPoints });
-      setFVGs(fvgs);
+      const newFvgs = detectFVGs(candleData, { swingPoints });
+      setFVGs(newFvgs);
       // 保存到多周期 FVG 存储（只保存最新的一个）
       const targetTimeframes2 = ['5m', '15m', '1h', '4h', '1d'] as const;
       if (targetTimeframes2.includes(timeframe as typeof targetTimeframes2[number])) {
-        setMultiTimeframeFVG(timeframe, fvgs[fvgs.length - 1] || null);
+        setMultiTimeframeFVG(timeframe, newFvgs[newFvgs.length - 1] || null);
       }
 
       // BOS/CHoCH 始终计算（MTF Trend 面板需要数据）
