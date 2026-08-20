@@ -60,12 +60,17 @@ class FibPaneRenderer implements ISeriesPrimitivePaneRenderer {
         const color = isBullish ? "rgba(168, 85, 247, 0.7)" : "rgba(251, 146, 60, 0.7)";
 
         // 只画当前 activeRatio 对应的那条水平线
-        const value = activeRatio === 0 ? item.fib22
+        // 跟 OBPanel 的 OB_RATIOS = [0.22, 0.60, 0.90] + 取整到 5 完全一致
+        const rawValue = activeRatio === 0 ? item.fib22
           : activeRatio === 1 ? item.fib50
           : item.fib90;
+        // 取整到 5(看涨向上 ceil,看跌向下 floor)— 跟 OBPanel 一致
+        const value = isBullish
+          ? Math.ceil(rawValue / 5) * 5
+          : Math.floor(rawValue / 5) * 5;
         const label = activeRatio === 0 ? ".22"
-          : activeRatio === 1 ? ".5"
-          : ".9";
+          : activeRatio === 1 ? ".60"
+          : ".90";
 
         const y = priceToCoordinate(value);
         if (y === null) continue;
