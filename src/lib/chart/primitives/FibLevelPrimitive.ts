@@ -32,6 +32,7 @@ export interface FibLevel {
 
 interface FibRendererData {
   items: FibLevel[];
+  activeRatio: 0 | 1 | 2;
   priceToCoordinate: (price: number) => Coordinate | null;
   timeToCoordinate: (time: Time) => Coordinate | null;
   chartWidth: number;
@@ -47,7 +48,7 @@ class FibPaneRenderer implements ISeriesPrimitivePaneRenderer {
   draw(target: CanvasRenderingTarget2D): void {
     if (!this._data || this._data.items.length === 0) return;
 
-    const { items, priceToCoordinate, timeToCoordinate, chartWidth } = this._data;
+    const { items, activeRatio, priceToCoordinate, timeToCoordinate, chartWidth } = this._data;
 
     target.useMediaCoordinateSpace(({ context: ctx }) => {
       for (const item of items) {
@@ -58,40 +59,38 @@ class FibPaneRenderer implements ISeriesPrimitivePaneRenderer {
         // 看涨用紫,看跌用橙
         const color = isBullish ? "rgba(168, 85, 247, 0.7)" : "rgba(251, 146, 60, 0.7)";
 
-        // 画 3 条水平虚线(.22 .5 .9)
-        const levels: { value: number; label: string }[] = [
-          { value: item.fib22, label: ".22" },
-          { value: item.fib50, label: ".5" },
-          { value: item.fib90, label: ".9" },
-        ];
+        // 只画当前 activeRatio 对应的那条水平线
+        const value = activeRatio === 0 ? item.fib22
+          : activeRatio === 1 ? item.fib50
+          : item.fib90;
+        const label = activeRatio === 0 ? ".22"
+          : activeRatio === 1 ? ".5"
+          : ".9";
 
-        for (const lvl of levels) {
-          const y = priceToCoordinate(lvl.value);
-          if (y === null) continue;
+        const y = priceToCoordinate(value);
+        if (y === null) continue;
 
-          // 虚线水平线
-          ctx.beginPath();
-          ctx.moveTo(startX, y);
-          ctx.lineTo(chartWidth, y);
-          ctx.strokeStyle = color;
-          ctx.lineWidth = 1;
-          ctx.setLineDash([4, 4]);
-          ctx.stroke();
-          ctx.setLineDash([]);
+        // 虚线水平线
+        ctx.beginPath();
+        ctx.moveTo(startX, y);
+        ctx.lineTo(chartWidth, y);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
 
-          // 右侧标签(.22 / .5 / .9)
-          ctx.font = "9px monospace";
-          const label = lvl.label;
-          const textWidth = ctx.measureText(label).width;
-          const labelX = chartWidth - textWidth - 6;
-          const labelY = y - 3;
-          ctx.fillStyle = isBullish
-            ? "rgba(168, 85, 247, 0.18)"
-            : "rgba(251, 146, 60, 0.18)";
-          ctx.fillRect(labelX - 3, labelY - 9, textWidth + 6, 14);
-          ctx.fillStyle = color;
-          ctx.fillText(label, labelX, labelY);
-        }
+        // 右侧标签
+        ctx.font = "9px monospace";
+        const textWidth = ctx.measureText(label).width;
+        const labelX = chartWidth - textWidth - 6;
+        const labelY = y - 3;
+        ctx.fillStyle = isBullish
+          ? "rgba(168, 85, 247, 0.18)"
+          : "rgba(251, 146, 60, 0.18)";
+        ctx.fillRect(labelX - 3, labelY - 9, textWidth + 6, 14);
+        ctx.fillStyle = color;
+        ctx.fillText(label, labelX, labelY);
       }
     });
   }
@@ -122,6 +121,8 @@ class FibPaneView implements ISeriesPrimitivePaneView {
 export class FibLevelPrimitive implements ISeriesPrimitive<Time> {
   private _paneView: FibPaneView;
   private _items: FibLevel[] = [];
+  /** 0=0.22, 1=0.5, 2=0.9 — 只画当前 ratio 对应的那条 */
+  private _activeRatio: 0 | 1 | 2 = 0;
   private _chart: IChartApiBase<Time> | null = null;
   private _series: SeriesAttachedParameter<Time>["series"] | null = null;
   private _requestUpdate?: () => void;
@@ -149,6 +150,7 @@ export class FibLevelPrimitive implements ISeriesPrimitive<Time> {
 
     const data: FibRendererData = {
       items: this._items,
+      activeRatio: this._activeRatio,
       priceToCoordinate: (price: number) => this._series!.priceToCoordinate(price),
       timeToCoordinate: (time: Time) => timeScale.timeToCoordinate(time),
       chartWidth: timeScale.width(),
@@ -161,8 +163,9 @@ export class FibLevelPrimitive implements ISeriesPrimitive<Time> {
     return [this._paneView];
   }
 
-  setData(items: FibLevel[]): void {
+  setData(items: FibLevel[], activeRatio: 0 | 1 | 2 = 0): void {
     this._items = items;
+    this._activeRatio = activeRatio;
     if (this._requestUpdate) {
       this._requestUpdate();
     }

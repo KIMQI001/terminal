@@ -134,6 +134,8 @@ export function TradingChart() {
     setMultiTimeframeEquilibrium,
     setProximitySignals,
     setFibLevels,
+    activeObFibRatio,
+    setActiveObFibRatio,
     setInitialBalance,
     setAsiaBias,
     setEuropeBias,
@@ -332,7 +334,7 @@ export function TradingChart() {
       }
       setFibLevels(fibLevels);
       if (fibLevelPrimitiveRef.current) {
-        fibLevelPrimitiveRef.current.setData(fibLevels);
+        fibLevelPrimitiveRef.current.setData(fibLevels, activeObFibRatio);
       }
     },
     [enabled, timeframe, setSwingPoints, setMissedPivots, setGhostLevels, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setEquilibriumLevels, setProximitySignals, setFibLevels, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend, setMultiTimeframeEquilibrium]

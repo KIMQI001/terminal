@@ -93,6 +93,8 @@ interface IndicatorStoreState {
   ghostLevels: GhostLevel[];
   engulfingPinbars: EngulfingPinbar[];
   fibLevels: import("@/lib/chart/primitives").FibLevel[];
+  /** OBPanel/FVGPanel 当前点击循环的 ratio 索引(0=0.22,1=0.5,2=0.9)— 控制图上画哪条 */
+  activeObFibRatio: 0 | 1 | 2;
   proximitySignals: ProximitySignal[];
   orderBlocks: OrderBlock[];
   fvgs: FVG[];
@@ -119,6 +121,7 @@ interface IndicatorStoreState {
   setEngulfingPinbars: (pinbars: EngulfingPinbar[]) => void;
   setProximitySignals: (signals: ProximitySignal[]) => void;
   setFibLevels: (levels: import("@/lib/chart/primitives").FibLevel[]) => void;
+  setActiveObFibRatio: (idx: 0 | 1 | 2) => void;
   setOrderBlocks: (blocks: OrderBlock[]) => void;
   setFVGs: (fvgs: FVG[]) => void;
   setBOSSignals: (signals: BOS[]) => void;
@@ -169,6 +172,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
   engulfingPinbars: [],
   proximitySignals: [],
   fibLevels: [],
+  activeObFibRatio: 0,
   orderBlocks: [],
   fvgs: [],
   bosSignals: [],
@@ -235,6 +239,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
   setEngulfingPinbars: (pinbars) => set({ engulfingPinbars: pinbars }),
   setProximitySignals: (signals) => set({ proximitySignals: signals }),
   setFibLevels: (levels) => set({ fibLevels: levels }),
+  setActiveObFibRatio: (idx) => set({ activeObFibRatio: idx }),
   setOrderBlocks: (blocks) => set({ orderBlocks: blocks }),
   setFVGs: (fvgs) => set({ fvgs }),
   setBOSSignals: (signals) => set({ bosSignals: signals }),
@@ -290,6 +295,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
       engulfingPinbars: [],
       proximitySignals: [],
       fibLevels: [],
+      activeObFibRatio: 0,
       orderBlocks: [],
       fvgs: [],
       bosSignals: [],

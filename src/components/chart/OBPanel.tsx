@@ -27,6 +27,7 @@ export function OBPanel() {
   const obClickCountRef = useRef(0);
   const { candles, timeframe, symbol } = useChartStore();
   const { setPrefillData, setTradingLines, openModal } = useOrderStore();
+  const { setActiveObFibRatio } = useIndicatorStore();
 
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
 
@@ -113,7 +114,10 @@ export function OBPanel() {
     const size = ob.high - ob.low;
     // 周期循环根据 OBPanel 自身的点击次数（OB 列表只用一个计数器）
     const ratio = OB_RATIOS[(obClickCountRef.current ?? 0) % 3];
-    obClickCountRef.current = (obClickCountRef.current + 1) % 3;
+    const newRatioIdx = ((obClickCountRef.current ?? 0) + 1) % 3;
+    obClickCountRef.current = newRatioIdx;
+    // 同步给 store,FibLevelPrimitive 只画当前 ratio 那条
+    setActiveObFibRatio(newRatioIdx as 0 | 1 | 2);
     const rawEntry = isBullish ? ob.high - size * ratio : ob.low + size * ratio;
     // 入场价格取整到 5 或 0（看多向上，看跌向下）
     const entry = isBullish
