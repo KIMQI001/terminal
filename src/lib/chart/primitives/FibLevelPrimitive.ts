@@ -48,7 +48,7 @@ class FibPaneRenderer implements ISeriesPrimitivePaneRenderer {
   draw(target: CanvasRenderingTarget2D): void {
     if (!this._data || this._data.items.length === 0) return;
 
-    const { items, activeRatio, priceToCoordinate, timeToCoordinate, chartWidth } = this._data;
+    const { items, priceToCoordinate, timeToCoordinate, chartWidth } = this._data;
 
     target.useMediaCoordinateSpace(({ context: ctx }) => {
       for (const item of items) {
@@ -56,46 +56,48 @@ class FibPaneRenderer implements ISeriesPrimitivePaneRenderer {
         if (startX === null) continue;
 
         const isBullish = item.side === "bullish";
-        // 看涨用紫,看跌用橙
-        const color = isBullish ? "rgba(168, 85, 247, 0.7)" : "rgba(251, 146, 60, 0.7)";
+        // 看涨用绿(OBPanel 同),看跌用红
+        const color = isBullish
+          ? "rgba(34, 197, 94, 0.7)"   // green-500
+          : "rgba(239, 68, 68, 0.7)";  // red-500
 
-        // 只画当前 activeRatio 对应的那条水平线
-        // 跟 OBPanel 的 OB_RATIOS = [0.22, 0.60, 0.90] + 取整到 5 完全一致
-        const rawValue = activeRatio === 0 ? item.fib22
-          : activeRatio === 1 ? item.fib50
-          : item.fib90;
-        // 取整到 5(看涨向上 ceil,看跌向下 floor)— 跟 OBPanel 一致
-        const value = isBullish
-          ? Math.ceil(rawValue / 5) * 5
-          : Math.floor(rawValue / 5) * 5;
-        const label = activeRatio === 0 ? ".22"
-          : activeRatio === 1 ? ".60"
-          : ".90";
+        // 3 档 fib 水平位(跟 OBPanel 的 OB_RATIOS = [0.22, 0.60, 0.90] + 取整到 5 一致)
+        const levels: { value: number; label: string }[] = [
+          { value: item.fib22, label: ".22" },
+          { value: item.fib50, label: ".60" },
+          { value: item.fib90, label: ".90" },
+        ];
 
-        const y = priceToCoordinate(value);
-        if (y === null) continue;
+        for (const lvl of levels) {
+          // 取整到 5(看涨 ceil,看跌 floor)— 跟 OBPanel entry 算法一致
+          const value = isBullish
+            ? Math.ceil(lvl.value / 5) * 5
+            : Math.floor(lvl.value / 5) * 5;
+          const y = priceToCoordinate(value);
+          if (y === null) continue;
 
-        // 虚线水平线
-        ctx.beginPath();
-        ctx.moveTo(startX, y);
-        ctx.lineTo(chartWidth, y);
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 4]);
-        ctx.stroke();
-        ctx.setLineDash([]);
+          // 虚线水平线
+          ctx.beginPath();
+          ctx.moveTo(startX, y);
+          ctx.lineTo(chartWidth, y);
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1;
+          ctx.setLineDash([4, 4]);
+          ctx.stroke();
+          ctx.setLineDash([]);
 
-        // 右侧标签
-        ctx.font = "9px monospace";
-        const textWidth = ctx.measureText(label).width;
-        const labelX = chartWidth - textWidth - 6;
-        const labelY = y - 3;
-        ctx.fillStyle = isBullish
-          ? "rgba(168, 85, 247, 0.18)"
-          : "rgba(251, 146, 60, 0.18)";
-        ctx.fillRect(labelX - 3, labelY - 9, textWidth + 6, 14);
-        ctx.fillStyle = color;
-        ctx.fillText(label, labelX, labelY);
+          // 右侧标签
+          ctx.font = "9px monospace";
+          const textWidth = ctx.measureText(lvl.label).width;
+          const labelX = chartWidth - textWidth - 6;
+          const labelY = y - 3;
+          ctx.fillStyle = isBullish
+            ? "rgba(34, 197, 94, 0.18)"
+            : "rgba(239, 68, 68, 0.18)";
+          ctx.fillRect(labelX - 3, labelY - 9, textWidth + 6, 14);
+          ctx.fillStyle = color;
+          ctx.fillText(lvl.label, labelX, labelY);
+        }
       }
     });
   }
