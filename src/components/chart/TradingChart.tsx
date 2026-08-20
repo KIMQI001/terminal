@@ -39,6 +39,7 @@ import { Candle } from "@/types/chart";
 import {
   OrderBlockPrimitive,
   RejectionPrimitive,
+  FibLevelPrimitive,
   FVGPrimitive,
   LiquidityPrimitive,
   KillzonePrimitive,
@@ -69,6 +70,7 @@ export function TradingChart() {
   // ICT Primitives
   const orderBlockPrimitiveRef = useRef<OrderBlockPrimitive | null>(null);
   const rejectionPrimitiveRef = useRef<RejectionPrimitive | null>(null);
+  const fibLevelPrimitiveRef = useRef<FibLevelPrimitive | null>(null);
   const fvgPrimitiveRef = useRef<FVGPrimitive | null>(null);
   const liquidityPrimitiveRef = useRef<LiquidityPrimitive | null>(null);
   const killzonePrimitiveRef = useRef<KillzonePrimitive | null>(null);
@@ -131,6 +133,7 @@ export function TradingChart() {
     setMultiTimeframeTrend,
     setMultiTimeframeEquilibrium,
     setProximitySignals,
+    setFibLevels,
     setInitialBalance,
     setAsiaBias,
     setEuropeBias,
@@ -311,8 +314,28 @@ export function TradingChart() {
       } else {
         setProximitySignals([]);
       }
+
+      // 收集 FVG/OB 的 fib 水平位(画在图上,默认开启)
+      const fibLevels: import("@/lib/chart/primitives").FibLevel[] = [];
+      for (const f of newFvgs) {
+        fibLevels.push({
+          time: f.time, high: f.high, low: f.low,
+          type: "fvg", side: f.type, fib22: f.fib22, fib50: f.fib50, fib90: f.fib90,
+        });
+      }
+      for (const o of obs) {
+        fibLevels.push({
+          time: o.startTime, high: o.high, low: o.low,
+          type: "ob", side: o.type,
+          fib22: o.fib22, fib50: (o as any).fib50 ?? o.fib22, fib90: (o as any).fib90 ?? o.fib22,
+        });
+      }
+      setFibLevels(fibLevels);
+      if (fibLevelPrimitiveRef.current) {
+        fibLevelPrimitiveRef.current.setData(fibLevels);
+      }
     },
-    [enabled, timeframe, setSwingPoints, setMissedPivots, setGhostLevels, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setEquilibriumLevels, setProximitySignals, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend, setMultiTimeframeEquilibrium]
+    [enabled, timeframe, setSwingPoints, setMissedPivots, setGhostLevels, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setEquilibriumLevels, setProximitySignals, setFibLevels, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend, setMultiTimeframeEquilibrium]
   );
 
   // Initialize chart
@@ -462,6 +485,7 @@ export function TradingChart() {
     // Initialize ICT Primitives
     const obPrimitive = new OrderBlockPrimitive();
     const rejectionPrimitive = new RejectionPrimitive();
+    const fibLevelPrimitive = new FibLevelPrimitive();
     const fvgPrimitive = new FVGPrimitive();
     const liquidityPrimitive = new LiquidityPrimitive();
     const killzonePrimitive = new KillzonePrimitive();
@@ -480,9 +504,11 @@ export function TradingChart() {
     candleSeries.attachPrimitive(liquidityPrimitive);
     candleSeries.attachPrimitive(liquidationHillPrimitive);
     candleSeries.attachPrimitive(rejectionPrimitive);
+    candleSeries.attachPrimitive(fibLevelPrimitive);
 
     orderBlockPrimitiveRef.current = obPrimitive;
     rejectionPrimitiveRef.current = rejectionPrimitive;
+    fibLevelPrimitiveRef.current = fibLevelPrimitive;
     fvgPrimitiveRef.current = fvgPrimitive;
     liquidityPrimitiveRef.current = liquidityPrimitive;
     killzonePrimitiveRef.current = killzonePrimitive;

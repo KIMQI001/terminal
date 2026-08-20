@@ -233,6 +233,8 @@ export function detectOrderBlocks(
     const obSize = ob.top - ob.btm;
     const fillPercentage = calculateFillPercentage(ob.top, ob.btm, ob.locIndex, "bullish");
     const fib22 = ob.top - obSize * 0.22;  // 看涨：顶部往下 22%
+    const fib50 = ob.top - obSize * 0.5;
+    const fib90 = ob.top - obSize * 0.9;
     result.push({
       type: "bullish",
       high: ob.top,
@@ -242,6 +244,8 @@ export function detectOrderBlocks(
       strength: 0,
       fillPercentage,
       fib22,
+      fib50,
+      fib90,
     });
   }
 
@@ -251,6 +255,8 @@ export function detectOrderBlocks(
     const obSize = ob.top - ob.btm;
     const fillPercentage = calculateFillPercentage(ob.top, ob.btm, ob.locIndex, "bearish");
     const fib22 = ob.btm + obSize * 0.22;  // 看跌：底部往上 22%
+    const fib50 = ob.btm + obSize * 0.5;
+    const fib90 = ob.btm + obSize * 0.9;
     result.push({
       type: "bearish",
       high: ob.top,
@@ -260,6 +266,8 @@ export function detectOrderBlocks(
       strength: 0,
       fillPercentage,
       fib22,
+      fib50,
+      fib90,
     });
   }
 

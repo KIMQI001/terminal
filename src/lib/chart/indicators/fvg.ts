@@ -52,8 +52,10 @@ export function detectFVGs(
         const fvgHigh = candle3.low;
         const fvgLow = candle1.high;
         const fvgSize = fvgHigh - fvgLow;
-        // 看涨FVG：入场点在高位 - 22%（价格回调到FVG上部买入）
+        // 看涨FVG：入场点在高位 - 22%/50%/90%（价格回调到FVG不同深度）
         const fib22 = fvgHigh - fvgSize * 0.22;
+        const fib50 = fvgHigh - fvgSize * 0.5;
+        const fib90 = fvgHigh - fvgSize * 0.9;
 
         fvgs.push({
           type: "bullish",
@@ -63,6 +65,8 @@ export function detectFVGs(
           filled,
           fillPercentage,
           fib22,
+          fib50,
+          fib90,
           candleIndex: i,
           tier: 1,  // 占位,后面统一算
         });
@@ -96,8 +100,10 @@ export function detectFVGs(
         const fvgHigh = candle1.low;
         const fvgLow = candle3.high;
         const fvgSize = fvgHigh - fvgLow;
-        // 看跌FVG：入场点在低位 + 22%（价格回调到FVG下部卖出）
+        // 看跌FVG：入场点在低位 + 22%/50%/90%（价格回调到FVG不同深度）
         const fib22 = fvgLow + fvgSize * 0.22;
+        const fib50 = fvgLow + fvgSize * 0.5;
+        const fib90 = fvgLow + fvgSize * 0.9;
 
         fvgs.push({
           type: "bearish",
@@ -107,6 +113,8 @@ export function detectFVGs(
           filled,
           fillPercentage,
           fib22,
+          fib50,
+          fib90,
           candleIndex: i,
           tier: 1,  // 占位,后面统一算
         });

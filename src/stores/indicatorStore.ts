@@ -92,6 +92,7 @@ interface IndicatorStoreState {
   missedPivots: MissedPivot[];
   ghostLevels: GhostLevel[];
   engulfingPinbars: EngulfingPinbar[];
+  fibLevels: import("@/lib/chart/primitives").FibLevel[];
   proximitySignals: ProximitySignal[];
   orderBlocks: OrderBlock[];
   fvgs: FVG[];
@@ -117,6 +118,7 @@ interface IndicatorStoreState {
   setGhostLevels: (levels: GhostLevel[]) => void;
   setEngulfingPinbars: (pinbars: EngulfingPinbar[]) => void;
   setProximitySignals: (signals: ProximitySignal[]) => void;
+  setFibLevels: (levels: import("@/lib/chart/primitives").FibLevel[]) => void;
   setOrderBlocks: (blocks: OrderBlock[]) => void;
   setFVGs: (fvgs: FVG[]) => void;
   setBOSSignals: (signals: BOS[]) => void;
@@ -166,6 +168,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
   ghostLevels: [],
   engulfingPinbars: [],
   proximitySignals: [],
+  fibLevels: [],
   orderBlocks: [],
   fvgs: [],
   bosSignals: [],
@@ -231,6 +234,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
   setGhostLevels: (levels) => set({ ghostLevels: levels }),
   setEngulfingPinbars: (pinbars) => set({ engulfingPinbars: pinbars }),
   setProximitySignals: (signals) => set({ proximitySignals: signals }),
+  setFibLevels: (levels) => set({ fibLevels: levels }),
   setOrderBlocks: (blocks) => set({ orderBlocks: blocks }),
   setFVGs: (fvgs) => set({ fvgs }),
   setBOSSignals: (signals) => set({ bosSignals: signals }),
@@ -284,7 +288,8 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
       missedPivots: [],
       ghostLevels: [],
       engulfingPinbars: [],
-  proximitySignals: [],
+      proximitySignals: [],
+      fibLevels: [],
       orderBlocks: [],
       fvgs: [],
       bosSignals: [],

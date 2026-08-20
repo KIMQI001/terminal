@@ -11,6 +11,8 @@ export interface OrderBlock {
   breakTime?: number;  // 被突破变成 breaker 的时间
   fillPercentage: number;  // 最大填充深度 (0-100)
   fib22: number;           // 0.22 入场点
+  fib50: number;           // 0.5 中点
+  fib90: number;           // 0.9 入场点
 }
 
 export interface FVG {
@@ -21,6 +23,8 @@ export interface FVG {
   filled: boolean;
   fillPercentage: number;
   fib22: number;  // 0.22入场点
+  fib50: number;  // 0.5 中点
+  fib90: number;  // 0.9 入场点
   /** 中间 K 索引(用于跨过 swing point 算 tier) */
   candleIndex: number;
   /** 层级:FS1/FS2/... 或 FR1/FR2/... — 从最近的 HH(FR)或 LL(FS)开始算段内连续 FVG 数 */

@@ -14,4 +14,5 @@ export { BreakerBlockPrimitive } from './BreakerBlockPrimitive';
 export { LiquidationHillPrimitive } from './LiquidationHillPrimitive';
 export { EquilibriumPrimitive } from './EquilibriumPrimitive';
 export type { LiquidationBar, LiquidationHillData } from './LiquidationHillPrimitive';
+export { FibLevelPrimitive, type FibLevel } from './FibLevelPrimitive';
 export { RejectionPrimitive } from './RejectionPrimitive';
