@@ -61,9 +61,8 @@ class RejectionPaneRenderer implements ISeriesPrimitivePaneRenderer {
 
         const isBullish = r.type === 'bullish';
         // 看涨:浅蓝(下影/支撑 S)
-        // 看跌:亮黄(上影/阻力 R)— 在红色 FVG 背景里最显眼
-        const lineColor = isBullish ? 'rgba(96, 165, 250, 0.9)' : 'rgba(250, 204, 21, 1)';
-        const textColor = isBullish ? 'rgba(96, 165, 250, 0.95)' : 'rgba(253, 224, 71, 1)';
+        // 看跌:紫色 + 白字 + 黑描边(上影/阻力 R)— 红/绿背景下都强对比
+        const lineColor = isBullish ? 'rgba(96, 165, 250, 0.9)' : 'rgba(192, 132, 252, 0.95)';
 
         // 中线射线(虚线)
         ctx.beginPath();
@@ -76,9 +75,22 @@ class RejectionPaneRenderer implements ISeriesPrimitivePaneRenderer {
         ctx.setLineDash([]);
 
         // 左侧 "S1/R1" "S2/R2" 标签(支撑/阻力 + 层级)
-        ctx.font = 'bold 10px monospace';
-        ctx.fillStyle = textColor;
-        ctx.fillText(isBullish ? `S${r.tier}` : `R${r.tier}`, startX + 4, yLevel + 3);
+        // 加大字号 + 黑色描边,任何背景下都清晰
+        const label = isBullish ? `S${r.tier}` : `R${r.tier}`;
+        ctx.font = 'bold 12px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        // 黑色描边(在所有背景上都看得见)
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.85)';
+        ctx.lineWidth = 3;
+        ctx.lineJoin = 'round';
+        ctx.strokeText(label, startX + 4, yLevel + 3);
+        // 紫色填充(看跌)/ 蓝色填充(看涨)
+        ctx.fillStyle = isBullish
+          ? 'rgba(224, 242, 254, 1)'     // blue-50 浅蓝文字
+          : 'rgba(245, 230, 255, 1)';    // purple-50 浅紫文字
+        ctx.fillText(label, startX + 4, yLevel + 3);
+        ctx.textAlign = 'start';
       }
     });
   }
