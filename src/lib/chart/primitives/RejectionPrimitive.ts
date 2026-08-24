@@ -60,9 +60,10 @@ class RejectionPaneRenderer implements ISeriesPrimitivePaneRenderer {
         if (endX <= startX) continue;
 
         const isBullish = r.type === 'bullish';
-        // 浅蓝(下影/支撑)/ 浅橙(上影/阻力)
-        const lineColor = isBullish ? 'rgba(96, 165, 250, 0.9)' : 'rgba(251, 146, 60, 0.9)';
-        const textColor = isBullish ? 'rgba(96, 165, 250, 0.95)' : 'rgba(251, 146, 60, 0.95)';
+        // 看涨:浅蓝(下影/支撑 S)
+        // 看跌:金色(上影/阻力 R)— 在红色 FVG 背景里更显眼
+        const lineColor = isBullish ? 'rgba(96, 165, 250, 0.9)' : 'rgba(234, 179, 8, 0.95)';
+        const textColor = isBullish ? 'rgba(96, 165, 250, 0.95)' : 'rgba(234, 179, 8, 1)';
 
         // 中线射线(虚线)
         ctx.beginPath();
