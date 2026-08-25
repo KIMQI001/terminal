@@ -19,6 +19,17 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
+/// 把 unix epoch 秒格式化成北京时间(UTC+8)"YYYY-MM-DD HH:MM"
+fn format_beijing_time(secs: i64) -> String {
+    use chrono::TimeZone;
+    chrono::FixedOffset::east_opt(8 * 3600)
+        .unwrap()
+        .timestamp_opt(secs, 0)
+        .single()
+        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| "?".to_string())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // 初始化日志
@@ -88,11 +99,12 @@ async fn main() -> anyhow::Result<()> {
                 let arrow = if w.side == "bullish" { "↑" } else { "↓" };
                 let side_label = if w.side == "bullish" { "支撑 S" } else { "阻力 R" };
                 let reversal_tag = if w.reversal { " 🔄反转" } else { "" };
+                let time_str = format_beijing_time(w.time);
                 format!(
-                    "\n\n### 📌 历史最近一个 wick\n\n- **方向**: {} {}{}\n- **level**: ${:.2}\n- **zone**: [${:.2}, ${:.2}]\n- **wick 比例**: {:.0}%\n- **层级**: {}\n- **time**: {}",
+                    "\n\n### 📌 历史最近一个 wick\n\n- **方向**: {} {}{}\n- **level**: ${:.2}\n- **zone**: [${:.2}, ${:.2}]\n- **wick 比例**: {:.0}%\n- **层级**: {}\n- **time(北京时间)**: {}",
                     arrow, side_label, reversal_tag,
                     w.level, w.zone_low, w.zone_high,
-                    w.ratio * 100.0, w.tier, w.time
+                    w.ratio * 100.0, w.tier, time_str
                 )
             }
             None => "\n\n### 📌 历史回溯中未发现 wick SR".to_string(),
