@@ -109,8 +109,6 @@ pub fn detect_wick_sr(
             // 阳 K:close > open
             let is_bullish_candle = c.close > c.open;
             let body_size = (c.close - c.open).abs();
-            let body_size = (c.close - c.open).abs();
-            let range = c.high - c.low;
             let small_body = body_size < options.body_max_usd;  // 实体 < 阈值(必要条件)
             let small_range = range < options.range_max_usd;  // 整体小(保险,大 K 实体小但 wick 不显著)
             // R 在阳 K(close>open)= K 收阳 → 卖方没把 K 打回 → 反转信号
@@ -118,7 +116,7 @@ pub fn detect_wick_sr(
             // + 十字星(实体+整体都小)
             let directional_match = is_bullish_candle;  // R 在阳 K
             let is_doji = small_body && small_range;
-            let mut high_quality = directional_match || is_doji;
+            let high_quality = directional_match || is_doji;
             results.push(WickSR {
                 time: c.time,
                 side: "bearish".to_string(),
@@ -143,7 +141,7 @@ pub fn detect_wick_sr(
             let is_bearish_candle = c.close < c.open;
             let body_size = (c.close - c.open).abs();
             let small_body = body_size < options.body_max_usd;
-            let mut high_quality = is_bearish_candle || small_body;  // S 阴 K 或 十字星 = 高等级
+            let high_quality = is_bearish_candle || small_body;  // S 阴 K 或 十字星 = 高等级
             results.push(WickSR {
                 time: c.time,
                 side: "bullish".to_string(),
@@ -225,7 +223,7 @@ pub fn latest_fvg_direction(
     let last_idx = candles.len() - 1;
     for i in (2..last_idx).rev() {
         let c1 = &candles[i - 2];
-        let c2 = &candles[i - 1];
+        let _c2 = &candles[i - 1];  // 中间 K:FVG 三K结构只取 c1/c3
         let c3 = &candles[i];
         let range_c3_low_to_c1_high = c3.low - c1.high;
         let range_c1_low_to_c3_high = c1.low - c3.high;

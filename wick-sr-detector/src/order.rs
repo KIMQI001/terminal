@@ -1,6 +1,5 @@
 //! Binance 下单模块(简化版 — 限价单 + 止损 + 止盈 Algo 单)
 
-use crate::types::Candle;
 use anyhow::{anyhow, Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -11,7 +10,9 @@ use tracing::{info, warn};
 #[derive(Debug, Clone)]
 pub struct OrderResult {
     pub order_id: String,
+    #[allow(dead_code)]
     pub stop_algo_id: String,
+    #[allow(dead_code)]
     pub tp_algo_id: String,
     pub entry_price: f64,
     pub quantity: f64,
@@ -65,8 +66,8 @@ pub async fn place_order_with_sl_tp(
 
     #[derive(Serialize, Deserialize)]
     struct BinanceResp {
-        #[serde(default)]
-        orderId: u64,
+        #[serde(default, rename = "orderId")]
+        order_id: u64,
         #[serde(default)]
         code: i32,
         #[serde(default)]
@@ -83,10 +84,10 @@ pub async fn place_order_with_sl_tp(
         .await
         .context("parse entry order")?;
 
-    if entry_resp.code != 0 && entry_resp.orderId == 0 {
+    if entry_resp.code != 0 && entry_resp.order_id == 0 {
         return Err(anyhow!("entry order failed: code={} msg={}", entry_resp.code, entry_resp.msg));
     }
-    info!("[Order] entry OK orderId={}", entry_resp.orderId);
+    info!("[Order] entry OK orderId={}", entry_resp.order_id);
 
     // 2) 止损 Algo(STOP_MARKET)— 价到 stop_loss 触发市价
     let stop_side = if side == "BUY" { "SELL" } else { "BUY" };
@@ -107,10 +108,10 @@ pub async fn place_order_with_sl_tp(
         .json()
         .await
         .context("parse stop loss")?;
-    if sl_resp.code != 0 && sl_resp.orderId == 0 {
+    if sl_resp.code != 0 && sl_resp.order_id == 0 {
         warn!("[Order] stop loss failed: code={} msg={}", sl_resp.code, sl_resp.msg);
     } else {
-        info!("[Order] stop loss OK algoId={}", sl_resp.orderId);
+        info!("[Order] stop loss OK algoId={}", sl_resp.order_id);
     }
 
     // 3) 止盈 Algo(TAKE_PROFIT_MARKET)
@@ -131,27 +132,25 @@ pub async fn place_order_with_sl_tp(
         .json()
         .await
         .context("parse take profit")?;
-    if tp_resp.code != 0 && tp_resp.orderId == 0 {
+    if tp_resp.code != 0 && tp_resp.order_id == 0 {
         warn!("[Order] take profit failed: code={} msg={}", tp_resp.code, tp_resp.msg);
     } else {
-        info!("[Order] take profit OK algoId={}", tp_resp.orderId);
+        info!("[Order] take profit OK algoId={}", tp_resp.order_id);
     }
 
     Ok(OrderResult {
-        order_id: entry_resp.orderId.to_string(),
-        stop_algo_id: sl_resp.orderId.to_string(),
-        tp_algo_id: tp_resp.orderId.to_string(),
+        order_id: entry_resp.order_id.to_string(),
+        stop_algo_id: sl_resp.order_id.to_string(),
+        tp_algo_id: tp_resp.order_id.to_string(),
         entry_price,
         quantity,
     })
 }
 
 /// 计算下单数量(基于账户余额 + 仓位百分比 + 杠杆)
-pub async fn calculate_quantity(
-    api_key: &str,
-    api_secret: &str,
-    base_url: &str,
-    symbol: &str,
+/// 简化版:quantity = (balance * pct) / entry_price,未考虑杠杆 —
+/// USDT 永续默认 20x,如需 1x 在币安手动设置
+pub fn calculate_quantity(
     wallet_balance: f64,
     position_pct: f64,
     entry_price: f64,
@@ -159,8 +158,6 @@ pub async fn calculate_quantity(
     if wallet_balance <= 0.0 || entry_price <= 0.0 {
         return 0.0;
     }
-    // 简化为 quantity = (balance * pct) / entry_price
-    // 没考虑杠杆 — 因为 USDT 永续默认 20x,如果你想 1x,在币安设置
     (wallet_balance * position_pct) / entry_price
 }
 
@@ -183,7 +180,6 @@ pub async fn get_account_balance(
     let url = format!("{}/fapi/v2/account?{}&signature={}", base_url, qs, sig);
 
     let client = Client::new();
-    use anyhow::Context;
     let resp: serde_json::Value = match client
         .get(&url)
         .header("X-MBX-APIKEY", api_key)
@@ -213,6 +209,7 @@ pub async fn get_account_balance(
 }
 
 /// 取消 symbol 的所有挂单(简化,API 不带 algoType)
+#[allow(dead_code)]
 pub async fn cancel_all_orders(api_key: &str, api_secret: &str, base_url: &str, symbol: &str) -> Result<()> {
     if api_key.is_empty() || api_secret.is_empty() {
         return Ok(());
