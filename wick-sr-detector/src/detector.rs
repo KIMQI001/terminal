@@ -19,6 +19,8 @@ pub struct DetectOptions {
     pub wick_ratio: f64,
     /// 反转 wick 判定的回溯 K 根数(默认 10)
     pub reversal_lookback: i64,
+    /// 高等级 wick(十字星)的实体最大 USD 值(默认 50)
+    pub body_max_usd: f64,
 }
 
 impl Default for DetectOptions {
@@ -26,6 +28,7 @@ impl Default for DetectOptions {
         Self {
             wick_ratio: 0.4,
             reversal_lookback: 10,
+            body_max_usd: 50.0,
         }
     }
 }
@@ -102,7 +105,9 @@ pub fn detect_wick_sr(
             let reversal = is_reversal_wick(c, candles, "bearish", options.reversal_lookback);
             // 阳 K:close > open
             let is_bullish_candle = c.close > c.open;
-            let high_quality = is_bullish_candle;  // R 在阳 K = 高等级
+            let body_size = (c.close - c.open).abs();
+            let small_body = body_size < options.body_max_usd;  // 十字星(实体 < 阈值)
+            let mut high_quality = is_bullish_candle || small_body;  // R 阳 K 或 十字星 = 高等级
             results.push(WickSR {
                 time: c.time,
                 side: "bearish".to_string(),
@@ -125,7 +130,9 @@ pub fn detect_wick_sr(
             let reversal = is_reversal_wick(c, candles, "bullish", options.reversal_lookback);
             // 阴 K:close < open
             let is_bearish_candle = c.close < c.open;
-            let high_quality = is_bearish_candle;  // S 在阴 K = 高等级
+            let body_size = (c.close - c.open).abs();
+            let small_body = body_size < options.body_max_usd;
+            let mut high_quality = is_bearish_candle || small_body;  // S 阴 K 或 十字星 = 高等级
             results.push(WickSR {
                 time: c.time,
                 side: "bullish".to_string(),
