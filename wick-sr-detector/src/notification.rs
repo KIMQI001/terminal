@@ -40,8 +40,9 @@ pub async fn send_dingtalk(config: &NotifyConfig, title: &str, text: &str) -> Re
         mac.update(string_to_sign.as_bytes());
         let result = mac.finalize();
         let sign_bytes = result.into_bytes();
-        let hex_sign = hex::encode(&sign_bytes);
-        let sign = urlencoding::encode(&hex_sign);
+        use base64::Engine;
+        let b64_sign = base64::engine::general_purpose::STANDARD.encode(&sign_bytes);
+        let sign = urlencoding::encode(&b64_sign);
         format!("{}&timestamp={}&sign={}", webhook, ts, sign)
     } else {
         webhook.clone()
