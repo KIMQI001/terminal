@@ -117,7 +117,7 @@ where
                     match serde_json::from_str::<WsKlineMsg>(&text) {
                         Ok(parsed) => {
                             if let Some(k) = parsed.k {
-                                info!("kline: t={} O={} H={} L={} C={} V={} x={}", k.t, k.o, k.h, k.l, k.c, k.v, k.x);
+                                debug!("kline: t={} O={} H={} L={} C={} V={} x={}", k.t, k.o, k.h, k.l, k.c, k.v, k.x);
                                 on_candle(Candle {
                                     time: k.t / 1000,
                                     open: k.o.parse().unwrap_or(0.0),
