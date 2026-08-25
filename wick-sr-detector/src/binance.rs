@@ -89,9 +89,10 @@ pub async fn fetch_klines(
 }
 
 /// 实时 WS 接收单一 K 线更新
+/// 回调 `is_closed` 为 true 表示这根 K 已收盘(才进行 wick 检测)
 pub async fn stream_klines<F, Fut>(config: &BinanceConfig, mut on_candle: F) -> Result<()>
 where
-    F: FnMut(Candle) -> Fut,
+    F: FnMut(Candle, bool) -> Fut,
     Fut: std::future::Future<Output = ()> + Send,
 {
     let url = config.ws_url();
@@ -120,7 +121,7 @@ where
                                 low: k.l.parse().unwrap_or(0.0),
                                 close: k.c.parse().unwrap_or(0.0),
                                 volume: k.v.parse().unwrap_or(0.0),
-                            });
+                            }, k.x);
                         }
                     }
                 }

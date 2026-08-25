@@ -133,7 +133,7 @@ async fn main() -> anyhow::Result<()> {
     let detect_options_clone = detect_options.clone();
     let symbol = binance_config.symbol.clone();
 
-    binance::stream_klines(&binance_config, move |candle| {
+    binance::stream_klines(&binance_config, move |candle, is_closed| {
         let candles = candles_clone.clone();
         let reported = reported_clone.clone();
         let notify = notify_clone.clone();
@@ -141,23 +141,25 @@ async fn main() -> anyhow::Result<()> {
         let symbol = symbol.clone();
         async move {
             // 更新最后一根 K(收盘就 append,进行中就 update 最后一根)
-            let is_closed = {
+            {
                 let mut c = candles.lock().await;
                 if let Some(last) = c.last_mut() {
                     if last.time == candle.time {
                         *last = candle.clone();
-                        true   // 替换最后一根(可能还在形成)
                     } else {
                         c.push(candle.clone());
-                        false  // 新 K,可能没收盘
                     }
                 } else {
                     c.push(candle.clone());
-                    false
                 }
             };
 
-            // 简化:每根 K 到达都检测一次(不分 close)
+            // 只在 K close 时检测 + 报警(wick 必须 close 完才算)
+            if !is_closed {
+                info!("candle update time={} (not closed, skip detection)", candle.time);
+                return;
+            }
+
             let c_snapshot = candles.lock().await.clone();
             let signals = detect_wick_sr(&c_snapshot, &[], &opts);
 
