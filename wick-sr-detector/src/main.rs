@@ -75,6 +75,11 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // 启动时如果配置了 DINGTALK_WEBHOOK 或 Telegram,发个启动通知(含最近的 wick)
+    info!(
+        "notify config: dingtalk_webhook={}, telegram_token={}",
+        notify_config.dingtalk_webhook.is_some(),
+        notify_config.telegram_token.is_some()
+    );
     if notify_config.dingtalk_webhook.is_some() || notify_config.telegram_token.is_some() {
         // 找最近一个 wick(按 time 倒序)
         let latest = signals.iter().max_by_key(|s| s.time);
@@ -102,7 +107,10 @@ async fn main() -> anyhow::Result<()> {
             lookback, detect_options.wick_ratio,
             detect_options.reversal_lookback, wick_section
         );
-        let _ = broadcast(&notify_config, "wick-sr-detector 启动", &body).await;
+        match broadcast(&notify_config, "wick-sr-detector 启动", &body).await {
+            Ok(()) => info!("startup notification sent"),
+            Err(e) => error!("startup notification failed: {:?}", e),
+        }
     }
 
     // WS 实时 K 线
