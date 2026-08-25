@@ -31,7 +31,7 @@ impl Default for DetectOptions {
             wick_ratio: 0.4,
             reversal_lookback: 10,
             body_max_usd: 50.0,
-            range_max_usd: 200.0,
+            range_max_usd: 250.0,
         }
     }
 }
