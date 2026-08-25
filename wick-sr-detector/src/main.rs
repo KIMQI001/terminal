@@ -209,7 +209,7 @@ async fn main() -> anyhow::Result<()> {
             for s in signals {
                 // 方向过滤
                 let side_is_bullish = s.side == "bullish";
-                if (side_is_bullish && !want_bullish) || (!side_is_bullish && !want_bearish) {
+                if !s.reversal && ((side_is_bullish && !want_bullish) || (!side_is_bullish && !want_bearish)) {
                     info!("filtered by direction: {} (long_only={})", s.side, long_only);
                     continue;
                 }
