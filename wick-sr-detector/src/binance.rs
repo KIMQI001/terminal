@@ -34,7 +34,7 @@ impl BinanceConfig {
 
     fn ws_url(&self) -> String {
         format!(
-            "wss://fstream.binance.com/ws/{}@kline_{}",
+            "wss://fstream.binance.com/ws/{}@continuousKline_{}",
             self.symbol.to_lowercase(),
             self.timeframe
         )
