@@ -54,8 +54,22 @@ pub async fn send_dingtalk(config: &NotifyConfig, title: &str, text: &str) -> Re
     });
     let resp = client.post(&url).json(&body).send().await
         .context("dingtalk send")?;
-    if !resp.status().is_success() {
-        return Err(anyhow::Error::msg(format!("dingtalk failed: {}", resp.status())));
+    let status = resp.status();
+    let body_text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(anyhow::Error::msg(format!(
+            "dingtalk failed: status={}, body={}",
+            status, body_text
+        )));
+    }
+    // 钉钉 200 但 errcode != 0 也会"成功发送但不显示"
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body_text) {
+        if v.get("errcode").and_then(|x| x.as_i64()) != Some(0) {
+            return Err(anyhow::Error::msg(format!(
+                "dingtalk returned ok but errcode != 0: {}",
+                body_text
+            )));
+        }
     }
     Ok(())
 }
