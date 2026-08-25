@@ -112,6 +112,7 @@ where
         while let Some(msg) = ws.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
+                    debug!("ws msg: {} bytes", text.len());
                     if let Ok(parsed) = serde_json::from_str::<WsKlineMsg>(&text) {
                         if let Some(k) = parsed.k {
                             on_candle(Candle {
