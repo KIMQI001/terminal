@@ -213,6 +213,91 @@ pub fn detect_wick_sr(
     results
 }
 
+/// 检测**最新一根 K**(candles 最后一根)的 wick SR zones ——
+/// 历史 K 不再处理,只针对刚 close 的这根 K。
+///
+/// reversal 判定仍用 `candles` 全数组:is_reversal_wick 找 candle.time 的
+/// idx,自动只取 idx - lookback .. idx 的最近 N 根(默认 10)。
+///
+/// 返回 0/1/2 个 wick(上影 R + 下影 S 可能同时命中)。
+/// 主循环在 main.rs 收到此 signals 后,只对最新 K 做报警 / 下单。
+pub fn detect_wick_sr_for_last(
+    candles: &[Candle],
+    options: &DetectOptions,
+) -> Vec<WickSR> {
+    if candles.len() < 3 {
+        return vec![];
+    }
+    let new_idx = candles.len() - 1;
+    let c = &candles[new_idx];
+    let body_top = c.open.max(c.close);
+    let body_bottom = c.open.min(c.close);
+    let range = c.high - c.low;
+    if range <= 0.0 {
+        return vec![];
+    }
+
+    let upper_wick = c.high - body_top;
+    let lower_wick = body_bottom - c.low;
+    let upper_ratio = upper_wick / range;
+    let lower_ratio = lower_wick / range;
+
+    let mut results = Vec::new();
+
+    // 上影(阻力,bearish)
+    if upper_ratio >= options.wick_ratio {
+        let level = (body_top + c.high) / 2.0;
+        let zone_low = body_top;
+        let zone_high = c.high;
+        let reversal = is_reversal_wick(c, candles, "bearish", options.reversal_lookback);
+        let is_bullish_candle = c.close > c.open;
+        let body_size = (c.close - c.open).abs();
+        let small_body = body_size < options.body_max_usd;
+        let small_range = range < options.range_max_usd;
+        let directional_match = is_bullish_candle;
+        let is_doji = small_body && small_range;
+        let high_quality = directional_match || is_doji;
+        results.push(WickSR {
+            time: c.time,
+            side: "bearish".to_string(),
+            level,
+            zone_low,
+            zone_high,
+            ratio: upper_ratio,
+            tier: 1,
+            index: new_idx as i64,
+            reversal,
+            high_quality,
+        });
+    }
+
+    // 下影(支撑,bullish)
+    if lower_ratio >= options.wick_ratio {
+        let level = (c.low + body_bottom) / 2.0;
+        let zone_low = c.low;
+        let zone_high = body_bottom;
+        let reversal = is_reversal_wick(c, candles, "bullish", options.reversal_lookback);
+        let is_bearish_candle = c.close < c.open;
+        let body_size = (c.close - c.open).abs();
+        let small_body = body_size < options.body_max_usd;
+        let high_quality = is_bearish_candle || small_body;
+        results.push(WickSR {
+            time: c.time,
+            side: "bullish".to_string(),
+            level,
+            zone_low,
+            zone_high,
+            ratio: lower_ratio,
+            tier: 1,
+            index: new_idx as i64,
+            reversal,
+            high_quality,
+        });
+    }
+
+    results
+}
+
 /// 检测最近一个 FVG 的方向(用 K 线 + FVG 三档字段判断)
 /// 简化:扫最后 LOOKBACK_FVG 根 K 线,找最近的 bullish/bearish FVG
 ///

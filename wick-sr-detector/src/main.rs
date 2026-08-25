@@ -215,7 +215,8 @@ async fn main() -> anyhow::Result<()> {
             }
 
             let c_snapshot = candles.lock().await.clone();
-            let signals = detect_wick_sr(&c_snapshot, &[], &opts);
+            // 只检测最新一根 K 的 wick(不再扫历史)— 历史 wick 会在前一根 K close 时已经处理过
+            let signals = detector::detect_wick_sr_for_last(&c_snapshot, &opts);
 
             // 方向过滤:long 趋势只报 S(支撑),short 趋势只报 R(阻力)
             // - 最近 FVG 看涨 → long → true
