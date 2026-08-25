@@ -7,6 +7,7 @@
 //! 4. 新触发的 wick SR 通过钉钉/Telegram 报警
 
 mod binance;
+mod order;
 mod detector;
 mod notification;
 mod types;
@@ -14,6 +15,7 @@ mod types;
 use binance::BinanceConfig;
 use detector::{detect_wick_sr, DetectOptions};
 use notification::{broadcast, NotifyConfig};
+use order::{calculate_quantity, get_account_balance, place_order_with_sl_tp};
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
