@@ -284,6 +284,8 @@ async fn main() -> anyhow::Result<()> {
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(50.0);
                     let take_profit_rr: f64 = std::env::var("TAKE_PROFIT_RR")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
+                    let take_profit_usd: f64 = std::env::var("TAKE_PROFIT_USD")
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
                     let max_orders: u64 = std::env::var("MAX_OPEN_ORDERS")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(2);
 
@@ -303,10 +305,11 @@ async fn main() -> anyhow::Result<()> {
 
                     // 止盈 = 入场 ± 风险 * RR
                     let risk = (entry_price - stop_loss).abs();
+                    // 止盈:固定 USD 距离(默认 200,跟止损对称 = 1:1 RR)
                     let take_profit = if s.side == "bullish" {
-                        entry_price + risk * take_profit_rr
+                        entry_price + take_profit_usd
                     } else {
-                        entry_price - risk * take_profit_rr
+                        entry_price - take_profit_usd
                     };
 
                     // 计算数量(基于账户余额 * 仓位百分比)
