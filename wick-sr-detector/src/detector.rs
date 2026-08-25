@@ -113,8 +113,9 @@ pub fn detect_wick_sr(
             let range = c.high - c.low;
             let small_body = body_size < options.body_max_usd;  // 实体 < 阈值(必要条件)
             let small_range = range < options.range_max_usd;  // 整体小(保险,大 K 实体小但 wick 不显著)
-            // 方向匹配:R(上影/阻力)在阳 K = 卖方没压住(收不回原方向)
-            //              + 十字星(实体+整体都小)
+            // R 在阳 K(close>open)= K 收阳 → 卖方没把 K 打回 → 反转信号
+            // R 在阴 K = 普通 wick(卖方压住)
+            // + 十字星(实体+整体都小)
             let directional_match = is_bullish_candle;  // R 在阳 K
             let is_doji = small_body && small_range;
             let mut high_quality = directional_match || is_doji;
