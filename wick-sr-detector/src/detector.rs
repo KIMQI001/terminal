@@ -94,12 +94,15 @@ pub fn detect_wick_sr(
         let upper_ratio = upper_wick / range;
         let lower_ratio = lower_wick / range;
 
-        // 上影(阻力,bearish)
+        // 上影(阻力,bearish) — R 在阳 K = 高等级(卖方没压住,收盘价入场)
         if upper_ratio >= options.wick_ratio {
             let level = (body_top + c.high) / 2.0;
             let zone_low = body_top;
             let zone_high = c.high;
             let reversal = is_reversal_wick(c, candles, "bearish", options.reversal_lookback);
+            // 阳 K:close > open
+            let is_bullish_candle = c.close > c.open;
+            let high_quality = is_bullish_candle;  // R 在阳 K = 高等级
             results.push(WickSR {
                 time: c.time,
                 side: "bearish".to_string(),
@@ -110,15 +113,19 @@ pub fn detect_wick_sr(
                 tier: 1,
                 index: i as i64,
                 reversal,
+                high_quality,
             });
         }
 
-        // 下影(支撑,bullish)
+        // 下影(支撑,bullish) — S 在阴 K = 高等级(买方没接住,收盘价入场)
         if lower_ratio >= options.wick_ratio {
             let level = (c.low + body_bottom) / 2.0;
             let zone_low = c.low;
             let zone_high = body_bottom;
             let reversal = is_reversal_wick(c, candles, "bullish", options.reversal_lookback);
+            // 阴 K:close < open
+            let is_bearish_candle = c.close < c.open;
+            let high_quality = is_bearish_candle;  // S 在阴 K = 高等级
             results.push(WickSR {
                 time: c.time,
                 side: "bullish".to_string(),
@@ -129,6 +136,7 @@ pub fn detect_wick_sr(
                 tier: 1,
                 index: i as i64,
                 reversal,
+                high_quality,
             });
         }
     }

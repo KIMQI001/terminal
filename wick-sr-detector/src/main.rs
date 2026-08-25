@@ -99,10 +99,11 @@ async fn main() -> anyhow::Result<()> {
                 let arrow = if w.side == "bullish" { "↑" } else { "↓" };
                 let side_label = if w.side == "bullish" { "支撑 S" } else { "阻力 R" };
                 let reversal_tag = if w.reversal { " 🔄反转" } else { "" };
+                let hq_tag = if w.high_quality { " ⭐高等级" } else { "" };
                 let time_str = format_beijing_time(w.time);
                 format!(
-                    "\n\n### 📌 历史最近一个 wick\n\n- **方向**: {} {}{}\n- **level**: ${:.2}\n- **zone**: [${:.2}, ${:.2}]\n- **wick 比例**: {:.0}%\n- **层级**: {}\n- **time(北京时间)**: {}",
-                    arrow, side_label, reversal_tag,
+                    "\n\n### 📌 历史最近一个 wick\n\n- **方向**: {} {}{}{}\n- **level**: ${:.2}\n- **zone**: [${:.2}, ${:.2}]\n- **wick 比例**: {:.0}%\n- **层级**: {}\n- **time(北京时间)**: {}",
+                    arrow, side_label, reversal_tag, hq_tag,
                     w.level, w.zone_low, w.zone_high,
                     w.ratio * 100.0, w.tier, time_str
                 )
@@ -190,23 +191,35 @@ async fn main() -> anyhow::Result<()> {
 
                 let arrow = if s.side == "bullish" { "↑" } else { "↓" };
                 let side_label = if s.side == "bullish" { "支撑 S" } else { "阻力 R" };
-                // 反转 wick 单独标注
                 let reversal_tag = if s.reversal { " 🔄反转" } else { "" };
-                let title = format!("{arrow} wick {} ({} tier={}){}", symbol, side_label, s.tier, reversal_tag);
+                let hq_tag = if s.high_quality { " ⭐高等级" } else { "" };
+                let title = format!(
+                    "{arrow} wick {} ({} tier={}){}{}",
+                    symbol, side_label, s.tier, reversal_tag, hq_tag
+                );
                 let reversal_line = if s.reversal {
                     format!("\n- **反转 wick**: K 线 high/low 是回溯 {} 根的极值(突破前高 / 跌破前低)\n", opts.reversal_lookback)
                 } else {
                     String::new()
                 };
+                let hq_line = if s.high_quality {
+                    let candle_type = if s.side == "bullish" { "阴 K" } else { "阳 K" };
+                    format!(
+                        "\n- **高等级信号**: R 在阳 K / S 在阴 K({})— 收不回原方向 → 推荐 **收盘价**(${:.2})入场\n",
+                        candle_type, s.level
+                    )
+                } else {
+                    String::new()
+                };
                 let body = format!(
-                    "### 📐 wick SR 触发{}\n\n\
+                    "### 📐 wick SR 触发{}{}{}\n\n\
 - **交易对**: {}\n\
 - **方向**: {} ({} )\n\
 - **level**: ${:.2}\n\
 - **zone**: [${:.2}, ${:.2}]\n\
 - **wick 比例**: {:.0}%\n\
-- **层级**: {}{}",
-                    reversal_tag,
+- **层级**: {}{}{}",
+                    reversal_tag, hq_tag, "".to_string(),
                     symbol,
                     side_label,
                     s.side,
@@ -214,7 +227,8 @@ async fn main() -> anyhow::Result<()> {
                     s.zone_low, s.zone_high,
                     s.ratio * 100.0,
                     s.tier,
-                    reversal_line
+                    reversal_line,
+                    hq_line
                 );
                 warn!("new wick SR: {}/{} @ {}", s.side, s.level, s.time);
                 if let Err(e) = broadcast(&notify, &title, &body).await {

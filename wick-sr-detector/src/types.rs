@@ -44,4 +44,6 @@ pub struct WickSR {
     pub index: i64,
     /// 是否反转 wick:R 突破前高(看跌反转) / S 跌破前低(看涨反转)
     pub reversal: bool,
+    /// 高等级信号:R 在阳 K / S 在阴 K(收不回 → 收盘价入场)
+    pub high_quality: bool,
 }
