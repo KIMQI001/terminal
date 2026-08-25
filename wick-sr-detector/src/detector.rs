@@ -1,0 +1,177 @@
+//! Wick SR 检测器
+//!
+// 长 wick 判定(参考前端 src/lib/chart/indicators/rejection.ts):
+// - range = high - low
+//! - 上影(阻力):(high - bodyTop) / range >= wick_ratio(默认 0.4)
+//! - 下影(支撑):(bodyBottom - low) / range >= wick_ratio
+//! - 一根 K 可以同时给两个候选(长腿十字)
+//!
+//! actionable level:
+//! - 阻力:level = (bodyTop + high) / 2, zone = [bodyTop, high]
+//! - 支撑:level = (low + bodyBottom) / 2, zone = [low, bodyBottom]
+//!
+//! tier:看上一根同方向 wick,同方向 +1,不同方向 reset 到 1
+
+use crate::types::{Candle, SwingPoint, WickSR};
+
+#[derive(Debug, Clone)]
+pub struct DetectOptions {
+    pub wick_ratio: f64,
+}
+
+impl Default for DetectOptions {
+    fn default() -> Self {
+        Self { wick_ratio: 0.4 }
+    }
+}
+
+/// 检测 wick SR zones(对应 K 索引 i,会跳过最后一根 — 还在形成)
+pub fn detect_wick_sr(
+    candles: &[Candle],
+    swing_points: &[SwingPoint],
+    options: &DetectOptions,
+) -> Vec<WickSR> {
+    if candles.len() < 3 {
+        return vec![];
+    }
+
+    let mut results = Vec::new();
+    let last_idx = candles.len() - 1; // 跳过最后一根(进行中)
+    for i in 2..last_idx {
+        let c = &candles[i];
+        let body_top = c.open.max(c.close);
+        let body_bottom = c.open.min(c.close);
+        let range = c.high - c.low;
+        if range <= 0.0 {
+            continue;
+        }
+
+        let upper_wick = c.high - body_top;
+        let lower_wick = body_bottom - c.low;
+        let upper_ratio = upper_wick / range;
+        let lower_ratio = lower_wick / range;
+
+        // 上影(阻力,bearish)
+        if upper_ratio >= options.wick_ratio {
+            let level = (body_top + c.high) / 2.0;
+            let zone_low = body_top;
+            let zone_high = c.high;
+            results.push(WickSR {
+                time: c.time,
+                side: "bearish".to_string(),
+                level,
+                zone_low,
+                zone_high,
+                ratio: upper_ratio,
+                tier: 1,
+                index: i as i64,
+            });
+        }
+
+        // 下影(支撑,bullish)
+        if lower_ratio >= options.wick_ratio {
+            let level = (c.low + body_bottom) / 2.0;
+            let zone_low = c.low;
+            let zone_high = body_bottom;
+            results.push(WickSR {
+                time: c.time,
+                side: "bullish".to_string(),
+                level,
+                zone_low,
+                zone_high,
+                ratio: lower_ratio,
+                tier: 1,
+                index: i as i64,
+            });
+        }
+    }
+
+    // 算 tier:看 live 数组里前一个同方向 wick,跨过同 K 内的另一个 wick,
+    // 跨过已擦除(is_tested = true)— 思路同前端,简化为按方向连续 +1
+    // (这里是后端,detection 在 K close 后跑,擦除由前端处理)
+    for i in 0..results.len() {
+        if i == 0 {
+            results[i].tier = 1;
+            continue;
+        }
+        // 跨过同一根 K 内的另一个 wick + 跨过 swing point 严格分类的 HH/LL
+        // 简化:找前一个同方向 wick,跨过同 K + 同 index 的另一侧
+        let want_type = if results[i].side == "bullish" {
+            "bullish"
+        } else {
+            "bearish"
+        };
+        let mut prev_tier = 0;
+        let mut found = false;
+        for k in (0..i).rev() {
+            if results[k].side != want_type {
+                continue;
+            }
+            // 跨过同根 K(不算)
+            if results[k].index == results[i].index {
+                continue;
+            }
+            // 不同方向或新段 → 重置为 1(再找更早的)
+            // 简化:同一方向连续 +1,不同方向 reset 到 1
+            prev_tier = results[k].tier;
+            found = true;
+            break;
+        }
+        // 检测中间是否有 strict HH/LL 段切换(可选)
+        let want_class = if want_type == "bullish" { "LL" } else { "HH" };
+        let has_new_ref = swing_points.iter().any(|sp| {
+            sp.classification.as_deref() == Some(want_class)
+                && sp.index > if found { results[i - 1].index } else { 0 }
+                && sp.index < results[i].index
+        });
+        if has_new_ref {
+            results[i].tier = 1;
+        } else if found {
+            results[i].tier = prev_tier + 1;
+        } else {
+            results[i].tier = 1;
+        }
+    }
+
+    results
+}
+
+/// 检测最近一个 FVG 的方向(用 K 线 + FVG 三档字段判断)
+/// 简化:扫最后 LOOKBACK_FVG 根 K 线,找最近的 bullish/bearish FVG
+///
+/// 返回 `Some(true)` = 最近 FVG 是看涨(long 趋势) / `Some(false)` = 看跌
+/// `None` = 没找到 FVG(无趋势判断)
+pub fn latest_fvg_direction(
+    candles: &[crate::types::Candle],
+    fvg_size_ratio: f64,  // gap / prev.high(看涨)或 / prev.low(看跌)
+) -> Option<bool> {
+    if candles.len() < 3 {
+        return None;
+    }
+    // 从右往左找最近一个 FVG
+    let last_idx = candles.len() - 1;
+    for i in (2..last_idx).rev() {
+        let c1 = &candles[i - 2];
+        let c2 = &candles[i - 1];
+        let c3 = &candles[i];
+        let range_c3_low_to_c1_high = c3.low - c1.high;
+        let range_c1_low_to_c3_high = c1.low - c3.high;
+
+        // 看涨 FVG:gap 在 c3.low - c1.high,需 > 0
+        if range_c3_low_to_c1_high > 0.0
+            && c1.high > 0.0
+            && (range_c3_low_to_c1_high / c1.high) * 100.0 >= fvg_size_ratio
+        {
+            return Some(true);
+        }
+
+        // 看跌 FVG:gap 在 c1.low - c3.high,需 > 0
+        if range_c1_low_to_c3_high > 0.0
+            && c1.low > 0.0
+            && (range_c1_low_to_c3_high / c1.low) * 100.0 >= fvg_size_ratio
+        {
+            return Some(false);
+        }
+    }
+    None
+}
