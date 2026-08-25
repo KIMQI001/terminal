@@ -15,7 +15,7 @@ mod types;
 use binance::BinanceConfig;
 use detector::{detect_wick_sr, DetectOptions};
 use notification::{broadcast, NotifyConfig};
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
@@ -44,10 +44,11 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(300);
-    let _cooldown_min = std::env::var("ALERT_COOLDOWN_MIN")
+    let cooldown_min: u64 = std::env::var("ALERT_COOLDOWN_MIN")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(15);
+    let cooldown_secs: i64 = (cooldown_min as i64) * 60;
     let detect_options = DetectOptions {
         wick_ratio: std::env::var("WICK_RATIO")
             .ok()
@@ -86,7 +87,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // 初始检测 + 报警
-    let reported: Arc<Mutex<HashSet<(i64, String)>>> = Arc::new(Mutex::new(HashSet::new()));
+    // reported: HashMap<(candle_time, side), 报警 unix 秒>
+    // 同一信号在 cooldown_secs 内不重复报警 + 下单
+    let reported: Arc<Mutex<HashMap<(i64, String), i64>>> = Arc::new(Mutex::new(HashMap::new()));
     let signals: Vec<crate::types::WickSR> = {
         let c = candles.lock().await;
         let sigs = detect_wick_sr(&c, &[], &detect_options);
@@ -235,6 +238,7 @@ async fn main() -> anyhow::Result<()> {
                 long_only
             );
             let mut reported_lock = reported.lock().await;
+            let now = chrono::Utc::now().timestamp();
             for s in signals {
                 // 方向过滤
                 let side_is_bullish = s.side == "bullish";
@@ -243,11 +247,20 @@ async fn main() -> anyhow::Result<()> {
                     continue;
                 }
                 let key = (s.time, s.side.clone());
-                if reported_lock.contains(&key) {
-                    continue;
+                // 冷却:距上次报警不足 cooldown_secs → 跳过
+                // (cooldown_secs == 0 时 now - last_ts >= 0 恒成立 → 等效关闭冷却)
+                match reported_lock.get(&key) {
+                    Some(&last_ts) if now - last_ts < cooldown_secs => {
+                        debug!(
+                            "cooldown: skip alert for key={:?} (last={}, now={}, cooldown_secs={})",
+                            key, last_ts, now, cooldown_secs
+                        );
+                        continue;
+                    }
+                    _ => {
+                        reported_lock.insert(key, now);
+                    }
                 }
-                // 冷却:同一根 K 同侧已报过 → 跳过
-                reported_lock.insert(key);
 
                 let arrow = if s.side == "bullish" { "↑" } else { "↓" };
                 let side_label = if s.side == "bullish" { "支撑 S" } else { "阻力 R" };
@@ -305,11 +318,11 @@ async fn main() -> anyhow::Result<()> {
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(0.5);
                     let stop_loss_usd: f64 = std::env::var("STOP_LOSS_USD")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
-                    let _take_profit_rr: f64 = std::env::var("TAKE_PROFIT_RR")
-                        .ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
-                    let take_profit_usd: f64 = std::env::var("TAKE_PROFIT_USD")
+                    let take_profit_rr: f64 = std::env::var("TAKE_PROFIT_RR")
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(1.0);
+                    let _take_profit_usd: f64 = std::env::var("TAKE_PROFIT_USD")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
-                    let _max_orders: u64 = std::env::var("MAX_OPEN_ORDERS")
+                    let max_orders: u64 = std::env::var("MAX_OPEN_ORDERS")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(2);
 
                     // 计算入场价:高等级用收盘价,否则用 wick level
@@ -319,6 +332,24 @@ async fn main() -> anyhow::Result<()> {
                         s.level
                     };
 
+                    // 风控:持仓数上限(查 /fapi/v2/positionRisk)
+                    // hedge 模式下 MAX_OPEN_ORDERS 生效;one-way 模式恒 ≤ 1
+                    let side_label = if s.side == "bullish" { "支撑 S" } else { "阻力 R" };
+                    let pos_count = order::get_position_count(&api_key, &api_secret, &base_url, &symbol).await;
+                    if (pos_count as u64) >= max_orders {
+                        warn!(
+                            "[Order] skip: position count {} >= MAX_OPEN_ORDERS={} (symbol={})",
+                            pos_count, max_orders, symbol
+                        );
+                        let skip_title = "⏸ 仓位已满,跳过下单";
+                        let skip_body = format!(
+                            "\n\n### ⏸ 仓位已满,跳过本次下单\n\n- **symbol**: {}\n- **当前持仓数**: {}\n- **MAX_OPEN_ORDERS**: {}\n- **本信号**: {} @ ${:.2}\n\n> 计数口径:仅当前监控 symbol 的有持仓方向数(hedge 模式下 LONG/SHORT 独立计算)",
+                            symbol, pos_count, max_orders, side_label, s.level
+                        );
+                        let _ = broadcast(&notify, skip_title, &(body.clone() + &skip_body)).await;
+                        continue;
+                    }
+
                     // 止损 = 入场价 ± STOP_LOSS_USD(R 往下,S 往上)
                     let stop_loss = if s.side == "bullish" {
                         entry_price - stop_loss_usd
@@ -326,13 +357,12 @@ async fn main() -> anyhow::Result<()> {
                         entry_price + stop_loss_usd
                     };
 
-                    // 止盈:固定 USD 距离(默认 200,跟止损对称 = 1:1 RR)
-                    // 注释:`let _risk = (entry_price - stop_loss).abs();` 历史保留,R 比例可由此推导
-                    let _risk = (entry_price - stop_loss).abs();
+                    // 止盈:R 倍风险(stop 距离 × RR,默认 1.0 = 1:1 对称)
+                    let risk = (entry_price - stop_loss).abs();
                     let take_profit = if s.side == "bullish" {
-                        entry_price + take_profit_usd
+                        entry_price + risk * take_profit_rr
                     } else {
-                        entry_price - take_profit_usd
+                        entry_price - risk * take_profit_rr
                     };
 
                     // 计算数量(基于账户余额 * 仓位百分比)

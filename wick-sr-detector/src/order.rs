@@ -19,16 +19,17 @@ pub struct OrderResult {
 }
 
 /// 计算 HMAC-SHA256 签名
+///
+/// Binance 要求 hex 编码(64 字符),不是 base64。
+/// 前端 `api/user/order/route.ts:25` 也是用 hex。
 fn sign_query(query: &str, secret: &str) -> String {
-    use base64::Engine;
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
     type HmacSha256 = Hmac<Sha256>;
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
     mac.update(query.as_bytes());
     let result = mac.finalize();
-    let b64 = base64::engine::general_purpose::STANDARD.encode(result.into_bytes());
-    b64
+    hex::encode(result.into_bytes())
 }
 
 /// 下限价单(带止损 + 止盈 Algo 单,一次性下三单)
@@ -298,4 +299,68 @@ pub async fn get_leverage(
     }
     // 没找到 → 默认 20x(Binance USDⓈ-M 永续默认 leverage)
     Some(20)
+}
+
+/// 查当前监控 symbol 的持仓条数(从 /fapi/v2/positionRisk 数 positionAmt.abs() > 0)
+///
+/// 口径:仅数 `symbol == X && positionAmt.abs() > 0` 的条目数。
+/// - hedge 模式:LONG + SHORT 可同时 > 0 → 返回 0/1/2
+/// - one-way 模式:任一时刻只能有一个方向有仓位 → 返回 0/1
+///
+/// 失败兜底:未配 key / 网络失败 / JSON 解析失败时返回 0(放行),
+/// 不要因为查不到而误杀(宁可多下一单,不要少下一单)。
+pub async fn get_position_count(
+    api_key: &str,
+    api_secret: &str,
+    base_url: &str,
+    symbol: &str,
+) -> u32 {
+    if api_key.is_empty() || api_secret.is_empty() {
+        return 0;
+    }
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let qs = format!("timestamp={}", ts);
+    let sig = sign_query(&qs, api_secret);
+    let url = format!("{}/fapi/v2/positionRisk?{}&signature={}", base_url, qs, sig);
+
+    let client = Client::new();
+    let resp: serde_json::Value = match client
+        .get(&url)
+        .header("X-MBX-APIKEY", api_key)
+        .send()
+        .await
+    {
+        Ok(r) => match r.json::<serde_json::Value>().await {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("[PositionCount] parse failed: {}", e);
+                return 0;
+            }
+        },
+        Err(e) => {
+            warn!("[PositionCount] request failed: {}", e);
+            return 0;
+        }
+    };
+
+    let mut count: u32 = 0;
+    if let Some(arr) = resp.as_array() {
+        for p in arr {
+            if p.get("symbol").and_then(|v| v.as_str()) != Some(symbol) {
+                continue;
+            }
+            // positionAmt 是字符串(如 "0.001" / "-0.5" / "0"),必须 as_str + parse
+            if let Some(amt_str) = p.get("positionAmt").and_then(|v| v.as_str()) {
+                if let Ok(amt) = amt_str.parse::<f64>() {
+                    if amt.abs() > 0.0 {
+                        count += 1;
+                    }
+                }
+            }
+        }
+    }
+    count
 }
