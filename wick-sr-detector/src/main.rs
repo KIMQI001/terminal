@@ -478,7 +478,7 @@ async fn main() -> anyhow::Result<()> {
                     let _take_profit_usd: f64 = std::env::var("TAKE_PROFIT_USD")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
                     let max_orders: u64 = std::env::var("MAX_OPEN_ORDERS")
-                        .ok().and_then(|s| s.parse().ok()).unwrap_or(2);
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(1);
                     let leverage_default: u32 = std::env::var("LEVERAGE_DEFAULT")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(100);
 
@@ -495,12 +495,12 @@ async fn main() -> anyhow::Result<()> {
                     let pos_count = order::get_position_count(&api_key, &api_secret, &base_url, &symbol).await;
                     if (pos_count as u64) >= max_orders {
                         warn!(
-                            "[Order] skip: position count {} >= MAX_OPEN_ORDERS={} (symbol={})",
+                            "[Order] skip: position count {} >= MAX_OPEN_ORDERS={} (symbol={})— 已有仓位,新信号不开单",
                             pos_count, max_orders, symbol
                         );
-                        let skip_title = "⏸ 仓位已满,跳过下单";
+                        let skip_title = "⏸ 已有仓位,跳过新单";
                         let skip_body = format!(
-                            "\n\n### ⏸ 仓位已满,跳过本次下单\n\n- **symbol**: {}\n- **当前持仓数**: {}\n- **MAX_OPEN_ORDERS**: {}\n- **本信号**: {} @ ${:.2}\n\n> 计数口径:仅当前监控 symbol 的有持仓方向数(hedge 模式下 LONG/SHORT 独立计算)",
+                            "\n\n### ⏸ 已有仓位,跳过本次下单\n\n- **symbol**: {}\n- **当前持仓数**: {} (已有仓位不开新单)\n- **MAX_OPEN_ORDERS**: {}\n- **本信号**: {} @ ${:.2}\n\n> 计数口径:仅当前监控 symbol 的有持仓方向数(hedge 模式 LONG/SHORT 独立)。MAX_OPEN_ORDERS=1 时,有持仓就跳过",
                             symbol, pos_count, max_orders, side_label, s.level
                         );
                         let _ = broadcast(&notify, skip_title, &(body.clone() + &skip_body)).await;
