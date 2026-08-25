@@ -241,3 +241,43 @@ pub async fn cancel_all_orders(api_key: &str, api_secret: &str, base_url: &str, 
     info!("[Order] cancelled all open orders for {}", symbol);
     Ok(())
 }
+
+/// 查 symbol 当前杠杆(从 /fapi/v1/leverage 读)
+/// 返回 `None` 表示失败或未配 API key(无 key 时不应读)
+pub async fn get_leverage(
+    api_key: &str,
+    api_secret: &str,
+    base_url: &str,
+    symbol: &str,
+) -> Option<u32> {
+    if api_key.is_empty() || api_secret.is_empty() {
+        return None;
+    }
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let qs = format!("symbol={}&timestamp={}", symbol, ts);
+    let sig = sign_query(&qs, api_secret);
+    let url = format!("{}/fapi/v1/leverage?{}&signature={}", base_url, qs, sig);
+
+    let client = Client::new();
+    let resp: serde_json::Value = match client
+        .get(&url)
+        .header("X-MBX-APIKEY", api_key)
+        .send()
+        .await
+    {
+        Ok(r) => match r.json::<serde_json::Value>().await {
+            Ok(v) => v,
+            Err(_) => return None,
+        },
+        Err(e) => {
+            warn!("[Leverage] request failed: {}", e);
+            return None;
+        }
+    };
+    resp.get("leverage")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32)
+}

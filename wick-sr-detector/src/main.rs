@@ -129,6 +129,23 @@ async fn main() -> anyhow::Result<()> {
             "⛔ 关闭(只报警 — env BINANCE_API_KEY 未设,不下单)"
         };
 
+        // 当前杠杆(从 /fapi/v1/leverage 读)— 仅当配了 API key 时查询
+        let leverage_section = match (&binance_config.api_key, &binance_config.api_secret) {
+            (Some(k), Some(s)) => {
+                let base_url = std::env::var("BINANCE_BASE_URL")
+                    .unwrap_or_else(|_| "https://fapi.binance.com".to_string());
+                match order::get_leverage(k, s, &base_url, &binance_config.symbol).await {
+                    Some(lev) => format!(
+                        "\n\n### ⚙️ 当前杠杆\n\n- **{}**: **{}x**\n\n> 杠杆取用户在 Binance 面板上的设置,本程序不会修改"
+                    , binance_config.symbol, lev),
+                    None => format!(
+                        "\n\n### ⚙️ 当前杠杆\n\n- **{}**: ⚠ 查询失败(可能该 symbol 未持仓或权限不足)\n\n> 配 key 后启动时自动读取"
+                    , binance_config.symbol),
+                }
+            }
+            _ => "\n\n### ⚙️ 当前杠杆\n\n- 未配 BINANCE_API_KEY/SECRET,无法查询\n\n> 配 key 后启动时自动读取".to_string(),
+        };
+
         // 最近 FVG 方向(用同一组历史 K 算)
         let last_fvg = candles.lock().await.clone();
         let fvg_dir = detector::latest_fvg_direction(&last_fvg, fvg_min_gap_percent);
@@ -150,10 +167,10 @@ async fn main() -> anyhow::Result<()> {
 - **回溯**: {} 根 K\n\
 - **Wick 阈值**: {:.2}\n\
 - **反转回溯**: {} 根\n\
-- **自动下单**: {}{}{}",
+- **自动下单**: {}{}{}{}",
             binance_config.symbol, binance_config.timeframe,
             lookback, detect_options.wick_ratio,
-            detect_options.reversal_lookback, auto_trade, wick_section, fvg_section
+            detect_options.reversal_lookback, auto_trade, leverage_section, wick_section, fvg_section
         );
         debug!("startup body =\n{}", &body);
         match broadcast(&notify_config, "wick-sr-detector 启动", &body).await {
