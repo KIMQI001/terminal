@@ -120,6 +120,28 @@ async fn main() -> anyhow::Result<()> {
             lookback, detect_options.wick_ratio,
             detect_options.reversal_lookback, wick_section
         );
+
+        // 最近 FVG 方向(用同一组历史 K 算)
+        let last_fvg = candles.lock().await.clone();
+        let fvg_dir = detector::latest_fvg_direction(&last_fvg, fvg_min_gap_percent);
+        let (trend_label, trend_arrow, long_only) = match fvg_dir {
+            Some(true)  => ("long (看涨 FVG)",  "↑", true),
+            Some(false) => ("short (看跌 FVG)", "↓", false),
+            None        => ("无 FVG(不限)",     "—", true),
+        };
+        let fvg_section = format!(
+            "\n\n### 📊 当前 FVG 方向\n\n- **趋势**: {} {}\n- **方向过滤**: {}\n- **FVG 阈值**: {:.2}%",
+            trend_arrow, trend_label,
+            if long_only { "只报 支撑 S" } else { "只报 阻力 R" },
+            fvg_min_gap_percent
+        );
+
+        let body = format!(
+            "### 🚀 wick-sr-detector 已启动\n\n- **监控**: {} @ {}\n- **回溯**: {} 根 K\n- **Wick 阈值**: {:.2}\n- **反转回溯**: {} 根{}",
+            binance_config.symbol, binance_config.timeframe,
+            lookback, detect_options.wick_ratio,
+            detect_options.reversal_lookback, wick_section
+        ) + &fvg_section;
         match broadcast(&notify_config, "wick-sr-detector 启动", &body).await {
             Ok(()) => info!("startup notification sent"),
             Err(e) => error!("startup notification failed: {:?}", e),
