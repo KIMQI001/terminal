@@ -581,12 +581,22 @@ pub async fn get_position_amount(
     None
 }
 
-/// 查所有 openAlgoOrders,返回 (algo_id, client_algo_id) 列表
+/// Algo 单信息(供孤儿清理 age 判定用)
+#[derive(Debug, Clone)]
+pub struct AlgoOrder {
+    pub algo_id: u64,
+    pub client_algo_id: String,
+    /// Binance 上 Algo 单的创建时间(unix ms)— 用真实时间判定 age
+    pub create_time_ms: i64,
+}
+
+/// 查所有 openAlgoOrders,返回 (algo_id, client_algo_id, create_time_ms)
+/// 用于孤儿清理:用 Binance 真实 create_time 算 age,不依赖本程序 round 计数
 pub async fn list_open_algo_orders(
     api_key: &str,
     api_secret: &str,
     base_url: &str,
-) -> Result<Vec<(u64, String)>> {
+) -> Result<Vec<AlgoOrder>> {
     if api_key.is_empty() || api_secret.is_empty() {
         return Ok(Vec::new());
     }
@@ -618,7 +628,15 @@ pub async fn list_open_algo_orders(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            algos.push((algo_id, client_algo_id));
+            // createTime 是 unix 毫秒
+            let create_time_ms = a.get("createTime")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            algos.push(AlgoOrder {
+                algo_id,
+                client_algo_id,
+                create_time_ms,
+            });
         }
     }
     Ok(algos)
