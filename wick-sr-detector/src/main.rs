@@ -281,7 +281,7 @@ async fn main() -> anyhow::Result<()> {
                     let position_pct: f64 = std::env::var("POSITION_PCT")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(0.5);
                     let stop_loss_usd: f64 = std::env::var("STOP_LOSS_USD")
-                        .ok().and_then(|s| s.parse().ok()).unwrap_or(50.0);
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
                     let take_profit_rr: f64 = std::env::var("TAKE_PROFIT_RR")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
                     let take_profit_usd: f64 = std::env::var("TAKE_PROFIT_USD")
