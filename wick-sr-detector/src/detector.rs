@@ -117,6 +117,12 @@ pub fn detect_wick_sr(
             let directional_match = is_bullish_candle;  // R 在阳 K
             let is_doji = small_body && small_range;
             let high_quality = directional_match || is_doji;
+            let high_quality_reason = match (directional_match, is_doji) {
+                (true, true) => "both",
+                (true, false) => "directional",
+                (false, true) => "doji",
+                (false, false) => "",
+            };
             results.push(WickSR {
                 time: c.time,
                 side: "bearish".to_string(),
@@ -128,6 +134,7 @@ pub fn detect_wick_sr(
                 index: i as i64,
                 reversal,
                 high_quality,
+                high_quality_reason: high_quality_reason.to_string(),
             });
         }
 
@@ -148,6 +155,12 @@ pub fn detect_wick_sr(
             let directional_match = is_bearish_candle;  // S 在阴 K
             let is_doji = small_body && small_range;
             let high_quality = directional_match || is_doji;  // 对齐 R 判定
+            let high_quality_reason = match (directional_match, is_doji) {
+                (true, true) => "both",
+                (true, false) => "directional",
+                (false, true) => "doji",
+                (false, false) => "",
+            };
             results.push(WickSR {
                 time: c.time,
                 side: "bullish".to_string(),
@@ -159,6 +172,7 @@ pub fn detect_wick_sr(
                 index: i as i64,
                 reversal,
                 high_quality,
+                high_quality_reason: high_quality_reason.to_string(),
             });
         }
     }
@@ -257,6 +271,12 @@ pub fn detect_wick_sr_for_last(
         let directional_match = is_bullish_candle;
         let is_doji = small_body && small_range;
         let high_quality = directional_match || is_doji;
+        let high_quality_reason = match (directional_match, is_doji) {
+            (true, true) => "both",
+            (true, false) => "directional",
+            (false, true) => "doji",
+            (false, false) => "",
+        };
         results.push(WickSR {
             time: c.time,
             side: "bearish".to_string(),
@@ -268,6 +288,7 @@ pub fn detect_wick_sr_for_last(
             index: new_idx as i64,
             reversal,
             high_quality,
+            high_quality_reason: high_quality_reason.to_string(),
         });
     }
 
@@ -280,7 +301,17 @@ pub fn detect_wick_sr_for_last(
         let is_bearish_candle = c.close < c.open;
         let body_size = (c.close - c.open).abs();
         let small_body = body_size < options.body_max_usd;
-        let high_quality = is_bearish_candle || small_body;
+        // 对齐 R 判定:方向匹配 OR 十字星(both 都需要 small_range)
+        let small_range = range < options.range_max_usd;
+        let directional_match = is_bearish_candle;
+        let is_doji = small_body && small_range;
+        let high_quality = directional_match || is_doji;
+        let high_quality_reason = match (directional_match, is_doji) {
+            (true, true) => "both",
+            (true, false) => "directional",
+            (false, true) => "doji",
+            (false, false) => "",
+        };
         results.push(WickSR {
             time: c.time,
             side: "bullish".to_string(),
@@ -292,6 +323,7 @@ pub fn detect_wick_sr_for_last(
             index: new_idx as i64,
             reversal,
             high_quality,
+            high_quality_reason: high_quality_reason.to_string(),
         });
     }
 

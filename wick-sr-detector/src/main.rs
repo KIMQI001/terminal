@@ -277,10 +277,16 @@ async fn main() -> anyhow::Result<()> {
                     String::new()
                 };
                 let hq_line = if s.high_quality {
-                    let candle_type = if s.side == "bullish" { "阴 K" } else { "阳 K" };
+                    let candle_type = if candle.close > candle.open { "阳 K" } else { "阴 K" };
+                    let reason_desc = match s.high_quality_reason.as_str() {
+                        "directional" => format!("方向匹配(R 在阳 K / S 在阴 K,收盘价收不回原方向 → {})", candle_type),
+                        "doji" => format!("十字星(实体<{:.0} USD + range<{:.0} USD,小实体表犹豫)", opts.body_max_usd, opts.range_max_usd),
+                        "both" => format!("方向匹配 + 十字星({} + 实体/range 都小)", candle_type),
+                        _ => candle_type.to_string(),
+                    };
                     format!(
-                        "\n- **高等级信号**: R 在阳 K / S 在阴 K({})— 收不回原方向 → 推荐 **收盘价**(${:.2})入场\n",
-                        candle_type, s.level
+                        "\n- **高等级信号**: {} → 推荐 **收盘价**(${:.2})入场\n",
+                        reason_desc, s.level
                     )
                 } else {
                     String::new()

@@ -46,4 +46,6 @@ pub struct WickSR {
     pub reversal: bool,
     /// 高等级信号:R 在阳 K / S 在阴 K(收不回 → 收盘价入场)
     pub high_quality: bool,
+    /// 高等级触发原因:"directional" | "doji" | "both" | ""
+    pub high_quality_reason: String,
 }
