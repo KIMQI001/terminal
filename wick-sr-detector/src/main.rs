@@ -443,6 +443,7 @@ async fn main() -> anyhow::Result<()> {
                     "### 📐 wick SR 触发{}{}{}\n\n\
 - **交易对**: {}\n\
 - **方向**: {} ({} )\n\
+- **K 线时间(北京)**: {}\n\
 - **level**: ${:.2}\n\
 - **zone**: [${:.2}, ${:.2}]\n\
 - **wick 比例**: {:.0}%\n\
@@ -451,6 +452,7 @@ async fn main() -> anyhow::Result<()> {
                     symbol,
                     side_label,
                     s.side,
+                    format_beijing_time(s.time),
                     s.level,
                     s.zone_low, s.zone_high,
                     s.ratio * 100.0,
