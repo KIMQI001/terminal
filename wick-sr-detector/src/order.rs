@@ -537,3 +537,164 @@ pub async fn get_position_count(
     }
     count
 }
+
+/// 给已有但**没挂 SL/TP Algo** 的持仓补上保护单。
+///
+/// 场景:
+/// - 下单时 SL/TP 因为 validate_stop_price / -1106 / 重试 3 次失败等没挂上
+/// - Algo 被外部误清(用户手动 / 其他脚本)
+/// - 启动前已有的持仓没有保护单
+///
+/// 逻辑:
+/// 1. 查 /fapi/v2/positionRisk 拿所有持仓(positionAmt != 0)
+/// 2. 查 /fapi/v1/openAlgoOrders 拿所有 Algo 单
+/// 3. 对每个有持仓的 symbol:
+///    - 没 SL Algo(同 symbol + positionSide + STOP_MARKET)→ 下 SL(stop_price = entry ± default_stop_usd)
+///    - 没 TP Algo → 下 TP
+///
+/// 返回补的 Algo 数量(0 = 都已有保护)。
+pub async fn ensure_protective_orders(
+    api_key: &str,
+    api_secret: &str,
+    base_url: &str,
+    default_stop_usd: f64,
+    default_tp_usd: f64,
+) -> Result<u32> {
+    if api_key.is_empty() || api_secret.is_empty() {
+        return Ok(0);
+    }
+
+    let client = Client::new();
+
+    // 1) 查 positionRisk
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis()).unwrap_or(0);
+    let pr_qs = format!("timestamp={}", ts);
+    let pr_sig = sign_query(&pr_qs, api_secret);
+    let pr_url = format!("{}/fapi/v2/positionRisk?{}&signature={}", base_url, pr_qs, pr_sig);
+
+    let pr_resp: serde_json::Value = match client.get(&pr_url)
+        .header("X-MBX-APIKEY", api_key).send().await
+    {
+        Ok(r) => match r.json().await {
+            Ok(v) => v,
+            Err(_) => return Ok(0),
+        },
+        Err(_) => return Ok(0),
+    };
+
+    // 收集有持仓的:(symbol, positionSide, entry_price, amt)
+    let mut positions: Vec<(String, String, f64, f64)> = Vec::new();
+    if let Some(arr) = pr_resp.as_array() {
+        for p in arr {
+            let symbol = match p.get("symbol").and_then(|v| v.as_str()) {
+                Some(s) => s.to_string(),
+                None => continue,
+            };
+            let amt_str = match p.get("positionAmt").and_then(|v| v.as_str()) {
+                Some(s) => s,
+                None => continue,
+            };
+            let amt = match amt_str.parse::<f64>() {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            if amt.abs() < 0.0001 {
+                continue;
+            }
+            let entry = p.get("entryPrice").and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+            let position_side = if amt > 0.0 { "LONG" } else { "SHORT" };
+            positions.push((symbol, position_side.to_string(), entry, amt));
+        }
+    }
+    if positions.is_empty() {
+        return Ok(0);
+    }
+
+    // 2) 查 openAlgoOrders
+    let algo_ts = SystemTime::now().duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis()).unwrap_or(0);
+    let algo_qs = format!("timestamp={}", algo_ts);
+    let algo_sig = sign_query(&algo_qs, api_secret);
+    let algo_url = format!("{}/fapi/v1/openAlgoOrders?{}&signature={}", base_url, algo_qs, algo_sig);
+    let algo_resp: serde_json::Value = match client.get(&algo_url)
+        .header("X-MBX-APIKEY", api_key).send().await
+    {
+        Ok(r) => match r.json().await {
+            Ok(v) => v,
+            Err(_) => serde_json::json!([]),
+        },
+        Err(_) => serde_json::json!([]),
+    };
+
+    // 收集已有 SL/TP(按 symbol|positionSide|type)
+    let mut existing: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    if let Some(arr) = algo_resp.as_array() {
+        for a in arr {
+            let symbol = a.get("symbol").and_then(|v| v.as_str()).unwrap_or("");
+            let position_side = a.get("positionSide").and_then(|v| v.as_str()).unwrap_or("");
+            let order_type = a.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            let key = format!("{}|{}|{}", symbol, position_side, order_type);
+            existing.insert(key, true);
+        }
+    }
+
+    // 3) 对每个持仓补 SL/TP
+    let mut placed: u32 = 0;
+    for (symbol, position_side, entry, amt) in positions {
+        if entry <= 0.0 {
+            warn!("[Protect] {} {} entry_price=0,跳过(可能刚开仓未更新)", symbol, position_side);
+            continue;
+        }
+        let side = if amt > 0.0 { "BUY" } else { "SELL" };
+        let stop_side = if side == "BUY" { "SELL" } else { "BUY" };
+        let quantity = amt.abs();
+        let sl_key = format!("{}|{}|STOP_MARKET", symbol, position_side);
+        let tp_key = format!("{}|{}|TAKE_PROFIT_MARKET", symbol, position_side);
+
+        // SL
+        if !existing.contains_key(&sl_key) {
+            let stop_price = if position_side == "LONG" {
+                entry - default_stop_usd
+            } else {
+                entry + default_stop_usd
+            };
+            let client_order_id = format!("protect_{}_{}_sl", symbol, position_side);
+            match place_algo_order(
+                &client, api_key, api_secret, base_url,
+                &symbol, stop_side, &position_side, "STOP_MARKET",
+                quantity, stop_price, &client_order_id,
+            ).await {
+                Ok(id) => {
+                    info!("[Protect] {} {} SL 补单: algoId={} stop_price={}", symbol, position_side, id, stop_price);
+                    placed += 1;
+                }
+                Err(e) => warn!("[Protect] {} {} SL 补单失败: {}", symbol, position_side, e),
+            }
+        }
+
+        // TP
+        if !existing.contains_key(&tp_key) {
+            let tp_price = if position_side == "LONG" {
+                entry + default_tp_usd
+            } else {
+                entry - default_tp_usd
+            };
+            let client_order_id = format!("protect_{}_{}_tp", symbol, position_side);
+            match place_algo_order(
+                &client, api_key, api_secret, base_url,
+                &symbol, stop_side, &position_side, "TAKE_PROFIT_MARKET",
+                quantity, tp_price, &client_order_id,
+            ).await {
+                Ok(id) => {
+                    info!("[Protect] {} {} TP 补单: algoId={} algo_price={}", symbol, position_side, id, tp_price);
+                    placed += 1;
+                }
+                Err(e) => warn!("[Protect] {} {} TP 补单失败: {}", symbol, position_side, e),
+            }
+        }
+    }
+
+    Ok(placed)
+}

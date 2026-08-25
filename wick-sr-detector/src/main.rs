@@ -187,6 +187,53 @@ async fn main() -> anyhow::Result<()> {
     let detect_options_clone = detect_options.clone();
     let symbol = binance_config.symbol.clone();
 
+    // 读 API key / secret / base_url 一次(下方 WS 闭包 + 仓位保护 task 共用)
+    let api_key_global = std::env::var("BINANCE_API_KEY").unwrap_or_default();
+    let api_secret_global = std::env::var("BINANCE_API_SECRET").unwrap_or_default();
+    let base_url_global = std::env::var("BINANCE_BASE_URL")
+        .unwrap_or_else(|_| "https://fapi.binance.com".to_string());
+
+    // 后台仓位保护 task:每 30s 检查"有持仓但没 SL/TP Algo"的仓位,自动补上(对齐 pinbar 默认 200 USD)
+    if !api_key_global.is_empty() && !api_secret_global.is_empty() {
+        let protective_stop_usd: f64 = std::env::var("PROTECTIVE_STOP_USD")
+            .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
+        let protective_tp_usd: f64 = std::env::var("PROTECTIVE_TP_USD")
+            .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
+        let api_key_protect = api_key_global.clone();
+        let api_secret_protect = api_secret_global.clone();
+        let base_url_protect = base_url_global.clone();
+        let notify_protect = notify_clone.clone();
+        tokio::spawn(async move {
+            let mut rounds: u32 = 0;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                rounds += 1;
+                match order::ensure_protective_orders(
+                    &api_key_protect,
+                    &api_secret_protect,
+                    &base_url_protect,
+                    protective_stop_usd,
+                    protective_tp_usd,
+                ).await {
+                    Ok(0) => {
+                        if rounds % 30 == 0 {
+                            info!("[Protect] task alive, 30 rounds (15 min) all positions already protected");
+                        }
+                    }
+                    Ok(n) => {
+                        warn!("[Protect] 给 {} 个仓位补了 SL/TP(默认 {} USD 距离)", n, protective_stop_usd);
+                        let body = format!(
+                            "\n\n### 🛡️ 仓位保护\n\n- **补单数量**: {}\n- **止损距离**: ${}\n- **止盈距离**: ${}\n\n> 检测到仓位但缺 SL/TP,自动补上(防止裸奔)",
+                            n, protective_stop_usd, protective_tp_usd
+                        );
+                        let _ = broadcast(&notify_protect, "🛡️ 仓位 SL/TP 已补", &body).await;
+                    }
+                    Err(e) => warn!("[Protect] failed: {:?}", e),
+                }
+            }
+        });
+    }
+
     binance::stream_klines(&binance_config, move |candle, is_closed| {
         let candles = candles_clone.clone();
         let reported = reported_clone.clone();
