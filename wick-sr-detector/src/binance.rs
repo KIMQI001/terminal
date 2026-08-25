@@ -1,8 +1,8 @@
 //! Binance API + WebSocket(简化版,只拉单一交易对 K 线)
 
 use crate::types::Candle;
-use anyhow::{anyhow, Context, Result};
-use futures_util::{SinkExt, StreamExt};
+use anyhow::{Context, Result};
+use futures_util::StreamExt;
 use reqwest::Client;
 use serde::Deserialize;
 use std::env;
@@ -13,7 +13,10 @@ use tracing::{debug, error, info, warn};
 pub struct BinanceConfig {
     pub symbol: String,
     pub timeframe: String,
+    // API 凭据走 env 直读(order 模块),此处留字段以便其他场景(如签名请求)
+    #[allow(dead_code)]
     pub api_key: Option<String>,
+    #[allow(dead_code)]
     pub api_secret: Option<String>,
 }
 
@@ -33,9 +36,10 @@ impl BinanceConfig {
     }
 
     fn ws_url(&self) -> String {
-        // USDC 永续合约在 /market/ 子路径(参考 pinbar-detector)
+        // USDC 永续合约在 /market/ 子路径,频道 2024-11 起统一为
+        // {symbol}_perpetual@continuousKline_{tf}(@kline_{tf} 已失效)
         format!(
-            "wss://fstream.binance.com/market/ws/{}@kline_{}",
+            "wss://fstream.binance.com/market/ws/{}_perpetual@continuousKline_{}",
             self.symbol.to_lowercase(),
             self.timeframe
         )
