@@ -325,6 +325,8 @@ async fn main() -> anyhow::Result<()> {
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
                     let max_orders: u64 = std::env::var("MAX_OPEN_ORDERS")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(2);
+                    let leverage_default: u32 = std::env::var("LEVERAGE_DEFAULT")
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(100);
 
                     // 计算入场价:高等级用收盘价,否则用 wick level
                     let entry_price = if s.high_quality {
@@ -366,11 +368,26 @@ async fn main() -> anyhow::Result<()> {
                         entry_price - risk * take_profit_rr
                     };
 
-                    // 计算数量(基于账户余额 * 仓位百分比)
+                    // 计算数量(基于账户余额 * 仓位百分比 * 当前 leverage)
                     let balance = order::get_account_balance(&api_key, &api_secret, &base_url, "USDC").await;
+                    // 读当前 leverage(查 /fapi/v2/positionRisk)— 找不到时按 LEVERAGE_DEFAULT fallback(用户设 100x)
+                    let leverage = order::get_leverage(&api_key, &api_secret, &base_url, &symbol)
+                        .await
+                        .unwrap_or(leverage_default);
                     let quantity = order::calculate_quantity(
-                        balance, position_pct, entry_price,
+                        balance, position_pct, leverage, entry_price,
                     );
+                    if leverage != leverage_default {
+                        info!(
+                            "[Order] qty={} (balance={} × pct={} × leverage={} / entry={})",
+                            quantity, balance, position_pct, leverage, entry_price
+                        );
+                    } else {
+                        info!(
+                            "[Order] qty={} (leverage 查不到,fallback {}: balance={} × pct={} / entry={})",
+                            quantity, leverage_default, balance, position_pct, entry_price
+                        );
+                    }
                     if quantity <= 0.0 {
                         warn!("[Order] quantity=0, skip (balance={})", balance);
                     } else {
