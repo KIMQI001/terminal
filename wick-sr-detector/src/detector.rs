@@ -140,8 +140,14 @@ pub fn detect_wick_sr(
             // 阴 K:close < open
             let is_bearish_candle = c.close < c.open;
             let body_size = (c.close - c.open).abs();
-            let small_body = body_size < options.body_max_usd;
-            let high_quality = is_bearish_candle || small_body;  // S 阴 K 或 十字星 = 高等级
+            let small_body = body_size < options.body_max_usd;  // 实体 < 阈值(必要条件)
+            let small_range = range < options.range_max_usd;  // 整体小(保险,大 K 实体小但 wick 不显著)
+            // S 在阴 K(close<open)= K 收阴 → 买方没把 K 接住 → 反转信号
+            // S 在阳 K = 普通 wick(买方接住)
+            // + 十字星(实体+整体都小)
+            let directional_match = is_bearish_candle;  // S 在阴 K
+            let is_doji = small_body && small_range;
+            let high_quality = directional_match || is_doji;  // 对齐 R 判定
             results.push(WickSR {
                 time: c.time,
                 side: "bullish".to_string(),

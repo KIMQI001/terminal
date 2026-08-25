@@ -95,6 +95,17 @@ pub async fn fetch_klines(
 
 /// 实时 WS 接收单一 K 线更新
 /// 回调 `is_closed` 为 true 表示这根 K 已收盘(才进行 wick 检测)
+///
+/// **K close 判定**:**用启发式,不只依赖 `k.x` 字段**。
+///
+/// Binance `continuousKline` 通道在 K 切换的瞬间**偶尔漏推 `k.x=true` 的事件** —
+/// 实测 15m 周期下,经常出现 `x` 永远停在 `false`,但 K 线本身已经 close 的情况。
+///
+/// 对齐前端 `src/lib/binance/websocket.ts:154-179` 的做法:维护 `last_kline_time`,
+/// 当推送的 `k.t` 比上一条大时(说明进入新 K),就认为**上一根 K 已经 close** ——
+/// 此时拿到的 candle 数据就是上一根 K close 时的完整 OHLC。
+///
+/// 触发检测的条件 = `k.x == true` OR `(last_kline_time != 0 && k.t > last_kline_time)`
 pub async fn stream_klines<F, Fut>(config: &BinanceConfig, mut on_candle: F) -> Result<()>
 where
     F: FnMut(Candle, bool) -> Fut,
@@ -114,6 +125,9 @@ where
         };
         info!("ws connected");
 
+        // 启发式:记录上一条推送的 K 开盘时间
+        let mut last_kline_time: i64 = 0;
+
         while let Some(msg) = ws.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
@@ -121,15 +135,31 @@ where
                     match serde_json::from_str::<WsKlineMsg>(&text) {
                         Ok(parsed) => {
                             if let Some(k) = parsed.k {
-                                debug!("kline: t={} O={} H={} L={} C={} V={} x={}", k.t, k.o, k.h, k.l, k.c, k.v, k.x);
+                                let k_time = k.t / 1000;
+                                // 启发式:K 开盘时间比上一条大 → 上一根 K close 了
+                                let is_new_kline = last_kline_time != 0 && k_time > last_kline_time;
+                                // 触发检测:显式 x=true OR 启发式新 K
+                                let should_detect = k.x || is_new_kline;
+                                debug!(
+                                    "kline: t={} T={} O={} H={} L={} C={} V={} x={} is_new={} should_detect={}",
+                                    k.t, k.close_t, k.o, k.h, k.l, k.c, k.v, k.x, is_new_kline, should_detect
+                                );
+                                if should_detect {
+                                    // 收线瞬间打 info,确保默认 info 级别也能看到
+                                    info!(
+                                        "[K close detected] t={} x={} is_new={} → triggering detection",
+                                        k.t, k.x, is_new_kline
+                                    );
+                                }
+                                last_kline_time = k_time;
                                 on_candle(Candle {
-                                    time: k.t / 1000,
+                                    time: k_time,
                                     open: k.o.parse().unwrap_or(0.0),
                                     high: k.h.parse().unwrap_or(0.0),
                                     low: k.l.parse().unwrap_or(0.0),
                                     close: k.c.parse().unwrap_or(0.0),
                                     volume: k.v.parse().unwrap_or(0.0),
-                                }, k.x);
+                                }, should_detect);
                             }
                         }
                         Err(e) => {
@@ -163,8 +193,12 @@ struct WsKlineMsg {
 
 #[derive(Debug, Deserialize)]
 struct WsKline {
+    /// K-line 开盘时间(ms)
     #[serde(rename = "t")]
     t: i64,
+    /// K-line close 时间(ms)— 用于兜底判断 K 是否已 close
+    #[serde(rename = "T")]
+    close_t: i64,
     #[serde(rename = "o")]
     o: String,
     #[serde(rename = "h")]
