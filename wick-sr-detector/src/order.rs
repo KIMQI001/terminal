@@ -147,9 +147,21 @@ pub async fn place_order_with_sl_tp(
     })
 }
 
-/// 计算下单数量(基于账户余额 + 仓位百分比 + 杠杆)
-/// 简化版:quantity = (balance * pct) / entry_price,未考虑杠杆 —
-/// USDT 永续默认 20x,如需 1x 在币安手动设置
+/// 计算下单数量(USDC 永续)
+///
+/// `quantity = balance * pct / entry_price` — 这是按 1x 名义算出的"裸数量"。
+///
+/// **杠杆:本程序不调用 `/fapi/v1/leverage`,实际 leverage 取用户在 Binance
+/// 面板上已设置的杠杆**。也就是说,如果用户在交易所把 BTCUSDC 设成 20x,
+/// 上面公式给出的 quantity 会被自动放大 20x。
+///
+/// 示例:balance = 1000, pct = 0.5, BTC = 60000 → qty = 0.0083 BTC
+/// - 1x:  名义 500 USDC,   保证金 500 USDC
+/// - 20x: 名义 10000 USDC, 保证金 500 USDC
+///
+/// 占用保证金 ≈ `qty × entry_price / leverage`,所以本公式的设计含义是:
+/// **"占用本金 = balance × pct,leverage 越大,名义越大,风险越大"**。
+/// 风控请在交易所面板上调 leverage。
 pub fn calculate_quantity(
     wallet_balance: f64,
     position_pct: f64,
