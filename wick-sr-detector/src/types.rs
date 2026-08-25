@@ -42,4 +42,6 @@ pub struct WickSR {
     pub tier: u32,
     /// 上一根 K 索引
     pub index: i64,
+    /// 是否反转 wick:R 突破前高(看跌反转) / S 跌破前低(看涨反转)
+    pub reversal: bool,
 }

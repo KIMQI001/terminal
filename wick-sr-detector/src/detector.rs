@@ -17,11 +17,54 @@ use crate::types::{Candle, SwingPoint, WickSR};
 #[derive(Debug, Clone)]
 pub struct DetectOptions {
     pub wick_ratio: f64,
+    /// 反转 wick 判定的回溯 K 根数(默认 10)
+    pub reversal_lookback: i64,
 }
 
 impl Default for DetectOptions {
     fn default() -> Self {
-        Self { wick_ratio: 0.4 }
+        Self {
+            wick_ratio: 0.4,
+            reversal_lookback: 10,
+        }
+    }
+}
+
+/// 反转 wick 判定:R(上影/阻力)所在 K 的 high 是回溯期内最高
+/// (突破前高,看跌反转) / S(下影/支撑)所在 K 的 low 是回溯期内最低
+/// (跌破前低,看涨反转)
+fn is_reversal_wick(
+    candle: &Candle,
+    candles: &[Candle],
+    side: &str,
+    lookback: i64,
+) -> bool {
+    let idx = candles.iter().position(|c| c.time == candle.time);
+    let idx = match idx {
+        Some(i) => i as i64,
+        None => return false,
+    };
+    let start = (idx - lookback).max(0) as usize;
+    let end = idx as usize;
+    if end <= start + 1 {
+        return false;  // 回溯窗口太短
+    }
+    if side == "bearish" {
+        // R 上影/阻力:所在 K 的 high 是窗口内最高
+        let prev_max = candles[start..end]
+            .iter()
+            .map(|c| c.high)
+            .fold(f64::NEG_INFINITY, f64::max);
+        candle.high >= prev_max
+    } else if side == "bullish" {
+        // S 下影/支撑:所在 K 的 low 是窗口内最低
+        let prev_min = candles[start..end]
+            .iter()
+            .map(|c| c.low)
+            .fold(f64::INFINITY, f64::min);
+        candle.low <= prev_min
+    } else {
+        false
     }
 }
 
@@ -56,6 +99,7 @@ pub fn detect_wick_sr(
             let level = (body_top + c.high) / 2.0;
             let zone_low = body_top;
             let zone_high = c.high;
+            let reversal = is_reversal_wick(c, candles, "bearish", options.reversal_lookback);
             results.push(WickSR {
                 time: c.time,
                 side: "bearish".to_string(),
@@ -65,6 +109,7 @@ pub fn detect_wick_sr(
                 ratio: upper_ratio,
                 tier: 1,
                 index: i as i64,
+                reversal,
             });
         }
 
@@ -73,6 +118,7 @@ pub fn detect_wick_sr(
             let level = (c.low + body_bottom) / 2.0;
             let zone_low = c.low;
             let zone_high = body_bottom;
+            let reversal = is_reversal_wick(c, candles, "bullish", options.reversal_lookback);
             results.push(WickSR {
                 time: c.time,
                 side: "bullish".to_string(),
@@ -82,6 +128,7 @@ pub fn detect_wick_sr(
                 ratio: lower_ratio,
                 tier: 1,
                 index: i as i64,
+                reversal,
             });
         }
     }

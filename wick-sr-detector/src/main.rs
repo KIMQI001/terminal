@@ -41,6 +41,10 @@ async fn main() -> anyhow::Result<()> {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.4),
+        reversal_lookback: std::env::var("REVERSAL_LOOKBACK")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(10),
     };
     let fvg_min_gap_percent = std::env::var("FVG_MIN_GAP_PERCENT")
         .ok()
@@ -146,22 +150,31 @@ async fn main() -> anyhow::Result<()> {
 
                 let arrow = if s.side == "bullish" { "↑" } else { "↓" };
                 let side_label = if s.side == "bullish" { "支撑 S" } else { "阻力 R" };
-                let title = format!("{arrow} wick {} ({} tier={})", symbol, side_label, s.tier);
+                // 反转 wick 单独标注
+                let reversal_tag = if s.reversal { " 🔄反转" } else { "" };
+                let title = format!("{arrow} wick {} ({} tier={}){}", symbol, side_label, s.tier, reversal_tag);
+                let reversal_line = if s.reversal {
+                    format!("\n- **反转 wick**: K 线 high/low 是回溯 {} 根的极值(突破前高 / 跌破前低)\n", opts.reversal_lookback)
+                } else {
+                    String::new()
+                };
                 let body = format!(
-                    "### 📐 wick SR 触发\n\n\
+                    "### 📐 wick SR 触发{}\n\n\
 - **交易对**: {}\n\
 - **方向**: {} ({} )\n\
 - **level**: ${:.2}\n\
 - **zone**: [${:.2}, ${:.2}]\n\
 - **wick 比例**: {:.0}%\n\
-- **层级**: {}",
+- **层级**: {}{}",
+                    reversal_tag,
                     symbol,
                     side_label,
                     s.side,
                     s.level,
                     s.zone_low, s.zone_high,
                     s.ratio * 100.0,
-                    s.tier
+                    s.tier,
+                    reversal_line
                 );
                 warn!("new wick SR: {}/{} @ {}", s.side, s.level, s.time);
                 if let Err(e) = broadcast(&notify, &title, &body).await {
