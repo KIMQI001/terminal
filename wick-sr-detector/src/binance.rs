@@ -150,7 +150,7 @@ where
                                     low: k.l.parse().unwrap_or(0.0),
                                     close: k.c.parse().unwrap_or(0.0),
                                     volume: k.v.parse().unwrap_or(0.0),
-                                }, is_closed);
+                                }, is_closed).await;
                             }
                         }
                         Err(e) => {
