@@ -174,6 +174,13 @@ async fn main() -> anyhow::Result<()> {
             let want_bearish = !long_only; // short → 只要 R(bearish)
 
             // 检测新触发的(time + side 没报过)
+            info!(
+                "tick: candle_time={} bullish_count={} bear_count={} long_only={}",
+                candle.time,
+                signals.iter().filter(|x| x.side == "bullish").count(),
+                signals.iter().filter(|x| x.side == "bearish").count(),
+                long_only
+            );
             let mut reported_lock = reported.lock().await;
             for s in signals {
                 // 方向过滤
