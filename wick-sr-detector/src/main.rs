@@ -62,6 +62,10 @@ async fn main() -> anyhow::Result<()> {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(50.0),
+        range_max_usd: std::env::var("WICK_RANGE_MAX_USD")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(200.0),
     };
     let fvg_min_gap_percent = std::env::var("FVG_MIN_GAP_PERCENT")
         .ok()
