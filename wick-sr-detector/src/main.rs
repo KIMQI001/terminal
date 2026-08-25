@@ -19,7 +19,7 @@ use order::{calculate_quantity, get_account_balance, place_order_with_sl_tp};
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// 把 unix epoch 秒格式化成北京时间(UTC+8)"YYYY-MM-DD HH:MM"
 fn format_beijing_time(secs: i64) -> String {
@@ -195,7 +195,7 @@ async fn main() -> anyhow::Result<()> {
 
             // 只在 K close 时检测 + 报警(wick 必须 close 完才算)
             if !is_closed {
-                info!("candle update time={} (not closed, skip detection)", candle.time);
+                debug!("candle update time={} (not closed, skip)", candle.time);
                 return;
             }
 
