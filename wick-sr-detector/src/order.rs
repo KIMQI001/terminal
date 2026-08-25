@@ -538,7 +538,114 @@ pub async fn get_position_count(
     count
 }
 
-/// 给已有但**没挂 SL/TP Algo** 的持仓补上保护单。
+/// 查 symbol 当前 positionAmt 数值(返回 f64,None 表示 API 失败)
+/// 用于孤儿清理的判定
+pub async fn get_position_amount(
+    api_key: &str,
+    api_secret: &str,
+    base_url: &str,
+    symbol: &str,
+) -> Option<f64> {
+    if api_key.is_empty() || api_secret.is_empty() {
+        return None;
+    }
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis()).unwrap_or(0);
+    let qs = format!("timestamp={}", ts);
+    let sig = sign_query(&qs, api_secret);
+    let url = format!("{}/fapi/v2/positionRisk?{}&signature={}", base_url, qs, sig);
+
+    let client = Client::new();
+    let resp: serde_json::Value = match client.get(&url)
+        .header("X-MBX-APIKEY", api_key).send().await
+    {
+        Ok(r) => match r.json().await {
+            Ok(v) => v,
+            Err(_) => return None,
+        },
+        Err(_) => return None,
+    };
+
+    if let Some(arr) = resp.as_array() {
+        for p in arr {
+            if p.get("symbol").and_then(|v| v.as_str()) != Some(symbol) {
+                continue;
+            }
+            if let Some(amt_str) = p.get("positionAmt").and_then(|v| v.as_str()) {
+                if let Ok(amt) = amt_str.parse::<f64>() {
+                    return Some(amt);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 查所有 openAlgoOrders,返回 (algo_id, client_algo_id) 列表
+pub async fn list_open_algo_orders(
+    api_key: &str,
+    api_secret: &str,
+    base_url: &str,
+) -> Result<Vec<(u64, String)>> {
+    if api_key.is_empty() || api_secret.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH)?
+        .as_millis();
+    let qs = format!("timestamp={}", ts);
+    let sig = sign_query(&qs, api_secret);
+    let url = format!("{}/fapi/v1/openAlgoOrders?{}&signature={}", base_url, qs, sig);
+
+    let client = Client::new();
+    let resp: serde_json::Value = match client.get(&url)
+        .header("X-MBX-APIKEY", api_key).send().await
+    {
+        Ok(r) => match r.json().await {
+            Ok(v) => v,
+            Err(e) => return Err(anyhow!("parse openAlgoOrders: {}", e)),
+        },
+        Err(e) => return Err(anyhow!("request openAlgoOrders: {}", e)),
+    };
+
+    let mut algos = Vec::new();
+    if let Some(arr) = resp.as_array() {
+        for a in arr {
+            let algo_id = match a.get("algoId").and_then(|v| v.as_u64()) {
+                Some(id) => id,
+                None => continue,
+            };
+            let client_algo_id = a.get("clientAlgoId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            algos.push((algo_id, client_algo_id));
+        }
+    }
+    Ok(algos)
+}
+
+/// 取消单个 Algo 单
+pub async fn cancel_single_algo(
+    api_key: &str,
+    api_secret: &str,
+    base_url: &str,
+    symbol: &str,
+    algo_id: u64,
+) -> Result<bool> {
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
+    let qs = format!("symbol={}&algoId={}&timestamp={}", symbol, algo_id, ts);
+    let sig = sign_query(&qs, api_secret);
+    let url = format!("{}/fapi/v1/algoOrder?{}&signature={}", base_url, qs, sig);
+
+    let client = Client::new();
+    let resp: serde_json::Value = client.delete(&url)
+        .header("X-MBX-APIKEY", api_key)
+        .send().await
+        .context("cancel algo")?
+        .json().await
+        .context("parse cancel resp")?;
+    Ok(resp.get("code").and_then(|v| v.as_i64()).unwrap_or(-1) == 0)
+}
 ///
 /// 场景:
 /// - 下单时 SL/TP 因为 validate_stop_price / -1106 / 重试 3 次失败等没挂上

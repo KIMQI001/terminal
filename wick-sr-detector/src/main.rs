@@ -232,6 +232,107 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         });
+
+        // 孤儿 Algo 单清理 v2:每 30s 检查"持仓已平 + Algo 单存在 ≥ 5 分钟"才清理
+        // age 判定保护:
+        // - 主单刚成交时 positionAmt 异步更新(几秒延迟),可能瞬时为 0
+        // - 但 Algo 单提交时间不会很长(通常 ≤1 轮 30s 内已挂)
+        // - age ≥ 5 分钟 = 10 轮 = 真孤儿,而不是误判
+        // - 配合 ensure_protective_orders 兜底:即使误清,30s 内补回
+        const ORPHAN_MIN_AGE_ROUNDS: u32 = 30; // 15 分钟
+        let api_key_orphan = api_key_global.clone();
+        let api_secret_orphan = api_secret_global.clone();
+        let base_url_orphan = base_url_global.clone();
+        let symbol_orphan = symbol.clone();
+        let notify_orphan = notify_clone.clone();
+        tokio::spawn(async move {
+            let mut rounds: u32 = 0;
+            // algo_id → 第一次见到的 round
+            let mut first_seen: std::collections::HashMap<u64, u32> = std::collections::HashMap::new();
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                rounds += 1;
+                // 1) 查 positionAmt
+                let pos_amt = match order::get_position_amount(
+                    &api_key_orphan, &api_secret_orphan, &base_url_orphan, &symbol_orphan,
+                ).await {
+                    Some(a) => a,
+                    None => {
+                        // API 失败,跳过本轮(不清也不补)
+                        if rounds % 30 == 0 {
+                            info!("[Orphan] task alive, {} rounds, API failed last round", rounds);
+                        }
+                        continue;
+                    }
+                };
+                // 2) 查所有 Algo 单
+                let algos_now = match order::list_open_algo_orders(
+                    &api_key_orphan, &api_secret_orphan, &base_url_orphan,
+                ).await {
+                    Ok(a) => a,
+                    Err(e) => {
+                        warn!("[Orphan] list failed: {:?}", e);
+                        continue;
+                    }
+                };
+                // 3) 更新 first_seen map
+                let now_ids: std::collections::HashSet<u64> = algos_now.iter().map(|(id, _)| *id).collect();
+                for (id, _) in &algos_now {
+                    first_seen.entry(*id).or_insert(rounds);
+                }
+                // 删除已不存在的 algo_id(被清掉/已 FILLED)
+                first_seen.retain(|id, _| now_ids.contains(id));
+
+                // 4) 仅当 positionAmt == 0 且 algo age >= 10 轮 才考虑清理
+                if pos_amt.abs() > 0.0001 {
+                    // 还有持仓,不清理(让保护 task 处理漏挂)
+                    if rounds % 30 == 0 {
+                        info!("[Orphan] task alive, {} rounds, position={} (protected)", rounds, pos_amt);
+                    }
+                    continue;
+                }
+                let mut to_cancel: Vec<u64> = Vec::new();
+                for (id, first_round) in &first_seen {
+                    if rounds.saturating_sub(*first_round) >= ORPHAN_MIN_AGE_ROUNDS {
+                        to_cancel.push(*id);
+                    }
+                }
+                if to_cancel.is_empty() {
+                    if rounds % 30 == 0 {
+                        info!("[Orphan] task alive, {} rounds, {} algos tracked, all under age threshold", rounds, first_seen.len());
+                    }
+                    continue;
+                }
+                // 5) 清理
+                let mut cancelled = 0u32;
+                let mut cancelled_ids = Vec::new();
+                for algo_id in &to_cancel {
+                    match order::cancel_single_algo(
+                        &api_key_orphan, &api_secret_orphan, &base_url_orphan,
+                        &symbol_orphan, *algo_id,
+                    ).await {
+                        Ok(true) => {
+                            cancelled += 1;
+                            cancelled_ids.push(*algo_id);
+                            debug!("[Orphan] cancelled algoId={}", algo_id);
+                        }
+                        Ok(false) => warn!("[Orphan] cancel algoId={} returned non-ok code", algo_id),
+                        Err(e) => warn!("[Orphan] cancel algoId={} failed: {:?}", algo_id, e),
+                    }
+                }
+                if cancelled > 0 {
+                    warn!(
+                        "[Orphan] 取消了 {} 个孤儿 Algo ({} {} 已持仓 0 且 age ≥ 5 min),algos={:?}",
+                        cancelled, symbol_orphan, cancelled, cancelled_ids
+                    );
+                    let body = format!(
+                        "\n\n### 🧹 孤儿 Algo 清理\n\n- **取消数量**: {}\n- **algo_id**: {:?}\n\n> positionAmt=0 + Algo age ≥ 5 分钟,确认为真孤儿(非异步延迟)。即便误清,保护 task 30s 内会补回",
+                        cancelled, cancelled_ids
+                    );
+                    let _ = broadcast(&notify_orphan, "🧹 孤儿 Algo 已清理", &body).await;
+                }
+            }
+        });
     }
 
     binance::stream_klines(&binance_config, move |candle, is_closed| {
