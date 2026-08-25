@@ -67,22 +67,42 @@ async fn main() -> anyhow::Result<()> {
 
     // 初始检测 + 报警
     let reported: Arc<Mutex<HashSet<(i64, String)>>> = Arc::new(Mutex::new(HashSet::new()));
-    {
+    let signals: Vec<crate::types::WickSR> = {
         let c = candles.lock().await;
-        let signals = detect_wick_sr(&c, &[], &detect_options);
-        info!("initial detection: {} wick zones", signals.len());
-    }
+        let sigs = detect_wick_sr(&c, &[], &detect_options);
+        info!("initial detection: {} wick zones", sigs.len());
+        sigs
+    };
 
-    // 启动时如果配置了 DINGTALK_WEBHOOK,发个启动通知
-    if notify_config.dingtalk_webhook.is_some() {
-        let _ = broadcast(
-            &notify_config,
-            "wick-sr-detector 启动",
-            &format!(
-                "### 🚀 wick-sr-detector 已启动\n\n- **监控**: {} @ {}\n- **回溯**: {} 根 K\n- **Wick 阈值**: {}",
-                binance_config.symbol, binance_config.timeframe, lookback, detect_options.wick_ratio
-            ),
-        ).await;
+    // 启动时如果配置了 DINGTALK_WEBHOOK 或 Telegram,发个启动通知(含最近的 wick)
+    if notify_config.dingtalk_webhook.is_some() || notify_config.telegram_token.is_some() {
+        // 找最近一个 wick(按 time 倒序)
+        let latest = signals.iter().max_by_key(|s| s.time);
+        let wick_section = match latest {
+            Some(w) => {
+                let arrow = if w.side == "bullish" { "↑" } else { "↓" };
+                let side_label = if w.side == "bullish" { "支撑 S" } else { "阻力 R" };
+                let reversal_tag = if w.reversal { " 🔄反转" } else { "" };
+                format!(
+                    "\n\n### 📌 历史最近一个 wick\n\n- **方向**: {} {}{}\n- **level**: ${:.2}\n- **zone**: [${:.2}, ${:.2}]\n- **wick 比例**: {:.0}%\n- **层级**: {}\n- **time**: {}",
+                    arrow, side_label, reversal_tag,
+                    w.level, w.zone_low, w.zone_high,
+                    w.ratio * 100.0, w.tier, w.time
+                )
+            }
+            None => "\n\n### 📌 历史回溯中未发现 wick SR".to_string(),
+        };
+        let body = format!(
+            "### 🚀 wick-sr-detector 已启动\n\n\
+- **监控**: {} @ {}\n\
+- **回溯**: {} 根 K\n\
+- **Wick 阈值**: {:.2}\n\
+- **反转回溯**: {} 根{}",
+            binance_config.symbol, binance_config.timeframe,
+            lookback, detect_options.wick_ratio,
+            detect_options.reversal_lookback, wick_section
+        );
+        let _ = broadcast(&notify_config, "wick-sr-detector 启动", &body).await;
     }
 
     // WS 实时 K 线
