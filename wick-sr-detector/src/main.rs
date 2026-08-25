@@ -374,26 +374,19 @@ async fn main() -> anyhow::Result<()> {
                         entry_price - risk * take_profit_rr
                     };
 
-                    // 计算数量(基于账户余额 * 仓位百分比 * 当前 leverage)
+                    // 计算数量(基于账户余额 * 仓位百分比 * 固定 leverage)
+                    // 不用 /fapi/v2/positionRisk 查实际值——直接用 LEVERAGE_DEFAULT
+                    // 假设用户在交易所面板已经设了对应杠杆(默认 100x)。
+                    // 启动通知里仍然会查一次实际面板 leverage 显示出来供对照。
                     let balance = order::get_account_balance(&api_key, &api_secret, &base_url, "USDC").await;
-                    // 读当前 leverage(查 /fapi/v2/positionRisk)— 找不到时按 LEVERAGE_DEFAULT fallback(用户设 100x)
-                    let leverage = order::get_leverage(&api_key, &api_secret, &base_url, &symbol)
-                        .await
-                        .unwrap_or(leverage_default);
+                    let leverage = leverage_default;
                     let quantity = order::calculate_quantity(
                         balance, position_pct, leverage, entry_price,
                     );
-                    if leverage != leverage_default {
-                        info!(
-                            "[Order] qty={} (balance={} × pct={} × leverage={} / entry={})",
-                            quantity, balance, position_pct, leverage, entry_price
-                        );
-                    } else {
-                        info!(
-                            "[Order] qty={} (leverage 查不到,fallback {}: balance={} × pct={} / entry={})",
-                            quantity, leverage_default, balance, position_pct, entry_price
-                        );
-                    }
+                    info!(
+                        "[Order] qty={} (balance={} × pct={} × leverage={} / entry={})",
+                        quantity, balance, position_pct, leverage, entry_price
+                    );
                     if quantity <= 0.0 {
                         warn!("[Order] quantity=0, skip (balance={})", balance);
                     } else {
