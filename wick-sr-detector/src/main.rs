@@ -267,6 +267,78 @@ async fn main() -> anyhow::Result<()> {
                 if let Err(e) = broadcast(&notify, &title, &body).await {
                     error!("broadcast error: {e}");
                 }
+
+                // 自动下单(如果配了 API key)— 高等级或反转 wick 都下
+                if std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {
+                    let api_key = std::env::var("BINANCE_API_KEY").unwrap_or_default();
+                    let api_secret = std::env::var("BINANCE_API_SECRET").unwrap_or_default();
+                    let base_url = std::env::var("BINANCE_BASE_URL")
+                        .unwrap_or_else(|_| "https://fapi.binance.com".to_string());
+                    let position_pct: f64 = std::env::var("POSITION_PCT")
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(0.5);
+                    let stop_loss_usd: f64 = std::env::var("STOP_LOSS_USD")
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(50.0);
+                    let take_profit_rr: f64 = std::env::var("TAKE_PROFIT_RR")
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
+                    let max_orders: u64 = std::env::var("MAX_OPEN_ORDERS")
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(2);
+
+                    // 计算入场价:高等级用收盘价,否则用 wick level
+                    let entry_price = if s.high_quality {
+                        candle.close
+                    } else {
+                        s.level
+                    };
+
+                    // 止损 = 入场价 ± STOP_LOSS_USD(R 往下,S 往上)
+                    let stop_loss = if s.side == "bullish" {
+                        entry_price - stop_loss_usd
+                    } else {
+                        entry_price + stop_loss_usd
+                    };
+
+                    // 止盈 = 入场 ± 风险 * RR
+                    let risk = (entry_price - stop_loss).abs();
+                    let take_profit = if s.side == "bullish" {
+                        entry_price + risk * take_profit_rr
+                    } else {
+                        entry_price - risk * take_profit_rr
+                    };
+
+                    // 计算数量(基于账户余额 * 仓位百分比)
+                    let balance = order::get_account_balance(&api_key, &api_secret, &base_url, "USDC").await;
+                    let quantity = order::calculate_quantity(
+                        &api_key, &api_secret, &base_url, &symbol, balance, position_pct, entry_price,
+                    ).await;
+                    if quantity <= 0.0 {
+                        warn!("[Order] quantity=0, skip (balance={})", balance);
+                    } else {
+                        let side = if s.side == "bullish" { "BUY" } else { "SELL" };
+                        let position_side = if s.side == "bullish" { "LONG" } else { "SHORT" };
+                        let order_id = format!("wick_{}_{}_{}", s.side, s.time, s.tier);
+                        match order::place_order_with_sl_tp(
+                            &api_key, &api_secret, &base_url, &symbol,
+                            side, position_side,
+                            entry_price, stop_loss, take_profit,
+                            quantity, &order_id,
+                        ).await {
+                            Ok(r) => {
+                                info!("[Order] placed {} entry={} qty={} SL={} TP={}",
+                                    side, r.entry_price, r.quantity, stop_loss, take_profit);
+                                let order_body = format!(
+                                    "\n\n### 🤖 自动下单\n\n- **方向**: {} {}\n- **入场价**: ${:.2}\n- **数量**: {:.4}\n- **止损**: ${:.2}\n- **止盈**: ${:.2}\n- **订单 ID**: {}",
+                                    side, position_side, r.entry_price, r.quantity, stop_loss, take_profit, r.order_id
+                                );
+                                let _ = broadcast(&notify, "🤖 自动下单成功", &(body.clone() + &order_body)).await;
+                            }
+                            Err(e) => {
+                                error!("[Order] place failed: {:?}", e);
+                                let order_body = format!("\n\n### ❌ 下单失败\n\n```\n{}\n```", e);
+                                let _ = broadcast(&notify, "❌ 下单失败", &(body.clone() + &order_body)).await;
+                            }
+                        }
+                    }
+                }
             }
         }
     }).await?;

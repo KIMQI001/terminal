@@ -3,7 +3,7 @@
 use crate::types::Candle;
 use anyhow::{anyhow, Context, Result};
 use reqwest::Client;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{info, warn};
 
@@ -19,6 +19,7 @@ pub struct OrderResult {
 
 /// 计算 HMAC-SHA256 签名
 fn sign_query(query: &str, secret: &str) -> String {
+    use base64::Engine;
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
     type HmacSha256 = Hmac<Sha256>;
@@ -62,7 +63,7 @@ pub async fn place_order_with_sl_tp(
         base_url, entry_qs, entry_sig
     );
 
-    #[derive(Serialize)]
+    #[derive(Serialize, Deserialize)]
     struct BinanceResp {
         #[serde(default)]
         orderId: u64,
@@ -173,22 +174,26 @@ pub async fn get_account_balance(
     if api_key.is_empty() || api_secret.is_empty() {
         return 0.0;
     }
-    let ts = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
     let qs = format!("timestamp={}", ts);
     let sig = sign_query(&qs, api_secret);
     let url = format!("{}/fapi/v2/account?{}&signature={}", base_url, qs, sig);
 
     let client = Client::new();
+    use anyhow::Context;
     let resp: serde_json::Value = match client
         .get(&url)
         .header("X-MBX-APIKEY", api_key)
         .send()
         .await
-        .context("get account")
-        .and_then(|r| async move { r.json::<serde_json::Value>().await.context("parse account") })
-        .await
     {
-        Ok(v) => v,
+        Ok(r) => match r.json::<serde_json::Value>().await {
+            Ok(v) => v,
+            Err(_) => return 0.0,
+        },
         Err(e) => {
             warn!("[Account] request failed: {}", e);
             return 0.0;
