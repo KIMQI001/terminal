@@ -114,16 +114,22 @@ where
             match msg {
                 Ok(Message::Text(text)) => {
                     debug!("ws msg: {} bytes", text.len());
-                    if let Ok(parsed) = serde_json::from_str::<WsKlineMsg>(&text) {
-                        if let Some(k) = parsed.k {
-                            on_candle(Candle {
-                                time: k.t / 1000,
-                                open: k.o.parse().unwrap_or(0.0),
-                                high: k.h.parse().unwrap_or(0.0),
-                                low: k.l.parse().unwrap_or(0.0),
-                                close: k.c.parse().unwrap_or(0.0),
-                                volume: k.v.parse().unwrap_or(0.0),
-                            }, k.x);
+                    match serde_json::from_str::<WsKlineMsg>(&text) {
+                        Ok(parsed) => {
+                            if let Some(k) = parsed.k {
+                                debug!("kline parsed: t={} x={}", k.t, k.x);
+                                on_candle(Candle {
+                                    time: k.t / 1000,
+                                    open: k.o.parse().unwrap_or(0.0),
+                                    high: k.h.parse().unwrap_or(0.0),
+                                    low: k.l.parse().unwrap_or(0.0),
+                                    close: k.c.parse().unwrap_or(0.0),
+                                    volume: k.v.parse().unwrap_or(0.0),
+                                }, k.x);
+                            }
+                        }
+                        Err(e) => {
+                            warn!("ws parse error: {} (text head: {})", e, &text[..text.len().min(120)]);
                         }
                     }
                 }
