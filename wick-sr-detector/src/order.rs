@@ -242,8 +242,14 @@ pub async fn cancel_all_orders(api_key: &str, api_secret: &str, base_url: &str, 
     Ok(())
 }
 
-/// 查 symbol 当前杠杆(从 /fapi/v1/leverage 读)
-/// 返回 `None` 表示失败或未配 API key(无 key 时不应读)
+/// 查 symbol 当前杠杆(从 /fapi/v2/positionRisk 读)
+///
+/// 为什么不调 `/fapi/v1/leverage`:那个 endpoint 只在用户之前调过 `POST /fapi/v1/leverage`
+/// 设置过 leverage 时才有数据,否则 -4028 报错("User's position settings of the symbol does not exist")。
+/// `/fapi/v2/positionRisk` 返回所有 symbol 的持仓信息(包括零持仓的),从里面找 leverage 更可靠。
+///
+/// 返回 `None` 表示未配 API key;其他情况总会返回 leverage(找不到时默认 20x,
+/// 跟前端 `/api/user/leverage` 的 fallback 行为一致)。
 pub async fn get_leverage(
     api_key: &str,
     api_secret: &str,
@@ -257,9 +263,9 @@ pub async fn get_leverage(
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    let qs = format!("symbol={}&timestamp={}", symbol, ts);
+    let qs = format!("timestamp={}", ts);
     let sig = sign_query(&qs, api_secret);
-    let url = format!("{}/fapi/v1/leverage?{}&signature={}", base_url, qs, sig);
+    let url = format!("{}/fapi/v2/positionRisk?{}&signature={}", base_url, qs, sig);
 
     let client = Client::new();
     let resp: serde_json::Value = match client
@@ -270,14 +276,26 @@ pub async fn get_leverage(
     {
         Ok(r) => match r.json::<serde_json::Value>().await {
             Ok(v) => v,
-            Err(_) => return None,
+            Err(e) => {
+                warn!("[Leverage] parse failed: {}", e);
+                return Some(20);  // 失败也默认 20x(跟前端一致)
+            }
         },
         Err(e) => {
             warn!("[Leverage] request failed: {}", e);
-            return None;
+            return Some(20);
         }
     };
-    resp.get("leverage")
-        .and_then(|v| v.as_u64())
-        .map(|v| v as u32)
+    // positionRisk 返回所有持仓数组,从里面找 symbol 匹配的条目,读 leverage
+    if let Some(arr) = resp.as_array() {
+        for p in arr {
+            if p.get("symbol").and_then(|v| v.as_str()) == Some(symbol) {
+                if let Some(lev) = p.get("leverage").and_then(|v| v.as_u64()) {
+                    return Some(lev as u32);
+                }
+            }
+        }
+    }
+    // 没找到 → 默认 20x(Binance USDⓈ-M 永续默认 leverage)
+    Some(20)
 }

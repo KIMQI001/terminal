@@ -129,21 +129,19 @@ async fn main() -> anyhow::Result<()> {
             "⛔ 关闭(只报警 — env BINANCE_API_KEY 未设,不下单)"
         };
 
-        // 当前杠杆(从 /fapi/v1/leverage 读)— 仅当配了 API key 时查询
+        // 当前杠杆(从 /fapi/v2/positionRisk 读)— 仅当配了 API key 时查询
         let leverage_section = match (&binance_config.api_key, &binance_config.api_secret) {
             (Some(k), Some(s)) => {
                 let base_url = std::env::var("BINANCE_BASE_URL")
                     .unwrap_or_else(|_| "https://fapi.binance.com".to_string());
                 match order::get_leverage(k, s, &base_url, &binance_config.symbol).await {
                     Some(lev) => format!(
-                        "\n\n### ⚙️ 当前杠杆\n\n- **{}**: **{}x**\n\n> 杠杆取用户在 Binance 面板上的设置,本程序不会修改"
+                        "\n\n### ⚙️ 当前杠杆\n\n- **{}**: **{}x**(来源 positionRisk)\n\n> 未持仓/未设置时 fallback 20x;实际 leverage 取用户在 Binance 面板上的设置,本程序不会修改"
                     , binance_config.symbol, lev),
-                    None => format!(
-                        "\n\n### ⚙️ 当前杠杆\n\n- **{}**: ⚠ 查询失败(可能该 symbol 未持仓或权限不足)\n\n> 配 key 后启动时自动读取"
-                    , binance_config.symbol),
+                    None => "\n\n### ⚙️ 当前杠杆\n\n- 未配 BINANCE_API_KEY/SECRET,无法查询".to_string(),
                 }
             }
-            _ => "\n\n### ⚙️ 当前杠杆\n\n- 未配 BINANCE_API_KEY/SECRET,无法查询\n\n> 配 key 后启动时自动读取".to_string(),
+            _ => "\n\n### ⚙️ 当前杠杆\n\n- 未配 BINANCE_API_KEY/SECRET,无法查询".to_string(),
         };
 
         // 最近 FVG 方向(用同一组历史 K 算)
