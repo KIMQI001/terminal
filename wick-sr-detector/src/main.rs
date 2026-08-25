@@ -116,15 +116,26 @@ async fn main() -> anyhow::Result<()> {
             }
             None => "\n\n### 📌 历史回溯中未发现 wick SR".to_string(),
         };
+        let auto_trade = if std::env::var("BINANCE_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .is_some()
+        {
+            "⚠ 开启(实盘 — BINANCE_API_KEY 已设,会下实单)"
+        } else {
+            "⛔ 关闭(只报警 — env BINANCE_API_KEY 未设,不下单)"
+        };
+        let auto_trade = if std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {"⚠ 开启(实盘 — BINANCE_API_KEY 已设,会下实单)"} else {"⛔ 关闭(只报警 — env BINANCE_API_KEY 未设,不下单)"};
+
         let body = format!(
             "### 🚀 wick-sr-detector 已启动\n\n\
 - **监控**: {} @ {}\n\
 - **回溯**: {} 根 K\n\
 - **Wick 阈值**: {:.2}\n\
-- **反转回溯**: {} 根{}",
+- **反转回溯**: {} 根\n- **自动下单**: {}{}",
             binance_config.symbol, binance_config.timeframe,
             lookback, detect_options.wick_ratio,
-            detect_options.reversal_lookback, wick_section
+            detect_options.reversal_lookback, auto_trade, wick_section
         );
 
         // 最近 FVG 方向(用同一组历史 K 算)
