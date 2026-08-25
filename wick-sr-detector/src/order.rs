@@ -123,9 +123,11 @@ async fn place_algo_order(
 ) -> Result<u64> {
     let (qty_p, price_p) = get_precision(symbol);
     let ts = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
+    // Algo 单触发价用 triggerPrice(不是 price)— 对齐前端 route.ts:225
+    // Binance 2025-12-09 迁移后强制:STOP_MARKET / TAKE_PROFIT_MARKET 必须用 triggerPrice
     let qs = format!(
         "algoType=CONDITIONAL&symbol={}&side={}&positionSide={}&type={}&\
-         quantity={}&price={}&clientAlgoId={}&timestamp={}",
+         quantity={}&triggerPrice={}&clientAlgoId={}&timestamp={}",
         symbol, side, position_side, order_type,
         format_qty(quantity, qty_p), format_qty(price, price_p),
         client_order_id, ts
