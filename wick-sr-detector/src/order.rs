@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 /// 下单结果
 #[derive(Debug, Clone)]
@@ -32,6 +32,175 @@ fn sign_query(query: &str, secret: &str) -> String {
     hex::encode(result.into_bytes())
 }
 
+/// 交易对精度表(对齐前端 src/app/api/user/order/route.ts:29-44)
+/// quantity/price 小数位
+const SYMBOL_PRECISION: &[(&str, u32, u32)] = &[
+    ("BTCUSDT", 3, 1),
+    ("ETHUSDT", 3, 2),
+    ("BNBUSDT", 2, 2),
+    ("SOLUSDT", 0, 2),
+    ("XRPUSDT", 1, 4),
+    ("DOGEUSDT", 0, 5),
+    ("ADAUSDT", 0, 4),
+    ("AVAXUSDT", 1, 2),
+    ("DOTUSDT", 1, 3),
+    ("LINKUSDT", 1, 3),
+    ("MATICUSDT", 0, 4),
+    ("LTCUSDT", 2, 2),
+    ("BTCUSDC", 3, 1),
+    ("ETHUSDC", 3, 2),
+];
+
+/// 取 symbol 的 quantity/price 精度,默认 (3, 2)
+fn get_precision(symbol: &str) -> (u32, u32) {
+    for (s, q, p) in SYMBOL_PRECISION {
+        if *s == symbol {
+            return (*q, *p);
+        }
+    }
+    (3, 2)
+}
+
+/// 格式化数量/价格(对齐前端 toFixed)
+fn format_qty(quantity: f64, precision: u32) -> String {
+    format!("{:.*}", precision as usize, quantity)
+}
+
+/// 验证 SL/TP 价格方向(对齐前端 validateStopPrice,src/app/api/user/order/route.ts:119-152)
+/// SL 平多 SELL:stopPrice < currentPrice
+/// SL 平空 BUY:stopPrice > currentPrice
+/// TP 平多 SELL:stopPrice > currentPrice
+/// TP 平空 BUY:stopPrice < currentPrice
+fn validate_stop_price(current_price: f64, stop_price: f64, side: &str, order_type: &str) -> bool {
+    match order_type {
+        "STOP_MARKET" => {
+            if side == "SELL" {
+                stop_price < current_price
+            } else {
+                stop_price > current_price
+            }
+        }
+        "TAKE_PROFIT_MARKET" => {
+            if side == "SELL" {
+                stop_price > current_price
+            } else {
+                stop_price < current_price
+            }
+        }
+        _ => true,
+    }
+}
+
+/// 查 symbol 当前价(/fapi/v1/ticker/price),失败返回 None
+async fn get_current_price(client: &Client, base_url: &str, symbol: &str) -> Option<f64> {
+    let url = format!("{}/fapi/v1/ticker/price?symbol={}", base_url, symbol);
+    let resp: serde_json::Value = match client.get(&url).send().await {
+        Ok(r) => match r.json::<serde_json::Value>().await {
+            Ok(v) => v,
+            Err(_) => return None,
+        },
+        Err(_) => return None,
+    };
+    resp.get("price")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<f64>().ok())
+}
+
+/// 单次 Algo 单下单(带 clientAlgoId 字段— Algo API 官方字段名)
+/// 返回 Err 时调用方决定是否重试
+async fn place_algo_order(
+    client: &Client,
+    api_key: &str,
+    api_secret: &str,
+    base_url: &str,
+    symbol: &str,
+    side: &str,
+    position_side: &str,
+    order_type: &str,
+    quantity: f64,
+    price: f64,
+    client_order_id: &str,
+) -> Result<u64> {
+    let (qty_p, price_p) = get_precision(symbol);
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
+    let qs = format!(
+        "algoType=CONDITIONAL&symbol={}&side={}&positionSide={}&type={}&\
+         quantity={}&price={}&clientAlgoId={}&timestamp={}",
+        symbol, side, position_side, order_type,
+        format_qty(quantity, qty_p), format_qty(price, price_p),
+        client_order_id, ts
+    );
+    let sig = sign_query(&qs, api_secret);
+    let url = format!("{}/fapi/v1/algoOrder?{}&signature={}", base_url, qs, sig);
+
+    #[derive(Serialize, Deserialize)]
+    struct AlgoResp {
+        #[serde(default, rename = "algoId")]
+        algo_id: u64,
+        #[serde(default)]
+        code: i32,
+        #[serde(default)]
+        msg: String,
+    }
+    let resp: AlgoResp = client
+        .post(&url)
+        .header("X-MBX-APIKEY", api_key)
+        .send()
+        .await
+        .context("send algo order")?
+        .json()
+        .await
+        .context("parse algo order")?;
+    if resp.code != 0 && resp.algo_id == 0 {
+        return Err(anyhow!("algo order failed: code={} msg={}", resp.code, resp.msg));
+    }
+    Ok(resp.algo_id)
+}
+
+/// Algo 单带重试(对齐前端 placeStopOrderWithRetry,默认 3 次 / 500ms)
+/// suffix 含 "_sl"/"_tp" 等,重试时变 "_sl_r1"/"_sl_r2"
+async fn place_algo_order_with_retry(
+    client: &Client,
+    api_key: &str,
+    api_secret: &str,
+    base_url: &str,
+    symbol: &str,
+    side: &str,
+    position_side: &str,
+    order_type: &str,
+    quantity: f64,
+    price: f64,
+    client_order_id_prefix: &str,
+    suffix: &str,
+) -> Option<u64> {
+    let max_retries = 2;
+    let retry_delay_ms = 500;
+    let mut last_err: Option<anyhow::Error> = None;
+    for attempt in 0..=max_retries {
+        let client_order_id = if attempt == 0 {
+            format!("{}{}", client_order_id_prefix, suffix)
+        } else {
+            format!("{}{}_r{}", client_order_id_prefix, suffix, attempt)
+        };
+        match place_algo_order(
+            client, api_key, api_secret, base_url,
+            symbol, side, position_side, order_type,
+            quantity, price, &client_order_id,
+        ).await {
+            Ok(id) => return Some(id),
+            Err(e) => {
+                warn!("[Algo] {} attempt {} failed: {}", order_type, attempt + 1, e);
+                last_err = Some(e);
+                if attempt < max_retries {
+                    tokio::time::sleep(std::time::Duration::from_millis(retry_delay_ms)).await;
+                }
+            }
+        }
+    }
+    error!("[Algo] {} all attempts failed: {:?}", order_type, last_err);
+    None
+}
+
 /// 下限价单(带止损 + 止盈 Algo 单,一次性下三单)
 pub async fn place_order_with_sl_tp(
     api_key: &str,
@@ -51,22 +220,28 @@ pub async fn place_order_with_sl_tp(
     }
 
     let client = Client::new();
-    let ts = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
 
-    // 1) 下限价单(入场)
+    // 0) 取当前价(用于 SL/TP 方向校验)— 失败也不阻塞主单,只是不下 SL/TP
+    let current_price = get_current_price(&client, base_url, symbol).await;
+    if current_price.is_none() {
+        warn!("[Order] 无法获取当前价,跳过 SL/TP 下单(主单照下)");
+    }
+
+    // 1) 下限价单(入场)— 同步单次(不重试)
+    let (qty_p, price_p) = get_precision(symbol);
+    let entry_ts = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
     let entry_qs = format!(
         "symbol={}&side={}&positionSide={}&type=LIMIT&timeInForce=GTC&\
          quantity={}&price={}&newClientOrderId={}_entry&timestamp={}",
-        symbol, side, position_side, quantity, entry_price, client_order_id_prefix, ts
+        symbol, side, position_side,
+        format_qty(quantity, qty_p), format_qty(entry_price, price_p),
+        client_order_id_prefix, entry_ts
     );
     let entry_sig = sign_query(&entry_qs, api_secret);
-    let entry_url = format!(
-        "{}/fapi/v1/order?{}&signature={}",
-        base_url, entry_qs, entry_sig
-    );
+    let entry_url = format!("{}/fapi/v1/order?{}&signature={}", base_url, entry_qs, entry_sig);
 
     #[derive(Serialize, Deserialize)]
-    struct BinanceResp {
+    struct EntryResp {
         #[serde(default, rename = "orderId")]
         order_id: u64,
         #[serde(default)]
@@ -74,8 +249,7 @@ pub async fn place_order_with_sl_tp(
         #[serde(default)]
         msg: String,
     }
-
-    let entry_resp: BinanceResp = client
+    let entry_resp: EntryResp = client
         .post(&entry_url)
         .header("X-MBX-APIKEY", api_key)
         .send()
@@ -84,65 +258,59 @@ pub async fn place_order_with_sl_tp(
         .json()
         .await
         .context("parse entry order")?;
-
     if entry_resp.code != 0 && entry_resp.order_id == 0 {
         return Err(anyhow!("entry order failed: code={} msg={}", entry_resp.code, entry_resp.msg));
     }
     info!("[Order] entry OK orderId={}", entry_resp.order_id);
 
-    // 2) 止损 Algo(STOP_MARKET)— 价到 stop_loss 触发市价
+    // 2) 止损 Algo + 3) 止盈 Algo — 共享 stop_side(SL/TP 都是平仓方向)
     let stop_side = if side == "BUY" { "SELL" } else { "BUY" };
-    let sl_ts = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
-    let sl_qs = format!(
-        "algoType=CONDITIONAL&symbol={}&side={}&positionSide={}&type=STOP_MARKET&\
-         quantity={}&price={}&newClientOrderId={}_sl&timestamp={}",
-        symbol, stop_side, position_side, quantity, stop_loss, client_order_id_prefix, sl_ts
-    );
-    let sl_sig = sign_query(&sl_qs, api_secret);
-    let sl_url = format!("{}/fapi/v1/algoOrder?{}&signature={}", base_url, sl_qs, sl_sig);
-    let sl_resp: BinanceResp = client
-        .post(&sl_url)
-        .header("X-MBX-APIKEY", api_key)
-        .send()
-        .await
-        .context("send stop loss")?
-        .json()
-        .await
-        .context("parse stop loss")?;
-    if sl_resp.code != 0 && sl_resp.order_id == 0 {
-        warn!("[Order] stop loss failed: code={} msg={}", sl_resp.code, sl_resp.msg);
-    } else {
-        info!("[Order] stop loss OK algoId={}", sl_resp.order_id);
-    }
+    let entry_order_id = entry_resp.order_id.to_string();
 
-    // 3) 止盈 Algo(TAKE_PROFIT_MARKET)
-    let tp_ts = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
-    let tp_qs = format!(
-        "algoType=CONDITIONAL&symbol={}&side={}&positionSide={}&type=TAKE_PROFIT_MARKET&\
-         quantity={}&price={}&newClientOrderId={}_tp&timestamp={}",
-        symbol, stop_side, position_side, quantity, take_profit, client_order_id_prefix, tp_ts
-    );
-    let tp_sig = sign_query(&tp_qs, api_secret);
-    let tp_url = format!("{}/fapi/v1/algoOrder?{}&signature={}", base_url, tp_qs, tp_sig);
-    let tp_resp: BinanceResp = client
-        .post(&tp_url)
-        .header("X-MBX-APIKEY", api_key)
-        .send()
-        .await
-        .context("send take profit")?
-        .json()
-        .await
-        .context("parse take profit")?;
-    if tp_resp.code != 0 && tp_resp.order_id == 0 {
-        warn!("[Order] take profit failed: code={} msg={}", tp_resp.code, tp_resp.msg);
-    } else {
-        info!("[Order] take profit OK algoId={}", tp_resp.order_id);
-    }
+    // 2) 止损 Algo
+    let stop_algo_id = match current_price {
+        Some(cp) if !validate_stop_price(cp, stop_loss, stop_side, "STOP_MARKET") => {
+            warn!(
+                "[Order] SL 价格方向无效,跳过: currentPrice={} stopLoss={} side={}",
+                cp, stop_loss, stop_side
+            );
+            String::new()
+        }
+        _ => {
+            place_algo_order_with_retry(
+                &client, api_key, api_secret, base_url,
+                symbol, stop_side, position_side, "STOP_MARKET",
+                quantity, stop_loss, &entry_order_id, "_sl",
+            ).await
+                .map(|id| id.to_string())
+                .unwrap_or_default()
+        }
+    };
+
+    // 3) 止盈 Algo
+    let tp_algo_id = match current_price {
+        Some(cp) if !validate_stop_price(cp, take_profit, stop_side, "TAKE_PROFIT_MARKET") => {
+            warn!(
+                "[Order] TP 价格方向无效,跳过: currentPrice={} takeProfit={} side={}",
+                cp, take_profit, stop_side
+            );
+            String::new()
+        }
+        _ => {
+            place_algo_order_with_retry(
+                &client, api_key, api_secret, base_url,
+                symbol, stop_side, position_side, "TAKE_PROFIT_MARKET",
+                quantity, take_profit, &entry_order_id, "_tp",
+            ).await
+                .map(|id| id.to_string())
+                .unwrap_or_default()
+        }
+    };
 
     Ok(OrderResult {
         order_id: entry_resp.order_id.to_string(),
-        stop_algo_id: sl_resp.order_id.to_string(),
-        tp_algo_id: tp_resp.order_id.to_string(),
+        stop_algo_id,
+        tp_algo_id,
         entry_price,
         quantity,
     })
