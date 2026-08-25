@@ -272,7 +272,7 @@ async fn main() -> anyhow::Result<()> {
                     error!("broadcast error: {e}");
                 }
 
-                // 自动下单(如果配了 API key)— 高等级或反转 wick 都下
+                // 自动下单(如果配了 API key + wick 是高等级 / 反转)
                 if std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {
                     let api_key = std::env::var("BINANCE_API_KEY").unwrap_or_default();
                     let api_secret = std::env::var("BINANCE_API_SECRET").unwrap_or_default();
