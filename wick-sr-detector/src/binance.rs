@@ -33,8 +33,9 @@ impl BinanceConfig {
     }
 
     fn ws_url(&self) -> String {
+        // USDC 永续合约在 /market/ 子路径(参考 pinbar-detector)
         format!(
-            "wss://fstream.binance.com/ws/{}@continuousKline_{}",
+            "wss://fstream.binance.com/market/ws/{}@kline_{}",
             self.symbol.to_lowercase(),
             self.timeframe
         )
