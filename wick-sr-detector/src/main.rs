@@ -15,7 +15,6 @@ mod types;
 use binance::BinanceConfig;
 use detector::{detect_wick_sr, DetectOptions};
 use notification::{broadcast, NotifyConfig};
-use order::{calculate_quantity, get_account_balance, place_order_with_sl_tp};
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -45,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(300);
-    let cooldown_min = std::env::var("ALERT_COOLDOWN_MIN")
+    let _cooldown_min = std::env::var("ALERT_COOLDOWN_MIN")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(15);
@@ -115,7 +114,7 @@ async fn main() -> anyhow::Result<()> {
                     "\n\n### 📌 历史最近一个 wick\n\n- **方向**: {} {}{}{}\n- **level**: ${:.2}\n- **zone**: [${:.2}, ${:.2}]\n- **wick 比例**: {:.0}%\n- **层级**: {}\n- **time(北京时间)**: {}",
                     arrow, side_label, reversal_tag, hq_tag,
                     w.level, w.zone_low, w.zone_high,
-                    w.ratio * 100.0, w.tier, time_str
+                    w.ratio * 100.0, w.tier, time_str,
                 )
             }
             None => "\n\n### 📌 历史回溯中未发现 wick SR".to_string(),
@@ -129,18 +128,6 @@ async fn main() -> anyhow::Result<()> {
         } else {
             "⛔ 关闭(只报警 — env BINANCE_API_KEY 未设,不下单)"
         };
-        let auto_trade = if std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {"⚠ 开启(实盘 — BINANCE_API_KEY 已设,会下实单)"} else {"⛔ 关闭(只报警 — env BINANCE_API_KEY 未设,不下单)"};
-
-        let body = format!(
-            "### 🚀 wick-sr-detector 已启动\n\n\
-- **监控**: {} @ {}\n\
-- **回溯**: {} 根 K\n\
-- **Wick 阈值**: {:.2}\n\
-- **反转回溯**: {} 根\n- **自动下单**: {}{}",
-            binance_config.symbol, binance_config.timeframe,
-            lookback, detect_options.wick_ratio,
-            detect_options.reversal_lookback, auto_trade, wick_section
-        );
 
         // 最近 FVG 方向(用同一组历史 K 算)
         let last_fvg = candles.lock().await.clone();
@@ -158,11 +145,17 @@ async fn main() -> anyhow::Result<()> {
         );
 
         let body = format!(
-            "### 🚀 wick-sr-detector 已启动\n\n- **监控**: {} @ {}\n- **回溯**: {} 根 K\n- **Wick 阈值**: {:.2}\n- **反转回溯**: {} 根\n- **自动下单**: {}{}",
+            "### 🚀 wick-sr-detector 已启动\n\n\
+- **监控**: {} @ {}\n\
+- **回溯**: {} 根 K\n\
+- **Wick 阈值**: {:.2}\n\
+- **反转回溯**: {} 根\n\
+- **自动下单**: {}{}{}",
             binance_config.symbol, binance_config.timeframe,
             lookback, detect_options.wick_ratio,
-            detect_options.reversal_lookback, auto_trade, wick_section
-        ) + &fvg_section;
+            detect_options.reversal_lookback, auto_trade, wick_section, fvg_section
+        );
+        debug!("startup body =\n{}", &body);
         match broadcast(&notify_config, "wick-sr-detector 启动", &body).await {
             Ok(()) => info!("startup notification sent"),
             Err(e) => error!("startup notification failed: {:?}", e),
@@ -297,11 +290,11 @@ async fn main() -> anyhow::Result<()> {
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(0.5);
                     let stop_loss_usd: f64 = std::env::var("STOP_LOSS_USD")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
-                    let take_profit_rr: f64 = std::env::var("TAKE_PROFIT_RR")
+                    let _take_profit_rr: f64 = std::env::var("TAKE_PROFIT_RR")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
                     let take_profit_usd: f64 = std::env::var("TAKE_PROFIT_USD")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
-                    let max_orders: u64 = std::env::var("MAX_OPEN_ORDERS")
+                    let _max_orders: u64 = std::env::var("MAX_OPEN_ORDERS")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(2);
 
                     // 计算入场价:高等级用收盘价,否则用 wick level
@@ -318,9 +311,9 @@ async fn main() -> anyhow::Result<()> {
                         entry_price + stop_loss_usd
                     };
 
-                    // 止盈 = 入场 ± 风险 * RR
-                    let risk = (entry_price - stop_loss).abs();
                     // 止盈:固定 USD 距离(默认 200,跟止损对称 = 1:1 RR)
+                    // 注释:`let _risk = (entry_price - stop_loss).abs();` 历史保留,R 比例可由此推导
+                    let _risk = (entry_price - stop_loss).abs();
                     let take_profit = if s.side == "bullish" {
                         entry_price + take_profit_usd
                     } else {
@@ -330,8 +323,8 @@ async fn main() -> anyhow::Result<()> {
                     // 计算数量(基于账户余额 * 仓位百分比)
                     let balance = order::get_account_balance(&api_key, &api_secret, &base_url, "USDC").await;
                     let quantity = order::calculate_quantity(
-                        &api_key, &api_secret, &base_url, &symbol, balance, position_pct, entry_price,
-                    ).await;
+                        balance, position_pct, entry_price,
+                    );
                     if quantity <= 0.0 {
                         warn!("[Order] quantity=0, skip (balance={})", balance);
                     } else {
