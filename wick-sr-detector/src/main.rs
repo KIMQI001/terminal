@@ -492,8 +492,27 @@ async fn main() -> anyhow::Result<()> {
                     let leverage_default: u32 = std::env::var("LEVERAGE_DEFAULT")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(100);
 
-                    // 计算入场价:高等级用收盘价,否则用 wick level
-                    let entry_price = if s.high_quality {
+                    // 计算入场价:
+// - 反转 wick(突破前 N 根极值):做多 = min(candle.low + reversal_offset, candle.close)
+//   做空 = max(candle.high - reversal_offset, candle.close)— 围绕反转点 ±offset USD
+//   跟收盘价比较,做多取较低(成交价更低),做空取较高(成交价更高)
+// - 普通 high_quality:用收盘价
+// - 普通 wick:用 wick level(中点)
+                    let reversal_offset_usd: f64 = std::env::var("REVERSAL_ENTRY_OFFSET_USD")
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
+                    let entry_price = if s.reversal {
+                        let candidate = if s.side == "bullish" {
+                            (candle.low + reversal_offset_usd).min(candle.close)
+                        } else {
+                            (candle.high - reversal_offset_usd).max(candle.close)
+                        };
+                        info!(
+                            "[Reverse wick entry] side={} low={} high={} close={} offset={} → entry={:.2} ({}offset vs close)",
+                            s.side, candle.low, candle.high, candle.close, reversal_offset_usd, candidate,
+                            if s.side == "bullish" { "low+" } else { "high-" }
+                        );
+                        candidate
+                    } else if s.high_quality {
                         candle.close
                     } else {
                         s.level
