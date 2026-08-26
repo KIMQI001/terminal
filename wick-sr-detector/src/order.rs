@@ -794,10 +794,13 @@ pub async fn ensure_protective_orders(
             } else {
                 entry + default_stop_usd
             };
-            // clientOrderId 加时间戳,避免 -4116 "ClientOrderId is duplicated"
-            // (Binance 同一个 clientAlgoId 24h 内不可重复使用)
-            let now_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
-            let client_order_id = format!("protect_{}_{}_sl_{}", symbol, position_side, now_ts);
+            // clientOrderId 加时间戳(秒级)避免重复 -4116;
+            // 同时要 < 36 字符(Binance 限制)— 用短前缀 + ts_secs
+            // 格式: p_{symbol}_{L_or_S}_{type}_{ts_secs}
+            // 例: p_BTCUSDC_L_sl_1787733900 (25 字符)
+            let now_secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+            let side_short = if position_side == "LONG" { "L" } else { "S" };
+            let client_order_id = format!("p_{}_{}_sl_{}", symbol, side_short, now_secs);
             match place_algo_order(
                 &client, api_key, api_secret, base_url,
                 &symbol, stop_side, &position_side, "STOP_MARKET",
@@ -822,8 +825,9 @@ pub async fn ensure_protective_orders(
             } else {
                 entry - default_tp_usd
             };
-            let now_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
-            let client_order_id = format!("protect_{}_{}_tp_{}", symbol, position_side, now_ts);
+            let now_secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+            let side_short = if position_side == "LONG" { "L" } else { "S" };
+            let client_order_id = format!("p_{}_{}_tp_{}", symbol, side_short, now_secs);
             match place_algo_order(
                 &client, api_key, api_secret, base_url,
                 &symbol, stop_side, &position_side, "TAKE_PROFIT_MARKET",
