@@ -164,16 +164,52 @@ async fn main() -> anyhow::Result<()> {
             fvg_min_gap_percent
         );
 
+        // SR fallback 信息:辅助显示 fallback 用的最高 R 或最低 S
+        let sr_fallback_section = if source_label == "SR" {
+            let srs = detector::scan_recent_srs(&last_fvg, &detect_options, 60);
+            // 找最高 R 和最低 S
+            let highest_r = srs.iter()
+                .filter(|s| s.side == "bearish")
+                .max_by(|a, b| a.zone_high.partial_cmp(&b.zone_high).unwrap_or(std::cmp::Ordering::Equal));
+            let lowest_s = srs.iter()
+                .filter(|s| s.side == "bullish")
+                .min_by(|a, b| a.zone_low.partial_cmp(&b.zone_low).unwrap_or(std::cmp::Ordering::Equal));
+            // 找更新的那个
+            let chosen = match (highest_r, lowest_s) {
+                (Some(r), Some(s)) => {
+                    if r.time > s.time { Some(r) } else { Some(s) }
+                }
+                (Some(r), None) => Some(r),
+                (None, Some(s)) => Some(s),
+                _ => None,
+            };
+            match chosen {
+                Some(sr) => {
+                    let sr_side = if sr.side == "bullish" { "支撑 S" } else { "阻力 R" };
+                    format!(
+                        "\n\n### 🛡️ SR Fallback 详情\n\n- **类型**: {}\n- **zone**: [${:.2}, ${:.2}]\n- **level**: ${:.2}\n- **K 线时间(北京)**: {}\n- **选这个的理由**: 最近 60 根 K 内 {} ({} 时间更新)",
+                        sr_side, sr.zone_low, sr.zone_high, sr.level,
+                        format_beijing_time(sr.time),
+                        sr_side,
+                        format_beijing_time(sr.time)
+                    )
+                }
+                None => String::new(),
+            }
+        } else {
+            String::new()
+        };
+
         let body = format!(
             "### 🚀 wick-sr-detector 已启动\n\n\
 - **监控**: {} @ {}\n\
 - **回溯**: {} 根 K\n\
 - **Wick 阈值**: {:.2}\n\
 - **反转回溯**: {} 根\n\
-- **自动下单**: {}{}{}{}",
+- **自动下单**: {}{}{}{}{}",
             binance_config.symbol, binance_config.timeframe,
             lookback, detect_options.wick_ratio,
-            detect_options.reversal_lookback, auto_trade, leverage_section, wick_section, fvg_section
+            detect_options.reversal_lookback, auto_trade, leverage_section, wick_section, fvg_section, sr_fallback_section
         );
         debug!("startup body =\n{}", &body);
         match broadcast(&notify_config, "wick-sr-detector 启动", &body).await {

@@ -430,7 +430,7 @@ pub fn latest_fvg_direction(
 /// 扫最近 N 根 K,找所有未被戳破的 wick SR zones
 /// - R(阻力)未戳破:后续 K 的 high 没超过 zone_high
 /// - S(支撑)未戳破:后续 K 的 low 没低于 zone_low
-fn scan_recent_srs(
+pub fn scan_recent_srs(
     candles: &[Candle],
     options: &DetectOptions,
     lookback_count: usize,
