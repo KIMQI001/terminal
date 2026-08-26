@@ -443,7 +443,8 @@ async fn main() -> anyhow::Result<()> {
 - **level**: ${:.2}\n\
 - **zone**: [${:.2}, ${:.2}]\n\
 - **wick 比例**: {:.0}%\n\
-- **层级**: {}{}{}",
+- **层级**: {}\n\
+- **FVG 方向**: {} → {}{}{}",
                     reversal_tag, hq_tag, "".to_string(),
                     symbol,
                     side_label,
@@ -453,6 +454,14 @@ async fn main() -> anyhow::Result<()> {
                     s.zone_low, s.zone_high,
                     s.ratio * 100.0,
                     s.tier,
+                    if long_only { "long (看涨)" } else { "short (看跌)" },
+                    if s.reversal {
+                        "反转 wick → 不过滤,直接报"
+                    } else if (s.side == "bullish" && long_only) || (s.side == "bearish" && !long_only) {
+                        "方向匹配 → 报"
+                    } else {
+                        "方向不匹配 → 本应被过滤(检查代码)"
+                    },
                     reversal_line,
                     hq_line
                 );
