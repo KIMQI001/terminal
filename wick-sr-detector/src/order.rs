@@ -754,13 +754,15 @@ pub async fn ensure_protective_orders(
     };
 
     // 收集已有 Algo 单(按 symbol|type → triggerPrice 列表,**不依赖 positionSide 字段**)
-// 容忍 hedge (LONG/SHORT) vs one-way (BOTH) 模式 positionSide 字段不一致的误判
+// 收集所有 Algo 单的 triggerPrice(不分 type,因为 Binance 返回的 type 字段可能为空/缺失)
+    // SL/TP 分类在持仓循环内根据 triggerPrice 跟 entry 的位置关系判定:
+    // - LONG 仓:triggerPrice < entry → SL,triggerPrice > entry → TP
+    // - SHORT 仓:triggerPrice > entry → SL,triggerPrice < entry → TP
     let mut existing: std::collections::HashMap<String, Vec<f64>> = std::collections::HashMap::new();
     let mut algo_count: u32 = 0;
     if let Some(arr) = algo_resp.as_array() {
         for a in arr {
             let symbol = a.get("symbol").and_then(|v| v.as_str()).unwrap_or("");
-            let order_type = a.get("type").and_then(|v| v.as_str()).unwrap_or("");
             let position_side = a.get("positionSide").and_then(|v| v.as_str()).unwrap_or("?");
             let algo_id = a.get("algoId").and_then(|v| v.as_u64()).unwrap_or(0);
             let client_algo_id = a.get("clientAlgoId").and_then(|v| v.as_str()).unwrap_or("");
@@ -769,13 +771,13 @@ pub async fn ensure_protective_orders(
                 .and_then(|v| v.as_str())
                 .and_then(|s| s.parse::<f64>().ok())
                 .unwrap_or(0.0);
-            let key = format!("{}|{}", symbol, order_type);
+            // key 用 symbol(忽略 type,因为 type 字段可能缺失)
+            let key = symbol.to_string();
             algo_count += 1;
             existing.entry(key).or_insert_with(Vec::new).push(trigger_price);
-            // INFO 级别:每次保护 task 跑都打印所有 Algo 单(辅助用户判断为什么 has_sl/has_tp 是 false)
             info!(
-                "[Protect] Algo 单: algoId={} clientAlgoId={} symbol={} type={} positionSide={} triggerPrice={}",
-                algo_id, client_algo_id, symbol, order_type, position_side, trigger_price
+                "[Protect] Algo 单: algoId={} clientAlgoId={} symbol={} positionSide={} triggerPrice={}",
+                algo_id, client_algo_id, symbol, position_side, trigger_price
             );
         }
     }
@@ -797,28 +799,41 @@ pub async fn ensure_protective_orders(
         let side = if amt > 0.0 { "BUY" } else { "SELL" };
         let stop_side = if side == "BUY" { "SELL" } else { "BUY" };
         let quantity = amt.abs();
-        let sl_key = format!("{}|STOP_MARKET", symbol);
-        let tp_key = format!("{}|TAKE_PROFIT_MARKET", symbol);
 
-        // SL:existing 里有没有 triggerPrice 跟 entry 距离 ≤ tolerance
-        let sl_prices = existing.get(&sl_key);
-        let has_sl = sl_prices.map_or(false, |prices| {
-            prices.iter().any(|&p| p > 0.0 && (p - entry).abs() <= tolerance)
-        });
+        // 不依赖 type 字段(可能缺失),按 triggerPrice 跟 entry 的位置分类:
+        // - LONG 仓:triggerPrice < entry → SL,triggerPrice > entry → TP
+        // - SHORT 仓:triggerPrice > entry → SL,triggerPrice < entry → TP
+        let prices = existing.get(&symbol).cloned().unwrap_or_default();
+        let has_sl = if position_side == "LONG" {
+            prices.iter().any(|&p| p > 0.0 && p < entry && (entry - p).abs() <= tolerance)
+        } else {
+            prices.iter().any(|&p| p > 0.0 && p > entry && (p - entry).abs() <= tolerance)
+        };
+        let has_tp = if position_side == "LONG" {
+            prices.iter().any(|&p| p > 0.0 && p > entry && (p - entry).abs() <= tolerance)
+        } else {
+            prices.iter().any(|&p| p > 0.0 && p < entry && (entry - p).abs() <= tolerance)
+        };
         // 诊断:为什么判定 false
         if !has_sl {
-            match sl_prices {
-                Some(prices) if !prices.is_empty() => {
-                    let dists: Vec<String> = prices.iter()
-                        .map(|&p| format!("${:.2}(dist=${:.0})", p, (p - entry).abs()))
-                        .collect();
-                    warn!(
-                        "[Protect] {} {} SL 判定 false: entry={} tolerance={} 已有 triggerPrices=[{}] 都超距离",
-                        symbol, position_side, entry, tolerance, dists.join(", ")
-                    );
-                }
-                Some(_) => warn!("[Protect] {} {} SL 判定 false: key={} 命中但 prices 空", symbol, position_side, sl_key),
-                None => warn!("[Protect] {} {} SL 判定 false: key={} 未命中(existing map 没这个 key)", symbol, position_side, sl_key),
+            // 诊断:为什么判定 false
+            if !prices.is_empty() {
+                let dists: Vec<String> = prices.iter()
+                    .map(|&p| {
+                        let pos = if position_side == "LONG" {
+                            if p < entry { "below_entry" } else { "above_entry" }
+                        } else {
+                            if p > entry { "above_entry" } else { "below_entry" }
+                        };
+                        format!("${:.2}(dist=${:.0},{})", p, (p - entry).abs(), pos)
+                    })
+                    .collect();
+                warn!(
+                    "[Protect] {} {} SL 判定 false: entry={} tolerance={} 已有 triggerPrices=[{}]",
+                    symbol, position_side, entry, tolerance, dists.join(", ")
+                );
+            } else {
+                warn!("[Protect] {} {} SL 判定 false: 没有任何 Algo 单", symbol, position_side);
             }
         }
         if !has_sl {
@@ -849,9 +864,6 @@ pub async fn ensure_protective_orders(
         }
 
         // TP
-        let has_tp = existing.get(&tp_key).map_or(false, |prices| {
-            prices.iter().any(|&p| p > 0.0 && (p - entry).abs() <= tolerance)
-        });
         if !has_tp {
             let tp_price = if position_side == "LONG" {
                 entry + default_tp_usd
