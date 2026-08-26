@@ -505,7 +505,7 @@ let tier_label = format!("{}{}", if s.side == "bullish" { "S" } else { "R" }, s.
                 } else {
                     String::new()
                 };
-                let hq_line = if s.high_quality {
+let hq_line = if s.high_quality {
                     let candle_type = if candle.close > candle.open { "阳 K" } else { "阴 K" };
                     let reason_desc = match s.high_quality_reason.as_str() {
                         "directional" => format!("方向匹配(R 在阳 K / S 在阴 K,收盘价收不回原方向 → {})", candle_type),
@@ -520,7 +520,14 @@ let tier_label = format!("{}{}", if s.side == "bullish" { "S" } else { "R" }, s.
                 } else {
                     String::new()
                 };
-let body = format!(
+                let action_line = if s.reversal {
+                    "\n- **动作**: 🔁 反转 wick → **触发下单**\n"
+                } else if s.high_quality {
+                    "\n- **动作**: ⭐高等级 → **仅报警,不下单**\n"
+                } else {
+                    "\n- **动作**: 普通 wick → **仅报警,不下单**\n"
+                };
+                let body = format!(
                     "### 📐 wick SR 触发{}{}{}\n\n\
 - **交易对**: {}\n\
 - **方向**: {} ({} {})\n\
@@ -529,7 +536,7 @@ let body = format!(
 - **zone**: [${:.2}, ${:.2}]\n\
 - **wick 比例**: {:.0}%\n\
 - **层级**: {}\n\
-- **FVG 方向**: {} → {}{}",
+- **FVG 方向**: {} → {}{}{}",
                     reversal_tag, hq_tag, "".to_string(),
                     symbol,
                     side_label,
@@ -548,7 +555,8 @@ let body = format!(
                         "方向不匹配 → 本应被过滤(检查代码)"
                     },
                     reversal_line,
-                    hq_line
+                    hq_line,
+                    action_line
                 );
                 warn!("new wick SR: {}/{} @ {}", s.side, s.level, s.time);
                 if let Err(e) = broadcast(&notify, &title, &body).await {
@@ -556,7 +564,7 @@ let body = format!(
                 }
 
                 // 自动下单(如果配了 API key)— 只高等级 wick 下单
-                if s.high_quality && std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {
+                if s.reversal && std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {
                     let api_key = std::env::var("BINANCE_API_KEY").unwrap_or_default();
                     let api_secret = std::env::var("BINANCE_API_SECRET").unwrap_or_default();
                     let base_url = std::env::var("BINANCE_BASE_URL")
