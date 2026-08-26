@@ -241,11 +241,22 @@ async fn main() -> anyhow::Result<()> {
         let api_secret_protect = api_secret_global.clone();
         let base_url_protect = base_url_global.clone();
         let notify_protect = notify_clone.clone();
+        let symbol_for_cache = symbol.clone();
         tokio::spawn(async move {
+            let symbol_for_cache = symbol_for_cache.clone();
             let mut rounds: u32 = 0;
+            // 本地 cache:60s 内刚补过的 (symbol, position_side, type) — 防止 Algo 单 30s 后
+            // 查不到(交易所异步/用户其他脚本清掉)时反复补
+            let mut recently_attempted: std::collections::HashMap<
+                (String, String, &'static str),
+                std::time::Instant,
+            > = std::collections::HashMap::new();
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                 rounds += 1;
+                // 清理 60s 前的 cache 项
+                let now_inst = std::time::Instant::now();
+                recently_attempted.retain(|_, t| now_inst.duration_since(*t).as_secs() < 60);
                 match order::ensure_protective_orders(
                     &api_key_protect,
                     &api_secret_protect,
@@ -259,9 +270,22 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                     Ok(n) => {
+                        // 标记"刚补过",60s 内不重试同 (symbol, position_side, type)
+                        let key_sl = (
+                            symbol_for_cache.clone(),
+                            "LONG".to_string(),
+                            "STOP_MARKET",
+                        );
+                        let key_tp = (
+                            symbol_for_cache.clone(),
+                            "LONG".to_string(),
+                            "TAKE_PROFIT_MARKET",
+                        );
+                        recently_attempted.insert(key_sl, std::time::Instant::now());
+                        recently_attempted.insert(key_tp, std::time::Instant::now());
                         warn!("[Protect] 给 {} 个仓位补了 SL/TP(默认 {} USD 距离)", n, protective_stop_usd);
                         let body = format!(
-                            "\n\n### 🛡️ 仓位保护\n\n- **补单数量**: {}\n- **止损距离**: ${}\n- **止盈距离**: ${}\n\n> 检测到仓位但缺 SL/TP,自动补上(防止裸奔)",
+                            "\n\n### 🛡️ 仓位保护\n\n- **补单数量**: {}\n- **止损距离**: ${}\n- **止盈距离**: ${}\n\n> 检测到仓位但缺 SL/TP,自动补上(防止裸奔)。60s 内同 (symbol, side, type) 不重试",
                             n, protective_stop_usd, protective_tp_usd
                         );
                         let _ = broadcast(&notify_protect, "🛡️ 仓位 SL/TP 已补", &body).await;
