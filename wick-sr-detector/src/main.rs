@@ -149,15 +149,15 @@ async fn main() -> anyhow::Result<()> {
 
         // 最近 FVG 方向(用同一组历史 K 算)
         let last_fvg = candles.lock().await.clone();
-        let fvg_dir = detector::latest_fvg_direction(&last_fvg, fvg_min_gap_percent);
-        let (trend_label, trend_arrow, long_only) = match fvg_dir {
-            Some(true)  => ("long (看涨 FVG)",  "↑", true),
-            Some(false) => ("short (看跌 FVG)", "↓", false),
-            None        => ("无 FVG(不限)",     "—", true),
+        let fvg_info = detector::latest_fvg_direction(&last_fvg, fvg_min_gap_percent);
+        let (trend_label, trend_arrow, long_only, fvg_time_str, fvg_gap_str) = match fvg_info {
+            Some((true, time, gap)) => ("long (看涨 FVG)", "↑", true, format_beijing_time(time), format!("${:.2}", gap)),
+            Some((false, time, gap)) => ("short (看跌 FVG)", "↓", false, format_beijing_time(time), format!("${:.2}", gap)),
+            None => ("无 FVG(不限)", "—", true, "(无)".to_string(), "-".to_string()),
         };
         let fvg_section = format!(
-            "\n\n### 📊 当前 FVG 方向\n\n- **趋势**: {} {}\n- **方向过滤**: {}\n- **FVG 阈值**: {:.2}%",
-            trend_arrow, trend_label,
+            "\n\n### 📊 当前 FVG 方向\n\n- **趋势**: {} {}\n- **FVG 时间(北京)**: {}\n- **FVG gap**: {}\n- **方向过滤**: {}\n- **FVG 阈值**: {:.2}%",
+            trend_arrow, trend_label, fvg_time_str, fvg_gap_str,
             if long_only { "只报 支撑 S" } else { "只报 阻力 R" },
             fvg_min_gap_percent
         );
@@ -365,22 +365,25 @@ async fn main() -> anyhow::Result<()> {
             // 方向过滤:long 趋势只报 S(支撑),short 趋势只报 R(阻力)
             // - 最近 FVG 看涨 → long → true
             // - 最近 FVG 看跌 → short → false
-            // - 无 FVG → None → 不限
-            let long_only = match detector::latest_fvg_direction(&c_snapshot, fvg_min_gap_percent) {
-                Some(true) => true,
-                Some(false) => false,
-                None => true,
+            // - 无 FVG → None → 不限(默认 long)
+            let fvg_info = detector::latest_fvg_direction(&c_snapshot, fvg_min_gap_percent);
+            let (long_only, fvg_time_str, fvg_gap_str) = match fvg_info {
+                Some((true, time, gap)) => (true, format_beijing_time(time), format!("${:.2}", gap)),
+                Some((false, time, gap)) => (false, format_beijing_time(time), format!("${:.2}", gap)),
+                None => (true, "(无 FVG)".to_string(), "-".to_string()),
             };
             let want_bullish = long_only;  // long → 只要 S(bullish)
             let want_bearish = !long_only; // short → 只要 R(bearish)
 
             // 检测新触发的(time + side 没报过)
             info!(
-                "tick: candle_time={} bullish_count={} bear_count={} long_only={}",
+                "tick: candle_time={} bullish_count={} bear_count={} long_only={} fvg_time={} fvg_gap={}",
                 candle.time,
                 signals.iter().filter(|x| x.side == "bullish").count(),
                 signals.iter().filter(|x| x.side == "bearish").count(),
-                long_only
+                long_only,
+                fvg_time_str,
+                fvg_gap_str
             );
             let mut reported_lock = reported.lock().await;
             let now = chrono::Utc::now().timestamp();

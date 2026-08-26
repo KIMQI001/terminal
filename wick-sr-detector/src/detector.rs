@@ -330,15 +330,17 @@ pub fn detect_wick_sr_for_last(
     results
 }
 
-/// 检测最近一个 FVG 的方向(用 K 线 + FVG 三档字段判断)
+/// 检测最近一个 FVG 的方向 + 时间 + gap 大小
 /// 简化:扫最后 LOOKBACK_FVG 根 K 线,找最近的 bullish/bearish FVG
 ///
-/// 返回 `Some(true)` = 最近 FVG 是看涨(long 趋势) / `Some(false)` = 看跌
-/// `None` = 没找到 FVG(无趋势判断)
+/// 三元组(方向, 时间, gap USD):
+/// - `Some((true, time, gap))` = 最近 FVG 是看涨(long 趋势),FVG 时间=三 K 中间 K
+/// - `Some((false, time, gap))` = 看跌
+/// - `None` = 没找到 FVG(无趋势判断)
 pub fn latest_fvg_direction(
     candles: &[crate::types::Candle],
-    fvg_size_ratio: f64,  // gap / prev.high(看涨)或 / prev.low(看跌)
-) -> Option<bool> {
+    fvg_size_ratio: f64,
+) -> Option<(bool, i64, f64)> {
     if candles.len() < 3 {
         return None;
     }
@@ -346,7 +348,7 @@ pub fn latest_fvg_direction(
     let last_idx = candles.len() - 1;
     for i in (2..last_idx).rev() {
         let c1 = &candles[i - 2];
-        let _c2 = &candles[i - 1];  // 中间 K:FVG 三K结构只取 c1/c3
+        let c2 = &candles[i - 1];  // 中间 K
         let c3 = &candles[i];
         let range_c3_low_to_c1_high = c3.low - c1.high;
         let range_c1_low_to_c3_high = c1.low - c3.high;
@@ -356,7 +358,7 @@ pub fn latest_fvg_direction(
             && c1.high > 0.0
             && (range_c3_low_to_c1_high / c1.high) * 100.0 >= fvg_size_ratio
         {
-            return Some(true);
+            return Some((true, c2.time, range_c3_low_to_c1_high));
         }
 
         // 看跌 FVG:gap 在 c1.low - c3.high,需 > 0
@@ -364,7 +366,7 @@ pub fn latest_fvg_direction(
             && c1.low > 0.0
             && (range_c1_low_to_c3_high / c1.low) * 100.0 >= fvg_size_ratio
         {
-            return Some(false);
+            return Some((false, c2.time, range_c1_low_to_c3_high));
         }
     }
     None
