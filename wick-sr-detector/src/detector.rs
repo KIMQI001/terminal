@@ -331,57 +331,172 @@ pub fn detect_wick_sr_for_last(
 }
 
 /// 检测最近一个 FVG 的方向 + 时间 + gap 大小(已剔除被填充的)
-/// 简化:扫最后 LOOKBACK_FVG 根 K 线,找最近的、未被后续 K 填充的 bullish/bearish FVG
+/// 简化:扫最近 `fvg_lookback_count` 根 K 线,找最近的、未被后续 K 填充的 FVG
+///
+/// 如果没找到未填充 FVG → fallback:
+/// 在最近 fvg_lookback_count 根 K 内扫所有未被戳破的 SR(zones),
+/// 找最高 R 和最低 S,比较时间戳:
+/// - 最高 R 时间更新 → 返回 (false, r.time, 0.0)  // short trend
+/// - 最低 S 时间更新 → 返回 (true, s.time, 0.0)   // long trend
 ///
 /// 三元组(方向, 时间, gap USD):
-/// - `Some((true, time, gap))` = 最近未被填充的看涨 FVG,FVG 时间=三 K 中间 K
-/// - `Some((false, time, gap))` = 最近未被填充的看跌 FVG
-/// - `None` = 没找到未被填充的 FVG(无趋势判断)
+/// - `Some((true, time, gap))` = 最近未被填充的看涨 FVG(或 SR fallback long)
+/// - `Some((false, time, gap))` = 最近未被填充的看跌 FVG(或 SR fallback short)
+/// - `None` = FVG + SR fallback 都没找到(无趋势判断)
 pub fn latest_fvg_direction(
     candles: &[crate::types::Candle],
     fvg_size_ratio: f64,
+    options: &DetectOptions,
+    fvg_lookback_count: usize,
 ) -> Option<(bool, i64, f64)> {
     if candles.len() < 3 {
         return None;
     }
-    // 从右往左找最近一个 FVG
-    let last_idx = candles.len() - 1;
-    for i in (2..last_idx).rev() {
+
+    // ===== 第一步:扫最近 fvg_lookback_count 根 K 找未填充 FVG =====
+    // 从右往左,起点 = max(2, candles.len() - fvg_lookback_count)
+    let start = candles.len().saturating_sub(fvg_lookback_count).max(2);
+    for i in (start..candles.len() - 1).rev() {
+        if i < 2 {
+            break;
+        }
         let c1 = &candles[i - 2];
         let c2 = &candles[i - 1]; // 中间 K
         let c3 = &candles[i];
         let range_c3_low_to_c1_high = c3.low - c1.high;
         let range_c1_low_to_c3_high = c1.low - c3.high;
 
-        // 看涨 FVG:gap 在 c3.low - c1.high,需 > 0
+        // 看涨 FVG
         if range_c3_low_to_c1_high > 0.0
             && c1.high > 0.0
             && (range_c3_low_to_c1_high / c1.high) * 100.0 >= fvg_size_ratio
         {
-            // 判定"是否被填充":后续任一 K 的 low 进入了 gap 区间(< c1.high)
-            // 即 K 进入 [c1.high, c3.low] 区间 → FVG 被填充 → 跳过
+            // 填充判定:后续任一 K 的 low < c1.high
             let filled = (i + 1..candles.len())
                 .any(|j| candles[j].low < c1.high);
             if filled {
-                continue; // 被填充,继续往前找
+                continue;
             }
             return Some((true, c2.time, range_c3_low_to_c1_high));
         }
 
-        // 看跌 FVG:gap 在 c1.low - c3.high,需 > 0
+        // 看跌 FVG
         if range_c1_low_to_c3_high > 0.0
             && c1.low > 0.0
             && (range_c1_low_to_c3_high / c1.low) * 100.0 >= fvg_size_ratio
         {
-            // 判定"是否被填充":后续任一 K 的 high 进入了 gap 区间(> c1.low)
-            // 即 K 进入 [c3.high, c1.low] 区间 → FVG 被填充 → 跳过
             let filled = (i + 1..candles.len())
                 .any(|j| candles[j].high > c1.low);
             if filled {
-                continue; // 被填充,继续往前找
+                continue;
             }
             return Some((false, c2.time, range_c1_low_to_c3_high));
         }
     }
-    None
+
+    // ===== 第二步:fallback — 扫所有未戳破的 SR =====
+    let srs = scan_recent_srs(candles, options, fvg_lookback_count);
+    if srs.is_empty() {
+        return None;
+    }
+    // 找最高 R(zone_high 最大,表示最大阻力位)
+    let highest_r = srs
+        .iter()
+        .filter(|s| s.side == "bearish")
+        .max_by(|a, b| a.zone_high.partial_cmp(&b.zone_high).unwrap_or(std::cmp::Ordering::Equal));
+    // 找最低 S(zone_low 最小,表示最大支撑位)
+    let lowest_s = srs
+        .iter()
+        .filter(|s| s.side == "bullish")
+        .min_by(|a, b| a.zone_low.partial_cmp(&b.zone_low).unwrap_or(std::cmp::Ordering::Equal));
+
+    match (highest_r, lowest_s) {
+        (Some(r), Some(s)) => {
+            // 比较时间戳:哪个更新就 follow 哪个方向
+            if r.time > s.time {
+                // 最高 R 更新 → short trend(从支撑涨不上去,转跌)
+                Some((false, r.time, 0.0))
+            } else {
+                // 最低 S 更新 → long trend(从阻力跌不破,转涨)
+                Some((true, s.time, 0.0))
+            }
+        }
+        (Some(r), None) => Some((false, r.time, 0.0)),
+        (None, Some(s)) => Some((true, s.time, 0.0)),
+        (None, None) => None,
+    }
+}
+
+/// 扫最近 N 根 K,找所有未被戳破的 wick SR zones
+/// - R(阻力)未戳破:后续 K 的 high 没超过 zone_high
+/// - S(支撑)未戳破:后续 K 的 low 没低于 zone_low
+fn scan_recent_srs(
+    candles: &[Candle],
+    options: &DetectOptions,
+    lookback_count: usize,
+) -> Vec<WickSR> {
+    if candles.len() < 3 {
+        return Vec::new();
+    }
+    let start = candles.len().saturating_sub(lookback_count).max(2);
+    let mut results = Vec::new();
+    for i in (start..candles.len() - 1).rev() {
+        if i < 2 {
+            break;
+        }
+        let c = &candles[i];
+        let body_top = c.open.max(c.close);
+        let body_bottom = c.open.min(c.close);
+        let range = c.high - c.low;
+        if range <= 0.0 {
+            continue;
+        }
+        let upper_wick = c.high - body_top;
+        let lower_wick = body_bottom - c.low;
+        let upper_ratio = upper_wick / range;
+        let lower_ratio = lower_wick / range;
+
+        // 上影(阻力 R)— 未被后续 K 的 high > c.high 戳破
+        if upper_ratio >= options.wick_ratio {
+            let broken = (i + 1..candles.len()).any(|j| candles[j].high > c.high);
+            if !broken {
+                let level = (body_top + c.high) / 2.0;
+                results.push(WickSR {
+                    time: c.time,
+                    side: "bearish".to_string(),
+                    level,
+                    zone_low: body_top,
+                    zone_high: c.high,
+                    ratio: upper_ratio,
+                    tier: 1,
+                    index: i as i64,
+                    reversal: is_reversal_wick(c, candles, "bearish", options.reversal_lookback),
+                    high_quality: false,
+                    high_quality_reason: String::new(),
+                });
+            }
+        }
+
+        // 下影(支撑 S)— 未被后续 K 的 low < c.low 戳破
+        if lower_ratio >= options.wick_ratio {
+            let broken = (i + 1..candles.len()).any(|j| candles[j].low < c.low);
+            if !broken {
+                let level = (c.low + body_bottom) / 2.0;
+                results.push(WickSR {
+                    time: c.time,
+                    side: "bullish".to_string(),
+                    level,
+                    zone_low: c.low,
+                    zone_high: body_bottom,
+                    ratio: lower_ratio,
+                    tier: 1,
+                    index: i as i64,
+                    reversal: is_reversal_wick(c, candles, "bullish", options.reversal_lookback),
+                    high_quality: false,
+                    high_quality_reason: String::new(),
+                });
+            }
+        }
+    }
+    results
 }

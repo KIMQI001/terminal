@@ -149,15 +149,17 @@ async fn main() -> anyhow::Result<()> {
 
         // 最近 FVG 方向(用同一组历史 K 算)
         let last_fvg = candles.lock().await.clone();
-        let fvg_info = detector::latest_fvg_direction(&last_fvg, fvg_min_gap_percent);
-        let (trend_label, trend_arrow, long_only, fvg_time_str, fvg_gap_str) = match fvg_info {
-            Some((true, time, gap)) => ("long (看涨 FVG)", "↑", true, format_beijing_time(time), format!("${:.2}", gap)),
-            Some((false, time, gap)) => ("short (看跌 FVG)", "↓", false, format_beijing_time(time), format!("${:.2}", gap)),
-            None => ("无 FVG(不限)", "—", true, "(无)".to_string(), "-".to_string()),
+        let fvg_info = detector::latest_fvg_direction(&last_fvg, fvg_min_gap_percent, &detect_options, 60);
+        let (trend_label, trend_arrow, long_only, fvg_time_str, fvg_gap_str, source_label) = match fvg_info {
+            Some((true, time, gap)) if gap > 0.0 => ("long (看涨 FVG)", "↑", true, format_beijing_time(time), format!("${:.2}", gap), "FVG".to_string()),
+            Some((false, time, gap)) if gap > 0.0 => ("short (看跌 FVG)", "↓", false, format_beijing_time(time), format!("${:.2}", gap), "FVG".to_string()),
+            Some((true, time, _)) => ("long (SR fallback)", "↑", true, format_beijing_time(time), "(无 FVG, 用 SR)".to_string(), "SR".to_string()),
+            Some((false, time, _)) => ("short (SR fallback)", "↓", false, format_beijing_time(time), "(无 FVG, 用 SR)".to_string(), "SR".to_string()),
+            None => ("无 FVG/SR(不限)", "—", true, "(无)".to_string(), "-".to_string(), "NONE".to_string()),
         };
         let fvg_section = format!(
-            "\n\n### 📊 当前 FVG 方向\n\n- **趋势**: {} {}\n- **FVG 时间(北京)**: {}\n- **FVG gap**: {}\n- **方向过滤**: {}\n- **FVG 阈值**: {:.2}%",
-            trend_arrow, trend_label, fvg_time_str, fvg_gap_str,
+            "\n\n### 📊 当前 FVG 方向\n\n- **趋势**: {} {}\n- **FVG 时间(北京)**: {}\n- **FVG gap**: {}\n- **判定来源**: {}\n- **方向过滤**: {}\n- **FVG 阈值**: {:.2}%",
+            trend_arrow, trend_label, fvg_time_str, fvg_gap_str, source_label,
             if long_only { "只报 支撑 S" } else { "只报 阻力 R" },
             fvg_min_gap_percent
         );
@@ -366,11 +368,13 @@ async fn main() -> anyhow::Result<()> {
             // - 最近 FVG 看涨 → long → true
             // - 最近 FVG 看跌 → short → false
             // - 无 FVG → None → 不限(默认 long)
-            let fvg_info = detector::latest_fvg_direction(&c_snapshot, fvg_min_gap_percent);
+            let fvg_info = detector::latest_fvg_direction(&c_snapshot, fvg_min_gap_percent, &opts, 60);
             let (long_only, fvg_time_str, fvg_gap_str) = match fvg_info {
-                Some((true, time, gap)) => (true, format_beijing_time(time), format!("${:.2}", gap)),
-                Some((false, time, gap)) => (false, format_beijing_time(time), format!("${:.2}", gap)),
-                None => (true, "(无 FVG)".to_string(), "-".to_string()),
+                Some((true, time, gap)) if gap > 0.0 => (true, format_beijing_time(time), format!("${:.2}", gap)),
+                Some((false, time, gap)) if gap > 0.0 => (false, format_beijing_time(time), format!("${:.2}", gap)),
+                Some((true, time, _)) => (true, format_beijing_time(time), "(SR fallback)".to_string()),
+                Some((false, time, _)) => (false, format_beijing_time(time), "(SR fallback)".to_string()),
+                None => (true, "(无 FVG/SR)".to_string(), "-".to_string()),
             };
             let want_bullish = long_only;  // long → 只要 S(bullish)
             let want_bearish = !long_only; // short → 只要 R(bearish)
