@@ -753,24 +753,22 @@ pub async fn ensure_protective_orders(
         Err(_) => serde_json::json!([]),
     };
 
-    // 收集已有 SL/TP(按 symbol|positionSide|type → triggerPrice 列表)
-    // value 用 Vec<triggerPrice> 而不是 bool — 加入价格距离验证,
-    // 容忍 positionSide 字段不一致(LONG vs BOTH)误判
+    // 收集已有 Algo 单(按 symbol|type → triggerPrice 列表,**不依赖 positionSide 字段**)
+// 容忍 hedge (LONG/SHORT) vs one-way (BOTH) 模式 positionSide 字段不一致的误判
     let mut existing: std::collections::HashMap<String, Vec<f64>> = std::collections::HashMap::new();
     if let Some(arr) = algo_resp.as_array() {
         for a in arr {
             let symbol = a.get("symbol").and_then(|v| v.as_str()).unwrap_or("");
-            let position_side = a.get("positionSide").and_then(|v| v.as_str()).unwrap_or("");
             let order_type = a.get("type").and_then(|v| v.as_str()).unwrap_or("");
             let trigger_price = a.get("triggerPrice").and_then(|v| v.as_str())
                 .and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
-            let key = format!("{}|{}|{}", symbol, position_side, order_type);
+            let key = format!("{}|{}", symbol, order_type);
             existing.entry(key).or_insert_with(Vec::new).push(trigger_price);
         }
     }
 
     // 价格容忍度:跟 entry 距离 ≤ max(default_stop_usd, default_tp_usd) * 1.5
-    // 默认 200 → tolerance = 300 USD。即:同一仓位附近 300 USD 内已有同 type Algo → 算"有"
+    // 默认 200 → tolerance = 300 USD。即:同一 symbol 附近 300 USD 内已有同 type Algo → 算"有"
     let tolerance = (default_stop_usd.max(default_tp_usd)) * 1.5;
 
     // 3) 对每个持仓补 SL/TP
@@ -783,10 +781,10 @@ pub async fn ensure_protective_orders(
         let side = if amt > 0.0 { "BUY" } else { "SELL" };
         let stop_side = if side == "BUY" { "SELL" } else { "BUY" };
         let quantity = amt.abs();
-        let sl_key = format!("{}|{}|STOP_MARKET", symbol, position_side);
-        let tp_key = format!("{}|{}|TAKE_PROFIT_MARKET", symbol, position_side);
+        let sl_key = format!("{}|STOP_MARKET", symbol);
+        let tp_key = format!("{}|TAKE_PROFIT_MARKET", symbol);
 
-        // SL:检查 existing[(sl_key)] 里是否有 triggerPrice 跟 entry 距离 ≤ tolerance 的
+        // SL:existing 里有没有 triggerPrice 跟 entry 距离 ≤ tolerance
         let has_sl = existing.get(&sl_key).map_or(false, |prices| {
             prices.iter().any(|&p| p > 0.0 && (p - entry).abs() <= tolerance)
         });
@@ -796,21 +794,25 @@ pub async fn ensure_protective_orders(
             } else {
                 entry + default_stop_usd
             };
-            let client_order_id = format!("protect_{}_{}_sl", symbol, position_side);
+            // clientOrderId 加时间戳,避免 -4116 "ClientOrderId is duplicated"
+            // (Binance 同一个 clientAlgoId 24h 内不可重复使用)
+            let now_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
+            let client_order_id = format!("protect_{}_{}_sl_{}", symbol, position_side, now_ts);
             match place_algo_order(
                 &client, api_key, api_secret, base_url,
                 &symbol, stop_side, &position_side, "STOP_MARKET",
                 quantity, stop_price, &client_order_id,
             ).await {
                 Ok(id) => {
-                    info!("[Protect] {} {} SL 补单: algoId={} stop_price={}", symbol, position_side, id, stop_price);
+                    info!("[Protect] {} {} SL 补单: algoId={} stop_price={} clientAlgoId={}",
+                        symbol, position_side, id, stop_price, client_order_id);
                     placed += 1;
                 }
                 Err(e) => warn!("[Protect] {} {} SL 补单失败: {}", symbol, position_side, e),
             }
         }
 
-        // TP:同样价格验证
+        // TP
         let has_tp = existing.get(&tp_key).map_or(false, |prices| {
             prices.iter().any(|&p| p > 0.0 && (p - entry).abs() <= tolerance)
         });
@@ -820,14 +822,16 @@ pub async fn ensure_protective_orders(
             } else {
                 entry - default_tp_usd
             };
-            let client_order_id = format!("protect_{}_{}_tp", symbol, position_side);
+            let now_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
+            let client_order_id = format!("protect_{}_{}_tp_{}", symbol, position_side, now_ts);
             match place_algo_order(
                 &client, api_key, api_secret, base_url,
                 &symbol, stop_side, &position_side, "TAKE_PROFIT_MARKET",
                 quantity, tp_price, &client_order_id,
             ).await {
                 Ok(id) => {
-                    info!("[Protect] {} {} TP 补单: algoId={} algo_price={}", symbol, position_side, id, tp_price);
+                    info!("[Protect] {} {} TP 补单: algoId={} tp_price={} clientAlgoId={}",
+                        symbol, position_side, id, tp_price, client_order_id);
                     placed += 1;
                 }
                 Err(e) => warn!("[Protect] {} {} TP 补单失败: {}", symbol, position_side, e),
