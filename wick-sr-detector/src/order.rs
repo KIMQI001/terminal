@@ -775,7 +775,7 @@ pub async fn ensure_protective_orders(
             let key = symbol.to_string();
             algo_count += 1;
             existing.entry(key).or_insert_with(Vec::new).push(trigger_price);
-            info!(
+            debug!(
                 "[Protect] Algo 单: algoId={} clientAlgoId={} symbol={} positionSide={} triggerPrice={}",
                 algo_id, client_algo_id, symbol, position_side, trigger_price
             );
