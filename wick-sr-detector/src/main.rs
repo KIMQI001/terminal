@@ -578,7 +578,17 @@ async fn main() -> anyhow::Result<()> {
                         );
                         candidate
                     } else if s.high_quality {
-                        candle.close
+                        // 高等级信号(影线长,close 不一定最优):比较极值 ± 200 跟 close
+                        // S 做多:min(下影最低+200, close) — 极值+200 跟 close 取较低
+                        // R 做空:max(上影最高-200, close) — 极值-200 跟 close 取较高
+                        // 默认 200 USD 偏移(env 可改)
+                        let hq_offset_usd: f64 = std::env::var("HQ_ENTRY_OFFSET_USD")
+                            .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
+                        if s.side == "bullish" {
+                            (candle.low + hq_offset_usd).min(candle.close)
+                        } else {
+                            (candle.high - hq_offset_usd).max(candle.close)
+                        }
                     } else {
                         s.level
                     };
