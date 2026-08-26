@@ -90,6 +90,9 @@ async fn main() -> anyhow::Result<()> {
     // reported: HashMap<(candle_time, side), 报警 unix 秒>
     // 同一信号在 cooldown_secs 内不重复报警 + 下单
     let reported: Arc<Mutex<HashMap<(i64, String), i64>>> = Arc::new(Mutex::new(HashMap::new()));
+    // 跨 K SR 累计序号:(symbol, side) → (last_wick_time, last_tier)
+    // 跟前端 rejection.ts 一致 — 同一根 K 多 wick 同 tier,不同 K tier += 1
+    let last_wick: Arc<Mutex<HashMap<(String, String), (i64, u32)>>> = Arc::new(Mutex::new(HashMap::new()));
     let signals: Vec<crate::types::WickSR> = {
         let c = candles.lock().await;
         let sigs = detect_wick_sr(&c, &[], &detect_options);
@@ -221,6 +224,7 @@ async fn main() -> anyhow::Result<()> {
     // WS 实时 K 线
     let candles_clone = candles.clone();
     let reported_clone = reported.clone();
+    let last_wick_clone = last_wick.clone();
     let notify_clone = notify_config.clone();
     let detect_options_clone = detect_options.clone();
     let symbol = binance_config.symbol.clone();
@@ -396,6 +400,7 @@ async fn main() -> anyhow::Result<()> {
     binance::stream_klines(&binance_config, move |candle, is_closed| {
         let candles = candles_clone.clone();
         let reported = reported_clone.clone();
+        let last_wick = last_wick_clone.clone();
         let notify = notify_clone.clone();
         let opts = detect_options_clone.clone();
         let symbol = symbol.clone();
@@ -451,13 +456,25 @@ async fn main() -> anyhow::Result<()> {
             );
             let mut reported_lock = reported.lock().await;
             let now = chrono::Utc::now().timestamp();
-            for s in signals {
+            // 计算每个 wick 的 tier — 跨 K 累计序号(对齐前端 rejection.ts)
+            // 同一根 K 多个 wick(同 K 上下影)同 tier,不同 K tier += 1
+            let mut last_wick_lock = last_wick.lock().await;
+            for mut s in signals {
                 // 方向过滤
                 let side_is_bullish = s.side == "bullish";
                 if !s.reversal && ((side_is_bullish && !want_bullish) || (!side_is_bullish && !want_bearish)) {
                     info!("filtered by direction: {} (long_only={})", s.side, long_only);
                     continue;
                 }
+                // 计算 tier:跨 K 累计序号
+                let side_key = (symbol.clone(), s.side.clone());
+                let tier = match last_wick_lock.get(&side_key) {
+                    Some((last_time, last_tier)) if *last_time == candle.time => *last_tier, // 同 K 多个 wick 同 tier
+                    Some((_last_time, last_tier)) => last_tier + 1, // 不同 K 累计
+                    None => 1, // 首次
+                };
+                s.tier = tier;
+                last_wick_lock.insert(side_key, (candle.time, tier));
                 let key = (s.time, s.side.clone());
                 // 冷却:距上次报警不足 cooldown_secs → 跳过
                 // (cooldown_secs == 0 时 now - last_ts >= 0 恒成立 → 等效关闭冷却)
@@ -478,9 +495,10 @@ async fn main() -> anyhow::Result<()> {
                 let side_label = if s.side == "bullish" { "支撑 S" } else { "阻力 R" };
                 let reversal_tag = if s.reversal { " 🔄反转" } else { "" };
                 let hq_tag = if s.high_quality { " ⭐高等级" } else { "" };
+let tier_label = format!("{}{}", if s.side == "bullish" { "S" } else { "R" }, s.tier);
                 let title = format!(
-                    "{arrow} wick {} ({} tier={}){}{}",
-                    symbol, side_label, s.tier, reversal_tag, hq_tag
+                    "{arrow} wick {} ({} {}){}{}",
+                    symbol, side_label, tier_label, reversal_tag, hq_tag
                 );
                 let reversal_line = if s.reversal {
                     format!("\n- **反转 wick**: K 线 high/low 是回溯 {} 根的极值(突破前高 / 跌破前低)\n", opts.reversal_lookback)
@@ -502,25 +520,25 @@ async fn main() -> anyhow::Result<()> {
                 } else {
                     String::new()
                 };
-                let body = format!(
+let body = format!(
                     "### 📐 wick SR 触发{}{}{}\n\n\
 - **交易对**: {}\n\
-- **方向**: {} ({} )\n\
+- **方向**: {} ({} {})\n\
 - **K 线时间(北京)**: {}\n\
 - **level**: ${:.2}\n\
 - **zone**: [${:.2}, ${:.2}]\n\
 - **wick 比例**: {:.0}%\n\
 - **层级**: {}\n\
-- **FVG 方向**: {} → {}{}{}",
+- **FVG 方向**: {} → {}{}",
                     reversal_tag, hq_tag, "".to_string(),
                     symbol,
                     side_label,
-                    s.side,
+                    tier_label,
                     format_beijing_time(s.time),
                     s.level,
                     s.zone_low, s.zone_high,
                     s.ratio * 100.0,
-                    s.tier,
+                    tier_label,
                     if long_only { "long (看涨)" } else { "short (看跌)" },
                     if s.reversal {
                         "反转 wick → 不过滤,直接报"
