@@ -330,13 +330,13 @@ pub fn detect_wick_sr_for_last(
     results
 }
 
-/// 检测最近一个 FVG 的方向 + 时间 + gap 大小
-/// 简化:扫最后 LOOKBACK_FVG 根 K 线,找最近的 bullish/bearish FVG
+/// 检测最近一个 FVG 的方向 + 时间 + gap 大小(已剔除被填充的)
+/// 简化:扫最后 LOOKBACK_FVG 根 K 线,找最近的、未被后续 K 填充的 bullish/bearish FVG
 ///
 /// 三元组(方向, 时间, gap USD):
-/// - `Some((true, time, gap))` = 最近 FVG 是看涨(long 趋势),FVG 时间=三 K 中间 K
-/// - `Some((false, time, gap))` = 看跌
-/// - `None` = 没找到 FVG(无趋势判断)
+/// - `Some((true, time, gap))` = 最近未被填充的看涨 FVG,FVG 时间=三 K 中间 K
+/// - `Some((false, time, gap))` = 最近未被填充的看跌 FVG
+/// - `None` = 没找到未被填充的 FVG(无趋势判断)
 pub fn latest_fvg_direction(
     candles: &[crate::types::Candle],
     fvg_size_ratio: f64,
@@ -348,7 +348,7 @@ pub fn latest_fvg_direction(
     let last_idx = candles.len() - 1;
     for i in (2..last_idx).rev() {
         let c1 = &candles[i - 2];
-        let c2 = &candles[i - 1];  // 中间 K
+        let c2 = &candles[i - 1]; // 中间 K
         let c3 = &candles[i];
         let range_c3_low_to_c1_high = c3.low - c1.high;
         let range_c1_low_to_c3_high = c1.low - c3.high;
@@ -358,6 +358,13 @@ pub fn latest_fvg_direction(
             && c1.high > 0.0
             && (range_c3_low_to_c1_high / c1.high) * 100.0 >= fvg_size_ratio
         {
+            // 判定"是否被填充":后续任一 K 的 low 进入了 gap 区间(< c1.high)
+            // 即 K 进入 [c1.high, c3.low] 区间 → FVG 被填充 → 跳过
+            let filled = (i + 1..candles.len())
+                .any(|j| candles[j].low < c1.high);
+            if filled {
+                continue; // 被填充,继续往前找
+            }
             return Some((true, c2.time, range_c3_low_to_c1_high));
         }
 
@@ -366,6 +373,13 @@ pub fn latest_fvg_direction(
             && c1.low > 0.0
             && (range_c1_low_to_c3_high / c1.low) * 100.0 >= fvg_size_ratio
         {
+            // 判定"是否被填充":后续任一 K 的 high 进入了 gap 区间(> c1.low)
+            // 即 K 进入 [c3.high, c1.low] 区间 → FVG 被填充 → 跳过
+            let filled = (i + 1..candles.len())
+                .any(|j| candles[j].high > c1.low);
+            if filled {
+                continue; // 被填充,继续往前找
+            }
             return Some((false, c2.time, range_c1_low_to_c3_high));
         }
     }
