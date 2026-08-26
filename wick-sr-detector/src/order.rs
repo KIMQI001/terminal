@@ -91,6 +91,55 @@ fn validate_stop_price(current_price: f64, stop_price: f64, side: &str, order_ty
     }
 }
 
+/// 反向 positionSide(LONG ↔ SHORT)
+pub fn opposite(s: &str) -> String {
+    match s {
+        "LONG" => "SHORT".to_string(),
+        "SHORT" => "LONG".to_string(),
+        _ => "?".to_string(),
+    }
+}
+
+/// 查 symbol 当前持仓列表(symbol, positionSide, positionAmt)— 用于反向仓位检测
+pub async fn get_positions_for_reverse(
+    api_key: &str,
+    api_secret: &str,
+    base_url: &str,
+    symbol: &str,
+) -> Vec<(String, String, f64)> {
+    if api_key.is_empty() || api_secret.is_empty() {
+        return Vec::new();
+    }
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis()).unwrap_or(0);
+    let qs = format!("timestamp={}", ts);
+    let sig = sign_query(&qs, api_secret);
+    let url = format!("{}/fapi/v2/positionRisk?{}&signature={}", base_url, qs, sig);
+    let client = Client::new();
+    let resp: serde_json::Value = match client.get(&url)
+        .header("X-MBX-APIKEY", api_key).send().await
+    {
+        Ok(r) => match r.json().await {
+            Ok(v) => v,
+            Err(_) => return Vec::new(),
+        },
+        Err(_) => return Vec::new(),
+    };
+    let mut positions = Vec::new();
+    if let Some(arr) = resp.as_array() {
+        for p in arr {
+            let symbol_v = p.get("symbol").and_then(|v| v.as_str()).unwrap_or("");
+            if symbol_v != symbol { continue; }
+            let amt = p.get("positionAmt").and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+            if amt.abs() < 0.0001 { continue; }
+            let position_side = if amt > 0.0 { "LONG".to_string() } else { "SHORT".to_string() };
+            positions.push((symbol_v.to_string(), position_side, amt));
+        }
+    }
+    positions
+}
+
 /// 查 symbol 当前价(/fapi/v1/ticker/price),失败返回 None
 async fn get_current_price(client: &Client, base_url: &str, symbol: &str) -> Option<f64> {
     let url = format!("{}/fapi/v1/ticker/price?symbol={}", base_url, symbol);
@@ -640,6 +689,50 @@ pub async fn list_open_algo_orders(
         }
     }
     Ok(algos)
+}
+
+/// 市价平仓现有仓位(用于反向仓位重开场景)
+/// - side: 跟现有仓位相反(如仓位 LONG → side=SELL 平掉)
+/// - quantity: |positionAmt|,reduceOnly=true
+/// - 失败返回 Err,成功返回 orderId
+pub async fn place_close_position_market(
+    api_key: &str,
+    api_secret: &str,
+    base_url: &str,
+    symbol: &str,
+    side: &str,           // "BUY" 平 SHORT / "SELL" 平 LONG
+    position_side: &str,  // "LONG" / "SHORT"
+    quantity: f64,
+) -> Result<u64> {
+    let (qty_p, _) = get_precision(symbol);
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
+    let qs = format!(
+        "symbol={}&side={}&positionSide={}&type=MARKET&quantity={}&reduceOnly=true&timestamp={}",
+        symbol, side, position_side, format_qty(quantity, qty_p), ts
+    );
+    let sig = sign_query(&qs, api_secret);
+    let url = format!("{}/fapi/v1/order?{}&signature={}", base_url, qs, sig);
+
+    #[derive(Serialize, Deserialize)]
+    struct CloseResp {
+        #[serde(default, rename = "orderId")]
+        order_id: u64,
+        #[serde(default)]
+        code: i32,
+        #[serde(default)]
+        msg: String,
+    }
+    let resp: CloseResp = reqwest::Client::new()
+        .post(&url)
+        .header("X-MBX-APIKEY", api_key)
+        .send().await
+        .context("send close order")?
+        .json().await
+        .context("parse close order")?;
+    if resp.code != 0 && resp.order_id == 0 {
+        return Err(anyhow!("close position failed: code={} msg={}", resp.code, resp.msg));
+    }
+    Ok(resp.order_id)
 }
 
 /// 取消单个 Algo 单
