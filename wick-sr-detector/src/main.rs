@@ -564,7 +564,24 @@ let hq_line = if s.high_quality {
                 }
 
                 // 自动下单(如果配了 API key)— 只高等级 wick 下单
-                if s.reversal && std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {
+                // 下单条件:
+// - 反转 wick:始终下单(无视 FVG 方向,因为反转本身就是趋势反转)
+// - 高等级 wick(非反转):仅在 20-24 时段(纽约交易时间)+ 方向同向 才下单
+//   (用户规则:纽约时段趋势强,适合同向高等级;其他时段只报警)
+                let hq_trade_hour_start: u32 = std::env::var("HQ_TRADE_HOUR_START")
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(20);
+                let hq_trade_hour_end: u32 = std::env::var("HQ_TRADE_HOUR_END")
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(24);
+                let now_beijing = chrono::Utc::now() + chrono::Duration::hours(8);
+                let current_hour: u32 = now_beijing.format("%H").to_string().parse().unwrap_or(0);
+                let in_hq_trade_window = current_hour >= hq_trade_hour_start
+                    && current_hour < hq_trade_hour_end;
+                let hq_same_direction = s.high_quality && in_hq_trade_window && (
+                    (s.side == "bullish" && long_only) ||
+                    (s.side == "bearish" && !long_only)
+                );
+                let will_trade = s.reversal || hq_same_direction;
+                if will_trade && std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {
                     let api_key = std::env::var("BINANCE_API_KEY").unwrap_or_default();
                     let api_secret = std::env::var("BINANCE_API_SECRET").unwrap_or_default();
                     let base_url = std::env::var("BINANCE_BASE_URL")
@@ -715,6 +732,8 @@ let hq_line = if s.high_quality {
                         let use_market = s.reversal && s.high_quality;
                         if use_market {
                             info!("[Order] 反转 + 高等级 → 市价单立即入场(K 形态确认强度,不等挂单成交)");
+                        } else if hq_same_direction {
+                            info!("[Order] 20-24 高等级同向 → 限价单挂单 entry={}", entry_price);
                         } else {
                             info!("[Order] 普通反转 → 限价单挂单 entry={}", entry_price);
                         }
