@@ -672,11 +672,15 @@ let hq_line = if s.high_quality {
                         }
                     }
 
-                    // 止损 = 入场价 ± STOP_LOSS_USD(R 往下,S 往上)
+                    // 止损 = entry ± STOP_LOSS_USD 跟 K 极值取离 entry 较近的那个
+//   - S 做多:max(entry - stop_loss, candle.low)— 取较高(离 entry 较近 = 止损小)
+                    //   如果 candle.low 比 entry - 200 更接近 entry,SL = candle.low(更紧)
+                    //   否则 SL = entry - 200(标准距离)
+                    //   同理 R 做空:min(entry + stop_loss, candle.high)
                     let stop_loss = if s.side == "bullish" {
-                        entry_price - stop_loss_usd
+                        (entry_price - stop_loss_usd).max(candle.low)
                     } else {
-                        entry_price + stop_loss_usd
+                        (entry_price + stop_loss_usd).min(candle.high)
                     };
 
                     // 止盈:R 倍风险(stop 距离 × RR,默认 1.0 = 1:1 对称)
