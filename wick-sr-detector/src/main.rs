@@ -571,7 +571,7 @@ let hq_line = if s.high_quality {
                 let hq_trade_hour_start: u32 = std::env::var("HQ_TRADE_HOUR_START")
                     .ok().and_then(|s| s.parse().ok()).unwrap_or(20);
                 let hq_trade_hour_end: u32 = std::env::var("HQ_TRADE_HOUR_END")
-                    .ok().and_then(|s| s.parse().ok()).unwrap_or(24);
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(23);
                 let now_beijing = chrono::Utc::now() + chrono::Duration::hours(8);
                 let current_hour: u32 = now_beijing.format("%H").to_string().parse().unwrap_or(0);
                 let in_hq_trade_window = current_hour >= hq_trade_hour_start
