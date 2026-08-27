@@ -265,6 +265,7 @@ pub async fn place_order_with_sl_tp(
     take_profit: f64,
     quantity: f64,
     client_order_id_prefix: &str,
+    market_order: bool,   // true → 市价立即成交(MARKET);false → 限价挂单(LIMIT)
 ) -> Result<OrderResult> {
     if api_key.is_empty() || api_secret.is_empty() {
         return Err(anyhow!("BINANCE_API_KEY/SECRET 未配置,跳过下单"));
@@ -278,16 +279,27 @@ pub async fn place_order_with_sl_tp(
         warn!("[Order] 无法获取当前价,跳过 SL/TP 下单(主单照下)");
     }
 
-    // 1) 下限价单(入场)— 同步单次(不重试)
+    // 1) 下主单:市价单(MARKET)立即成交 或 限价单(LIMIT)挂单
     let (qty_p, price_p) = get_precision(symbol);
     let entry_ts = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
-    let entry_qs = format!(
-        "symbol={}&side={}&positionSide={}&type=LIMIT&timeInForce=GTC&\
-         quantity={}&price={}&newClientOrderId={}_entry&timestamp={}",
-        symbol, side, position_side,
-        format_qty(quantity, qty_p), format_qty(entry_price, price_p),
-        client_order_id_prefix, entry_ts
-    );
+    let entry_type = if market_order { "MARKET" } else { "LIMIT" };
+    let entry_qs = if market_order {
+        // 市价单不需要 price 字段,只需 timeInForce
+        format!(
+            "symbol={}&side={}&positionSide={}&type=MARKET&quantity={}&newClientOrderId={}_entry&timestamp={}",
+            symbol, side, position_side,
+            format_qty(quantity, qty_p),
+            client_order_id_prefix, entry_ts
+        )
+    } else {
+        format!(
+            "symbol={}&side={}&positionSide={}&type=LIMIT&timeInForce=GTC&\
+             quantity={}&price={}&newClientOrderId={}_entry&timestamp={}",
+            symbol, side, position_side,
+            format_qty(quantity, qty_p), format_qty(entry_price, price_p),
+            client_order_id_prefix, entry_ts
+        )
+    };
     let entry_sig = sign_query(&entry_qs, api_secret);
     let entry_url = format!("{}/fapi/v1/order?{}&signature={}", base_url, entry_qs, entry_sig);
 
@@ -312,7 +324,7 @@ pub async fn place_order_with_sl_tp(
     if entry_resp.code != 0 && entry_resp.order_id == 0 {
         return Err(anyhow!("entry order failed: code={} msg={}", entry_resp.code, entry_resp.msg));
     }
-    info!("[Order] entry OK orderId={}", entry_resp.order_id);
+    info!("[Order] entry OK ({} order) orderId={}", entry_type, entry_resp.order_id);
 
     // 2) 止损 Algo + 3) 止盈 Algo — 共享 stop_side(SL/TP 都是平仓方向)
     let stop_side = if side == "BUY" { "SELL" } else { "BUY" };
