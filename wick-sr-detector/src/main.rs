@@ -154,10 +154,15 @@ async fn main() -> anyhow::Result<()> {
         let last_fvg = candles.lock().await.clone();
         let fvg_info = detector::latest_fvg_direction(&last_fvg, fvg_min_gap_percent, &detect_options, 60);
         let (trend_label, trend_arrow, long_only, fvg_time_str, fvg_gap_str, source_label) = match fvg_info {
-            Some((true, time, gap)) if gap > 0.0 => ("long (看涨 FVG)", "↑", true, format_beijing_time(time), format!("${:.2}", gap), "FVG".to_string()),
-            Some((false, time, gap)) if gap > 0.0 => ("short (看跌 FVG)", "↓", false, format_beijing_time(time), format!("${:.2}", gap), "FVG".to_string()),
-            Some((true, time, _)) => ("long (SR fallback)", "↑", true, format_beijing_time(time), "(无 FVG, 用 SR)".to_string(), "SR".to_string()),
-            Some((false, time, _)) => ("short (SR fallback)", "↓", false, format_beijing_time(time), "(无 FVG, 用 SR)".to_string(), "SR".to_string()),
+            Some((true, time, gap, "FVG+SR 一致 long")) => ("long (FVG+SR 一致)", "↑", true, format_beijing_time(time), format!("${:.2}", gap), "FVG+SR 一致".to_string()),
+            Some((false, time, gap, "FVG+SR 一致 short")) => ("short (FVG+SR 一致)", "↓", false, format_beijing_time(time), format!("${:.2}", gap), "FVG+SR 一致".to_string()),
+            Some((true, time, gap, "FVG+SR 矛盾(默认 long)")) => ("long (FVG+SR 矛盾)", "↑", true, format_beijing_time(time), format!("${:.2}", gap), "FVG+SR 矛盾".to_string()),
+            Some((true, time, _, "SR only long")) => ("long (SR only)", "↑", true, format_beijing_time(time), "(无 FVG, 用 SR)".to_string(), "SR".to_string()),
+            Some((false, time, _, "SR only short")) => ("short (SR only)", "↓", false, format_beijing_time(time), "(无 FVG, 用 SR)".to_string(), "SR".to_string()),
+            Some((true, time, gap, "FVG only")) => ("long (FVG only)", "↑", true, format_beijing_time(time), format!("${:.2}", gap), "FVG only".to_string()),
+            Some((false, time, gap, "FVG only")) => ("short (FVG only)", "↓", false, format_beijing_time(time), format!("${:.2}", gap), "FVG only".to_string()),
+            // 兜底:任何未穷举的 (direction, _, _, _) → 默认 long
+            Some(_) => ("long (default)", "↑", true, "?".to_string(), "-".to_string(), "unknown".to_string()),
             None => ("无 FVG/SR(不限)", "—", true, "(无)".to_string(), "-".to_string(), "NONE".to_string()),
         };
         let fvg_section = format!(
@@ -435,11 +440,15 @@ async fn main() -> anyhow::Result<()> {
             // - 无 FVG → None → 不限(默认 long)
             let fvg_info = detector::latest_fvg_direction(&c_snapshot, fvg_min_gap_percent, &opts, 60);
             let (long_only, fvg_time_str, fvg_gap_str) = match fvg_info {
-                Some((true, time, gap)) if gap > 0.0 => (true, format_beijing_time(time), format!("${:.2}", gap)),
-                Some((false, time, gap)) if gap > 0.0 => (false, format_beijing_time(time), format!("${:.2}", gap)),
-                Some((true, time, _)) => (true, format_beijing_time(time), "(SR fallback)".to_string()),
-                Some((false, time, _)) => (false, format_beijing_time(time), "(SR fallback)".to_string()),
-                None => (true, "(无 FVG/SR)".to_string(), "-".to_string()),
+                Some((true, time, gap, "FVG+SR 一致 long")) => (true, format_beijing_time(time), format!("${:.2}", gap)),
+                Some((false, time, gap, "FVG+SR 一致 short")) => (false, format_beijing_time(time), format!("${:.2}", gap)),
+                Some((true, time, gap, "FVG+SR 矛盾(默认 long)")) => (true, format_beijing_time(time), format!("${:.2}(矛盾)", gap)),
+                Some((true, time, _, "SR only long")) => (true, format_beijing_time(time), "(SR)".to_string()),
+                Some((false, time, _, "SR only short")) => (false, format_beijing_time(time), "(SR)".to_string()),
+                Some((true, time, gap, "FVG only")) => (true, format_beijing_time(time), format!("${:.2}(FVG)", gap)),
+                Some((false, time, gap, "FVG only")) => (false, format_beijing_time(time), format!("${:.2}(FVG)", gap)),
+                Some(_) => (true, "?".to_string(), "?".to_string()),
+                None => (true, "(无)".to_string(), "-".to_string()),
             };
             let want_bullish = long_only;  // long → 只要 S(bullish)
             let want_bearish = !long_only; // short → 只要 R(bearish)

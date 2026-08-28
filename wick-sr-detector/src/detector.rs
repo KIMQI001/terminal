@@ -330,32 +330,35 @@ pub fn detect_wick_sr_for_last(
     results
 }
 
-/// 检测最近一个 FVG 的方向 + 时间 + gap 大小(已剔除被填充的)
-/// 简化:扫最近 `fvg_lookback_count` 根 K 线,找最近的、未被后续 K 填充的 FVG
+/// 检测方向:SR + FVG 必须一致才确定方向
 ///
-/// 如果没找到未填充 FVG → fallback:
-/// 在最近 fvg_lookback_count 根 K 内扫所有未被戳破的 SR(zones),
-/// 找最高 R 和最低 S,比较时间戳:
-/// - 最高 R 时间更新 → 返回 (false, r.time, 0.0)  // short trend
-/// - 最低 S 时间更新 → 返回 (true, s.time, 0.0)   // long trend
+/// 决策表:
+/// | FVG | SR(最高 R/最低 S)| 一致? | 方向 |
+/// |-----|--------------------|-------|------|
+/// | 有  | 有                 | 一致 | FVG 方向(FVG+SR 一致)|
+/// | 有  | 有                 | 不一致 | 默认 long(FVG+SR 矛盾) |
+/// | 有  | 无                 | -     | FVG 方向(无 SR 参考) |
+/// | 无  | 有                 | -     | SR 方向(无 FVG 时用 SR) |
+/// | 无  | 无                 | -     | None(默认 long) |
 ///
-/// 三元组(方向, 时间, gap USD):
-/// - `Some((true, time, gap))` = 最近未被填充的看涨 FVG(或 SR fallback long)
-/// - `Some((false, time, gap))` = 最近未被填充的看跌 FVG(或 SR fallback short)
-/// - `None` = FVG + SR fallback 都没找到(无趋势判断)
+/// 返回四元组(方向, 时间, gap, 来源标签):
+/// - 方向: true=long(只报 S)/ false=short(只报 R)
+/// - 来源标签: "FVG+SR 一致" | "FVG+SR 矛盾(默认 long)" | "FVG only" | "SR only" | "NONE"
 pub fn latest_fvg_direction(
     candles: &[crate::types::Candle],
     fvg_size_ratio: f64,
     options: &DetectOptions,
     fvg_lookback_count: usize,
-) -> Option<(bool, i64, f64)> {
+) -> Option<(bool, i64, f64, &'static str)> {
     if candles.len() < 3 {
         return None;
     }
 
     // ===== 第一步:扫最近 fvg_lookback_count 根 K 找未填充 FVG =====
+    // 找到就立刻记下,后面跟 SR 一起判定一致性
     // 从右往左,起点 = max(2, candles.len() - fvg_lookback_count)
     let start = candles.len().saturating_sub(fvg_lookback_count).max(2);
+    let mut fvg_info: Option<(bool, i64, f64)> = None;  // (direction, time, gap)
     for i in (start..candles.len() - 1).rev() {
         if i < 2 {
             break;
@@ -377,7 +380,8 @@ pub fn latest_fvg_direction(
             if filled {
                 continue;
             }
-            return Some((true, c2.time, range_c3_low_to_c1_high));
+            fvg_info = Some((true, c2.time, range_c3_low_to_c1_high));
+            break;
         }
 
         // 看跌 FVG
@@ -390,40 +394,54 @@ pub fn latest_fvg_direction(
             if filled {
                 continue;
             }
-            return Some((false, c2.time, range_c1_low_to_c3_high));
+            fvg_info = Some((false, c2.time, range_c1_low_to_c3_high));
+            break;
         }
     }
 
-    // ===== 第二步:fallback — 扫所有未戳破的 SR =====
+    // ===== 第二步:扫所有未戳破的 SR =====
     let srs = scan_recent_srs(candles, options, fvg_lookback_count);
-    if srs.is_empty() {
-        return None;
-    }
-    // 找最高 R(zone_high 最大,表示最大阻力位)
     let highest_r = srs
         .iter()
         .filter(|s| s.side == "bearish")
         .max_by(|a, b| a.zone_high.partial_cmp(&b.zone_high).unwrap_or(std::cmp::Ordering::Equal));
-    // 找最低 S(zone_low 最小,表示最大支撑位)
     let lowest_s = srs
         .iter()
         .filter(|s| s.side == "bullish")
         .min_by(|a, b| a.zone_low.partial_cmp(&b.zone_low).unwrap_or(std::cmp::Ordering::Equal));
 
-    match (highest_r, lowest_s) {
-        (Some(r), Some(s)) => {
-            // 比较时间戳:哪个更新就 follow 哪个方向
-            if r.time > s.time {
-                // 最高 R 更新 → short trend(从支撑涨不上去,转跌)
-                Some((false, r.time, 0.0))
+    // ===== 第三步:合并 FVG + SR,根据决策表判定方向 =====
+    match (fvg_info, highest_r, lowest_s) {
+        // FVG+SR 都有:必须一致
+        (Some((fvg_dir, fvg_time, gap)), Some(r), Some(s)) => {
+            // SR 方向:比较最高 R / 最低 S 时间戳
+            let sr_dir = if r.time > s.time { false } else { true }; // R 更新→short, S 更新→long
+            if fvg_dir == sr_dir {
+                // 一致
+                let label = if fvg_dir { "FVG+SR 一致 long" } else { "FVG+SR 一致 short" };
+                Some((fvg_dir, fvg_time, gap, label))
             } else {
-                // 最低 S 更新 → long trend(从阻力跌不破,转涨)
-                Some((true, s.time, 0.0))
+                // 矛盾 → 默认 long
+                Some((true, fvg_time, gap, "FVG+SR 矛盾(默认 long)"))
             }
         }
-        (Some(r), None) => Some((false, r.time, 0.0)),
-        (None, Some(s)) => Some((true, s.time, 0.0)),
-        (None, None) => None,
+        // 有 FVG 没 SR(有 FVG 没第二个验证)
+        (Some((fvg_dir, fvg_time, gap)), _, _) => {
+            Some((fvg_dir, fvg_time, gap, "FVG only"))
+        }
+        // 没 FVG 有 SR
+        (None, Some(r), Some(s)) => {
+            // 比较 SR 时间戳
+            if r.time > s.time {
+                Some((false, r.time, 0.0, "SR only short"))
+            } else {
+                Some((true, s.time, 0.0, "SR only long"))
+            }
+        }
+        (None, Some(r), None) => Some((false, r.time, 0.0, "SR only short")),
+        (None, None, Some(s)) => Some((true, s.time, 0.0, "SR only long")),
+        // 都没
+        (None, None, None) => None,
     }
 }
 
