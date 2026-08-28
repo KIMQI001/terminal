@@ -98,6 +98,67 @@ pub async fn fetch_klines(
 ///
 /// **K close 判定**:对齐 `pinbar-detector/src/main.rs:2002` ——
 /// 只信 Binance 推送的 `k.x` 字段,只在 `x=true` 时进入检测路径。
+pub async fn fetch_daily_klines(
+    config: &BinanceConfig,
+    limit: usize,
+) -> Result<Vec<Candle>> {
+    let url = format!(
+        "{}/fapi/v1/klines?symbol={}&interval=1d&limit={}",
+        config.base_url(),
+        config.symbol,
+        limit
+    );
+    let client = Client::new();
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .context("fetch daily klines http")?
+        .error_for_status()
+        .context("fetch daily klines status")?;
+    let data: Vec<Vec<serde_json::Value>> = resp.json().await.context("parse daily klines")?;
+    let candles = data
+        .iter()
+        .filter_map(|row| {
+            if row.len() < 6 {
+                return None;
+            }
+            let time_ms = row[0].as_i64()?;
+            let open = row[1].as_str()?.parse().ok()?;
+            let high = row[2].as_str()?.parse().ok()?;
+            let low = row[3].as_str()?.parse().ok()?;
+            let close = row[4].as_str()?.parse().ok()?;
+            let volume = row[5].as_str()?.parse().ok()?;
+            Some(Candle {
+                time: time_ms / 1000,
+                open, high, low, close, volume,
+            })
+        })
+        .collect();
+    Ok(candles)
+}
+
+/// 日 K 锚点(对齐前端 `TradingChart.tsx:904` `findAnchorAndCalculateHL`):
+/// 从右往左找包含当前价的日 K,然后合并该 K 的 high/low 跟最新 K 的 high/low
+/// 返回 (PDH, PDL, anchor_time)
+pub fn calculate_daily_anchors(
+    daily_candles: &[Candle],
+    current_price: f64,
+) -> Option<(f64, f64, i64)> {
+    if daily_candles.len() < 2 {
+        return None;
+    }
+    let latest = &daily_candles[daily_candles.len() - 1];
+    for i in (0..daily_candles.len() - 1).rev() {
+        let c = &daily_candles[i];
+        if current_price >= c.low && current_price <= c.high {
+            let pdh = c.high.max(latest.high);
+            let pdl = c.low.min(latest.low);
+            return Some((pdh, pdl, c.time));
+        }
+    }
+    None
+}
 /// WS URL 用 `@kline_{tf}` 频道(对齐 pinbar)而不是 `continuousKline`。
 pub async fn stream_klines<F, Fut>(config: &BinanceConfig, mut on_candle: F) -> Result<()>
 where
