@@ -336,14 +336,14 @@ pub fn detect_wick_sr_for_last(
 /// | FVG | SR(最高 R/最低 S)| 一致? | 方向 |
 /// |-----|--------------------|-------|------|
 /// | 有  | 有                 | 一致 | FVG 方向(FVG+SR 一致)|
-/// | 有  | 有                 | 不一致 | 默认 long(FVG+SR 矛盾) |
+/// | 有  | 有                 | 不一致 | FVG 方向(FVG+SR 矛盾按 FVG)|
 /// | 有  | 无                 | -     | FVG 方向(无 SR 参考) |
 /// | 无  | 有                 | -     | SR 方向(无 FVG 时用 SR) |
 /// | 无  | 无                 | -     | None(默认 long) |
 ///
 /// 返回四元组(方向, 时间, gap, 来源标签):
 /// - 方向: true=long(只报 S)/ false=short(只报 R)
-/// - 来源标签: "FVG+SR 一致" | "FVG+SR 矛盾(默认 long)" | "FVG only" | "SR only" | "NONE"
+/// - 来源标签: "FVG+SR 一致" | "FVG+SR 矛盾(按 FVG long/short)" | "FVG only" | "SR only" | "NONE"
 pub fn latest_fvg_direction(
     candles: &[crate::types::Candle],
     fvg_size_ratio: f64,
@@ -421,8 +421,9 @@ pub fn latest_fvg_direction(
                 let label = if fvg_dir { "FVG+SR 一致 long" } else { "FVG+SR 一致 short" };
                 Some((fvg_dir, fvg_time, gap, label))
             } else {
-                // 矛盾 → 默认 long
-                Some((true, fvg_time, gap, "FVG+SR 矛盾(默认 long)"))
+                // 矛盾 → 按 FVG 为准(FVG 优先于 SR)
+                let label = if fvg_dir { "FVG+SR 矛盾(按 FVG long)" } else { "FVG+SR 矛盾(按 FVG short)" };
+                Some((fvg_dir, fvg_time, gap, label))
             }
         }
         // 有 FVG 没 SR(有 FVG 没第二个验证)

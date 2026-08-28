@@ -156,7 +156,8 @@ async fn main() -> anyhow::Result<()> {
         let (trend_label, trend_arrow, long_only, fvg_time_str, fvg_gap_str, source_label) = match fvg_info {
             Some((true, time, gap, "FVG+SR 一致 long")) => ("long (FVG+SR 一致)", "↑", true, format_beijing_time(time), format!("${:.2}", gap), "FVG+SR 一致".to_string()),
             Some((false, time, gap, "FVG+SR 一致 short")) => ("short (FVG+SR 一致)", "↓", false, format_beijing_time(time), format!("${:.2}", gap), "FVG+SR 一致".to_string()),
-            Some((true, time, gap, "FVG+SR 矛盾(默认 long)")) => ("long (FVG+SR 矛盾)", "↑", true, format_beijing_time(time), format!("${:.2}", gap), "FVG+SR 矛盾".to_string()),
+            Some((true, time, gap, "FVG+SR 矛盾(按 FVG long)")) => ("long (FVG+SR 矛盾,按 FVG)", "↑", true, format_beijing_time(time), format!("${:.2}", gap), "FVG+SR 矛盾(按 FVG)".to_string()),
+            Some((false, time, gap, "FVG+SR 矛盾(按 FVG short)")) => ("short (FVG+SR 矛盾,按 FVG)", "↓", false, format_beijing_time(time), format!("${:.2}", gap), "FVG+SR 矛盾(按 FVG)".to_string()),
             Some((true, time, _, "SR only long")) => ("long (SR only)", "↑", true, format_beijing_time(time), "(无 FVG, 用 SR)".to_string(), "SR".to_string()),
             Some((false, time, _, "SR only short")) => ("short (SR only)", "↓", false, format_beijing_time(time), "(无 FVG, 用 SR)".to_string(), "SR".to_string()),
             Some((true, time, gap, "FVG only")) => ("long (FVG only)", "↑", true, format_beijing_time(time), format!("${:.2}", gap), "FVG only".to_string()),
@@ -442,7 +443,8 @@ async fn main() -> anyhow::Result<()> {
             let (long_only, fvg_time_str, fvg_gap_str) = match fvg_info {
                 Some((true, time, gap, "FVG+SR 一致 long")) => (true, format_beijing_time(time), format!("${:.2}", gap)),
                 Some((false, time, gap, "FVG+SR 一致 short")) => (false, format_beijing_time(time), format!("${:.2}", gap)),
-                Some((true, time, gap, "FVG+SR 矛盾(默认 long)")) => (true, format_beijing_time(time), format!("${:.2}(矛盾)", gap)),
+                Some((true, time, gap, "FVG+SR 矛盾(按 FVG long)")) => (true, format_beijing_time(time), format!("${:.2}(矛盾)", gap)),
+                Some((false, time, gap, "FVG+SR 矛盾(按 FVG short)")) => (false, format_beijing_time(time), format!("${:.2}(矛盾)", gap)),
                 Some((true, time, _, "SR only long")) => (true, format_beijing_time(time), "(SR)".to_string()),
                 Some((false, time, _, "SR only short")) => (false, format_beijing_time(time), "(SR)".to_string()),
                 Some((true, time, gap, "FVG only")) => (true, format_beijing_time(time), format!("${:.2}(FVG)", gap)),
