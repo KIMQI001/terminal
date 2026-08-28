@@ -330,6 +330,32 @@ pub fn detect_wick_sr_for_last(
     results
 }
 
+/// OC 中点 = (PDO + PDC) / 2
+/// ICT 概念:下跌趋势的 OC 中点是"多头硬支撑",上涨趋势的 OC 中点是"空头硬阻力"
+/// 价格碰到 OC 中点附近出现 S/R → 强反转信号
+pub fn oc_midpoint(pdo: f64, pdc: f64) -> f64 {
+    (pdo + pdc) / 2.0
+}
+
+/// 反转 wick 跟 OC 中点的"接近度"判定
+/// - S 做多:wick_zone_low 离 oc_midpoint 越近 = 强支撑
+/// - R 做空:wick_zone_high 离 oc_midpoint 越近 = 强阻力
+/// 距离 < threshold → 强反转
+pub fn is_strong_reversal_near_oc(
+    oc_mid: f64,
+    wick_zone_low: f64,
+    wick_zone_high: f64,
+    wick_side: &str,
+    threshold_usd: f64,
+) -> bool {
+    let dist = if wick_side == "bullish" {
+        (oc_mid - wick_zone_low).abs()
+    } else {
+        (wick_zone_high - oc_mid).abs()
+    };
+    dist < threshold_usd
+}
+
 /// 根据 1D 锚点 (PDO, PDH, PDL, PDC) 跟当前价的关系,判定方向
 /// 复用前端 `DailyKPanel.tsx` 概念:4 个锚点都是"价格会反应的位置"
 /// - 当前价 > PDH:突破前高 → 强势 long
