@@ -330,6 +330,35 @@ pub fn detect_wick_sr_for_last(
     results
 }
 
+/// 根据 1D 锚点 (PDO, PDH, PDL, PDC) 跟当前价的关系,判定方向
+/// 复用前端 `DailyKPanel.tsx` 概念:4 个锚点都是"价格会反应的位置"
+/// - 当前价 > PDH:突破前高 → 强势 long
+/// - 当前价 < PDL:跌破前低 → 强势 short
+/// - PDH ≥ 当前价 ≥ PDL:在区间内,看 PDO/PDC
+///   - > PDC:高于昨日收盘 → 偏多
+///   - < PDC:低于昨日收盘 → 偏空
+///   - == PDC:中性(兜底 long)
+/// 返回 (long_only, 来源标签)
+pub fn daily_anchor_direction(
+    pdo: f64,
+    pdh: f64,
+    pdl: f64,
+    pdc: f64,
+    current_price: f64,
+) -> (bool, &'static str) {
+    if current_price > pdh {
+        (true, "long > PDH(突破前高)")
+    } else if current_price < pdl {
+        (false, "short < PDL(跌破前低)")
+    } else if current_price > pdc {
+        (true, "long > PDC(高于昨日收)")
+    } else if current_price < pdc {
+        (false, "short < PDC(低于昨日收)")
+    } else {
+        (true, "long == PDC(等于昨日收)")
+    }
+}
+
 /// 检测方向:SR + FVG 必须一致才确定方向
 ///
 /// 决策表:

@@ -138,13 +138,17 @@ pub async fn fetch_daily_klines(
     Ok(candles)
 }
 
-/// 日 K 锚点(对齐前端 `TradingChart.tsx:904` `findAnchorAndCalculateHL`):
-/// 从右往左找包含当前价的日 K,然后合并该 K 的 high/low 跟最新 K 的 high/low
-/// 返回 (PDH, PDL, anchor_time)
+/// 日 K 锚点 OHLC(对齐前端 `TradingChart.tsx:904` + `DailyKPanel.tsx`):
+/// 找包含当前价的"锚定 K" + 合并最新 K 的 high/low
+/// 返回 (PDO, PDH, PDL, PDC, anchor_time)
+/// - PDO = 锚定日 K 的 open(开盘价)
+/// - PDH = max(锚定日 K 的 high, 最新日 K 的 high)
+/// - PDL = min(锚定日 K 的 low, 最新日 K 的 low)
+/// - PDC = 锚定日 K 的 close(收盘价) — 实际价格参考
 pub fn calculate_daily_anchors(
     daily_candles: &[Candle],
     current_price: f64,
-) -> Option<(f64, f64, i64)> {
+) -> Option<(f64, f64, f64, f64, i64)> {
     if daily_candles.len() < 2 {
         return None;
     }
@@ -152,9 +156,11 @@ pub fn calculate_daily_anchors(
     for i in (0..daily_candles.len() - 1).rev() {
         let c = &daily_candles[i];
         if current_price >= c.low && current_price <= c.high {
+            let pdo = c.open;
             let pdh = c.high.max(latest.high);
             let pdl = c.low.min(latest.low);
-            return Some((pdh, pdl, c.time));
+            let pdc = c.close;
+            return Some((pdo, pdh, pdl, pdc, c.time));
         }
     }
     None
