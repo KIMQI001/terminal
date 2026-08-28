@@ -1253,6 +1253,50 @@ export function TradingChart() {
         dailyKLineIdsRef.current.add(`dk-1D-${line}`);
         priceLinesRef.current.push(pl);
       });
+
+      // ===== 新增:日 K SR(R level + S level)+ 趋势 K 时画 OC 中点 =====
+      // 跟 Rust 端 WickSR.level 公式一致
+      const bodyTop = Math.max(anchor.open, anchor.close);
+      const bodyBottom = Math.min(anchor.open, anchor.close);
+      const body = Math.abs(anchor.close - anchor.open);
+      const range = anchor.high - anchor.low;
+      const bodyRatio = range > 0 ? body / range : 0;
+
+      // 日 K SR:R level = (body_top + high) / 2, S level = (low + body_bottom) / 2
+      // 总是画(跟 15m SR 概念一致,作为大级别参考)
+      const srLines: Array<{ name: 'R' | 'S'; price: number; color: string }> = [
+        { name: 'R', price: (bodyTop + anchor.high) / 2, color: '#ef4444' },  // 红
+        { name: 'S', price: (anchor.low + bodyBottom) / 2, color: '#22c55e' }, // 绿
+      ];
+      srLines.forEach(({ name, price, color }) => {
+        const pl = candleSeriesRef.current!.createPriceLine({
+          price,
+          color,
+          lineWidth: 2,  // 粗一点突出大级别
+          lineStyle: 2,  // 虚线区别于 O/H/L/C 实线
+          axisLabelVisible: true,
+          title: `1D ${name}`,
+        });
+        (pl as any)._tag = `dk-1D-sr-${name}`;
+        dailyKLineIdsRef.current.add(`dk-1D-sr-${name}`);
+        priceLinesRef.current.push(pl);
+      });
+
+      // 趋势 K 时(实体 ≥ 40% 整 K)画 OC 中点 = (open + close) / 2
+      if (bodyRatio >= 0.4) {
+        const ocMid = (anchor.open + anchor.close) / 2;
+        const pl = candleSeriesRef.current!.createPriceLine({
+          price: ocMid,
+          color: '#8b5cf6',  // 紫
+          lineWidth: 1,
+          lineStyle: 0,  // 实线
+          axisLabelVisible: true,
+          title: '1D OC Mid',
+        });
+        (pl as any)._tag = 'dk-1D-oc-mid';
+        dailyKLineIdsRef.current.add('dk-1D-oc-mid');
+        priceLinesRef.current.push(pl);
+      }
     }
   }, [dailyKAnchors, dailyKLineEnabled]);
   useEffect(() => {
