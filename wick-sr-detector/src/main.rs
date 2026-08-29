@@ -155,8 +155,9 @@ async fn main() -> anyhow::Result<()> {
         // 最近 FVG 方向(用同一组历史 K 算)
         let last_fvg = candles.lock().await.clone();
         // 顺便 fetch 1D K 算 daily anchor(用于报警显示跟 1D 锚点的关键价位距离)
+        // 对齐前端 DailyKPanel.tsx:46 findAnchor:用日 K 数组最后一根 K 的 close 作 current_price
         if let Ok(daily_k) = binance::fetch_daily_klines(&binance_config, 30).await {
-            if let Some(current_price) = last_fvg.last().map(|c| c.close) {
+            if let Some(current_price) = daily_k.last().map(|c| c.close) {
                 if let Some(anchor) = detector::build_daily_anchor(&daily_k, current_price) {
                     *daily_anchor.lock().await = Some(anchor);
                 }
