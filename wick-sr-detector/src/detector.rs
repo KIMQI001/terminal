@@ -625,11 +625,12 @@ pub fn build_daily_anchor(
     daily_candles: &[crate::types::Candle],
     current_price: f64,
 ) -> Option<DailyAnchorData> {
-    if daily_candles.is_empty() {
+    if daily_candles.len() < 2 {
         return None;
     }
     let mut anchor: Option<&crate::types::Candle> = None;
-    for i in (0..daily_candles.len()).rev() {
+    // 对齐前端 DailyKPanel.tsx:46 findAnchor:从 length-2 倒序(不含最新 1D K)
+    for i in (0..daily_candles.len() - 1).rev() {
         let c = &daily_candles[i];
         if current_price >= c.low && current_price <= c.high {
             anchor = Some(c);
