@@ -629,7 +629,12 @@ pub fn build_daily_anchor(
         return None;
     }
     let mut anchor: Option<&crate::types::Candle> = None;
-    for i in (0..daily_candles.len()).rev() {
+    // 对齐前端 DailyKPanel.tsx:46 findAnchor:current_price 来自 latestCandle.close(今日日 K 收盘价)
+    // 但 findAnchor 从 length-2 倒序,不含最新 1D K(今日可能未收盘,范围不稳)
+    if daily_candles.len() < 2 {
+        return None;
+    }
+    for i in (0..daily_candles.len() - 1).rev() {
         let c = &daily_candles[i];
         if current_price >= c.low && current_price <= c.high {
             anchor = Some(c);
