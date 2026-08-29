@@ -574,3 +574,78 @@ pub fn scan_recent_srs(
     }
     results
 }
+
+/// 1D 锚定 K 的 SR(R level + S level)— 跟 Rust 端 `detect_wick_sr` 公式一致
+/// - R level = (body_top + high) / 2(上影中点)
+/// - S level = (low + body_bottom) / 2(下影中点)
+/// 返回 (Option<f64>, Option<f64>)= (r_level, s_level)
+pub fn sr_levels(candle: &Candle) -> (Option<f64>, Option<f64>) {
+    let body_top = candle.open.max(candle.close);
+    let body_bottom = candle.open.min(candle.close);
+    let range = candle.high - candle.low;
+    if range <= 0.0 {
+        return (None, None);
+    }
+    let upper_wick = candle.high - body_top;
+    let lower_wick = body_bottom - candle.low;
+    let upper_ratio = upper_wick / range;
+    let lower_ratio = lower_wick / range;
+    let r_level = if upper_ratio >= 0.4 {
+        Some((body_top + candle.high) / 2.0)
+    } else {
+        None
+    };
+    let s_level = if lower_ratio >= 0.4 {
+        Some((candle.low + body_bottom) / 2.0)
+    } else {
+        None
+    };
+    (r_level, s_level)
+}
+
+/// 1D 锚定 K 完整快照(OHLC + OC mid + SR levels + time)
+/// 对齐前端 DailyKPanel + wick 中点
+#[derive(Clone)]
+pub struct DailyAnchorData {
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub close: f64,
+    pub oc_mid: f64,         // (open + close) / 2
+    pub r_level: Option<f64>, // wick 中点(SR 之 R)
+    pub s_level: Option<f64>, // wick 中点(SR 之 S)
+    pub time: i64,
+}
+
+/// 算 1D 锚定 K 完整快照(对齐前端 DailyKPanel)
+/// - OHLC + 时间:从 daily_candles 找包含当前价的 K
+/// - OC mid: (open + close) / 2
+/// - SR levels: 跟 detect_wick_sr 公式一致(body_top+high)/2、(low+body_bottom)/2
+pub fn build_daily_anchor(
+    daily_candles: &[crate::types::Candle],
+    current_price: f64,
+) -> Option<DailyAnchorData> {
+    if daily_candles.is_empty() {
+        return None;
+    }
+    let mut anchor: Option<&crate::types::Candle> = None;
+    for i in (0..daily_candles.len()).rev() {
+        let c = &daily_candles[i];
+        if current_price >= c.low && current_price <= c.high {
+            anchor = Some(c);
+            break;
+        }
+    }
+    let c = anchor?;
+    let (r_level, s_level) = sr_levels(c);
+    Some(DailyAnchorData {
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        oc_mid: (c.open + c.close) / 2.0,
+        r_level,
+        s_level,
+        time: c.time,
+    })
+}

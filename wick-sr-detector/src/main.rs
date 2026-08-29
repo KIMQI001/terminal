@@ -93,6 +93,8 @@ async fn main() -> anyhow::Result<()> {
     // 跨 K SR 累计序号:(symbol, side) → (last_wick_time, last_tier)
     // 跟前端 rejection.ts 一致 — 同一根 K 多 wick 同 tier,不同 K tier += 1
     let last_wick: Arc<Mutex<HashMap<(String, String), (i64, u32)>>> = Arc::new(Mutex::new(HashMap::new()));
+    // 1D 锚点完整数据(OHLC + OC mid + SR + time)— 启动时拉一次,signals 循环里读
+    let daily_anchor: Arc<Mutex<Option<detector::DailyAnchorData>>> = Arc::new(Mutex::new(None));
     let signals: Vec<crate::types::WickSR> = {
         let c = candles.lock().await;
         let sigs = detect_wick_sr(&c, &[], &detect_options);
@@ -152,6 +154,14 @@ async fn main() -> anyhow::Result<()> {
 
         // 最近 FVG 方向(用同一组历史 K 算)
         let last_fvg = candles.lock().await.clone();
+        // 顺便 fetch 1D K 算 daily anchor(用于报警显示跟 1D 锚点的关键价位距离)
+        if let Ok(daily_k) = binance::fetch_daily_klines(&binance_config, 30).await {
+            if let Some(current_price) = last_fvg.last().map(|c| c.close) {
+                if let Some(anchor) = detector::build_daily_anchor(&daily_k, current_price) {
+                    *daily_anchor.lock().await = Some(anchor);
+                }
+            }
+        }
         let fvg_info = detector::latest_fvg_direction(&last_fvg, fvg_min_gap_percent, &detect_options, 60);
         let (trend_label, trend_arrow, long_only, fvg_time_str, fvg_gap_str, source_label) = match fvg_info {
             Some((true, time, gap, "FVG+SR 一致 long")) => ("long (FVG+SR 一致)", "↑", true, format_beijing_time(time), format!("${:.2}", gap), "FVG+SR 一致".to_string()),
@@ -231,6 +241,7 @@ async fn main() -> anyhow::Result<()> {
     let candles_clone = candles.clone();
     let reported_clone = reported.clone();
     let last_wick_clone = last_wick.clone();
+    let daily_anchor_clone = daily_anchor.clone();
     let notify_clone = notify_config.clone();
     let detect_options_clone = detect_options.clone();
     let symbol = binance_config.symbol.clone();
@@ -407,6 +418,7 @@ async fn main() -> anyhow::Result<()> {
         let candles = candles_clone.clone();
         let reported = reported_clone.clone();
         let last_wick = last_wick_clone.clone();
+        let daily_anchor = daily_anchor_clone.clone();
         let notify = notify_clone.clone();
         let opts = detect_options_clone.clone();
         let symbol = symbol.clone();
@@ -470,6 +482,8 @@ async fn main() -> anyhow::Result<()> {
             // 计算每个 wick 的 tier — 跨 K 累计序号(对齐前端 rejection.ts)
             // 同一根 K 多个 wick(同 K 上下影)同 tier,不同 K tier += 1
             let mut last_wick_lock = last_wick.lock().await;
+            // 读 1D 锚点数据(启动时 fetch 一次,这里只读)
+            let anchor_data = (*daily_anchor.lock().await).clone();
             for mut s in signals {
                 // 方向过滤
                 let side_is_bullish = s.side == "bullish";
@@ -516,6 +530,41 @@ let tier_label = format!("{}{}", if s.side == "bullish" { "S" } else { "R" }, s.
                 } else {
                     String::new()
                 };
+                // 1D 锚点关键价位距离(取绝对值最小的那个)
+                let anchor_dist_line = if let Some(anchor) = anchor_data.as_ref() {
+                    let mut distances: Vec<(&str, f64)> = vec![];
+                    distances.push(("1D O", (anchor.open - s.level).abs()));
+                    distances.push(("1D H", (anchor.high - s.level).abs()));
+                    distances.push(("1D L", (anchor.low - s.level).abs()));
+                    distances.push(("1D C", (anchor.close - s.level).abs()));
+                    distances.push(("1D OC mid", (anchor.oc_mid - s.level).abs()));
+                    if let Some(r) = anchor.r_level {
+                        distances.push(("1D R level", (r - s.level).abs()));
+                    }
+                    if let Some(sl) = anchor.s_level {
+                        distances.push(("1D S level", (sl - s.level).abs()));
+                    }
+                    distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                    if let Some((name, dist)) = distances.first() {
+                        let key_level = if *name == "1D O" { anchor.open }
+                            else if *name == "1D H" { anchor.high }
+                            else if *name == "1D L" { anchor.low }
+                            else if *name == "1D C" { anchor.close }
+                            else if *name == "1D OC mid" { anchor.oc_mid }
+                            else if *name == "1D R level" { anchor.r_level.unwrap_or(0.0) }
+                            else { anchor.s_level.unwrap_or(0.0) };
+                        let is_key = *dist < 100.0;
+                        format!(
+                            "\n- **1D 关键价位最近**: {} → ${:.2}(距 wick ${:.2} 仅 **{:.0} USD**{})",
+                            name, key_level, s.level, dist,
+                            if is_key { " ★关键位" } else { "" }
+                        )
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                };
 let hq_line = if s.high_quality {
                     let candle_type = if candle.close > candle.open { "阳 K" } else { "阴 K" };
                     let reason_desc = match s.high_quality_reason.as_str() {
@@ -547,7 +596,7 @@ let hq_line = if s.high_quality {
 - **zone**: [${:.2}, ${:.2}]\n\
 - **wick 比例**: {:.0}%\n\
 - **层级**: {}\n\
-- **FVG 方向**: {} → {}{}{}",
+- **FVG 方向**: {} → {}{}{}{}",
                     reversal_tag, hq_tag, "".to_string(),
                     symbol,
                     side_label,
@@ -567,7 +616,8 @@ let hq_line = if s.high_quality {
                     },
                     reversal_line,
                     hq_line,
-                    action_line
+                    action_line,
+                    anchor_dist_line
                 );
                 warn!("new wick SR: {}/{} @ {}", s.side, s.level, s.time);
                 if let Err(e) = broadcast(&notify, &title, &body).await {
