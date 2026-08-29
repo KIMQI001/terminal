@@ -575,9 +575,10 @@ pub fn scan_recent_srs(
     results
 }
 
-/// 1D 锚定 K 的 SR(R level + S level)— 跟 Rust 端 `detect_wick_sr` 公式一致
+/// 1D 锚定 K 的 SR(R level + S level)
 /// - R level = (body_top + high) / 2(上影中点)
 /// - S level = (low + body_bottom) / 2(下影中点)
+/// 不管 wick_ratio 阈值,只要上影或下影存在就出 level(wick=0 时退化为 body 端点)
 /// 返回 (Option<f64>, Option<f64>)= (r_level, s_level)
 pub fn sr_levels(candle: &Candle) -> (Option<f64>, Option<f64>) {
     let body_top = candle.open.max(candle.close);
@@ -588,17 +589,16 @@ pub fn sr_levels(candle: &Candle) -> (Option<f64>, Option<f64>) {
     }
     let upper_wick = candle.high - body_top;
     let lower_wick = body_bottom - candle.low;
-    let upper_ratio = upper_wick / range;
-    let lower_ratio = lower_wick / range;
-    let r_level = if upper_ratio >= 0.4 {
+    // 不管 wick_ratio 阈值,有 wick 就出(0 时退化为 body 端点)
+    let r_level = if upper_wick > 0.0 {
         Some((body_top + candle.high) / 2.0)
     } else {
-        None
+        Some(body_top)  // 没上影,level = body_top
     };
-    let s_level = if lower_ratio >= 0.4 {
+    let s_level = if lower_wick > 0.0 {
         Some((candle.low + body_bottom) / 2.0)
     } else {
-        None
+        Some(body_bottom)  // 没下影,level = body_bottom
     };
     (r_level, s_level)
 }
