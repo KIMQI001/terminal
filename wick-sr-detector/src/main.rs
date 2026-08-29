@@ -219,16 +219,30 @@ async fn main() -> anyhow::Result<()> {
             None => String::new(),
         };
 
+        // 1D 锚点信息段(OHLC + OC mid + SR levels)
+        let anchor_section = if let Some(anchor) = daily_anchor.lock().await.as_ref() {
+            let r_line = anchor.r_level.map(|r| format!("\n  - **R level**: ${:.2}", r)).unwrap_or_default();
+            let s_line = anchor.s_level.map(|s| format!("\n  - **S level**: ${:.2}", s)).unwrap_or_default();
+            format!(
+                "\n\n### 📊 1D 锚点(锚定 K {} 北京)\n\n- **O**: ${:.2}\n- **H**: ${:.2}\n- **L**: ${:.2}\n- **C**: ${:.2}\n- **OC mid**: ${:.2}{}{}",
+                format_beijing_time(anchor.time),
+                anchor.open, anchor.high, anchor.low, anchor.close, anchor.oc_mid,
+                r_line, s_line
+            )
+        } else {
+            String::new()
+        };
+
         let body = format!(
             "### 🚀 wick-sr-detector 已启动\n\n\
 - **监控**: {} @ {}\n\
 - **回溯**: {} 根 K\n\
 - **Wick 阈值**: {:.2}\n\
 - **反转回溯**: {} 根\n\
-- **自动下单**: {}{}{}{}{}",
+- **自动下单**: {}{}{}{}{}{}",
             binance_config.symbol, binance_config.timeframe,
             lookback, detect_options.wick_ratio,
-            detect_options.reversal_lookback, auto_trade, leverage_section, wick_section, fvg_section, sr_fallback_section
+            detect_options.reversal_lookback, auto_trade, leverage_section, wick_section, fvg_section, sr_fallback_section, anchor_section
         );
         debug!("startup body =\n{}", &body);
         match broadcast(&notify_config, "wick-sr-detector 启动", &body).await {
