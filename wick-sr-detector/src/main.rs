@@ -666,14 +666,19 @@ let hq_line = if s.high_quality {
 // - 反转 wick:始终下单(无视 FVG 方向,因为反转本身就是趋势反转)
 // - 高等级 wick(非反转):仅在 20-24 时段(纽约交易时间)+ 方向同向 才下单
 //   (用户规则:纽约时段趋势强,适合同向高等级;其他时段只报警)
+                // 20:00 - 22:30 北京(纽约时段早盘 + 末盘前 1.5h)
+                // 用分钟数比较支持 22:30 半点小窗口
                 let hq_trade_hour_start: u32 = std::env::var("HQ_TRADE_HOUR_START")
                     .ok().and_then(|s| s.parse().ok()).unwrap_or(20);
-                let hq_trade_hour_end: u32 = std::env::var("HQ_TRADE_HOUR_END")
-                    .ok().and_then(|s| s.parse().ok()).unwrap_or(23);
+                let hq_trade_hour_end_min: u32 = std::env::var("HQ_TRADE_HOUR_END_MIN")
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(22 * 60 + 30);
                 let now_beijing = chrono::Utc::now() + chrono::Duration::hours(8);
-                let current_hour: u32 = now_beijing.format("%H").to_string().parse().unwrap_or(0);
-                let in_hq_trade_window = current_hour >= hq_trade_hour_start
-                    && current_hour < hq_trade_hour_end;
+                let current_min: u32 = now_beijing.format("%H:%M").to_string()
+                    .split(':').map(|s| s.parse::<u32>().unwrap_or(0)).fold(0u32, |acc, n| acc * 100 + n)
+                    % 10000;
+                // 20:00 到 hq_trade_hour_end_min 分钟数(默认 22:30 = 1350 分)
+                let in_hq_trade_window = current_min >= hq_trade_hour_start * 60
+                    && current_min < hq_trade_hour_end_min;
                 let hq_same_direction = s.high_quality && in_hq_trade_window && (
                     (s.side == "bullish" && long_only) ||
                     (s.side == "bearish" && !long_only)
