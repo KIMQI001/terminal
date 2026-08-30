@@ -564,7 +564,9 @@ let tier_label = format!("{}{}", if s.side == "bullish" { "S" } else { "R" }, s.
                 } else {
                     String::new()
                 };
-                // 1D 锚点关键价位距离(取绝对值最小的那个)
+                // 1D 锚点关键价位距离(取绝对值最小的那个)— 同时记下最近距离
+                // 用于 will_trade 判定:距离 < 100 USD 视为关键位,自动下单
+                let mut nearest_distance: f64 = f64::INFINITY;
                 let anchor_dist_line = if let Some(anchor) = anchor_data.as_ref() {
                     let mut distances: Vec<(&str, f64)> = vec![];
                     distances.push(("1D O", (anchor.open - s.level).abs()));
@@ -580,6 +582,7 @@ let tier_label = format!("{}{}", if s.side == "bullish" { "S" } else { "R" }, s.
                     }
                     distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
                     if let Some((name, dist)) = distances.first() {
+                        nearest_distance = *dist;
                         let key_level = if *name == "1D O" { anchor.open }
                             else if *name == "1D H" { anchor.high }
                             else if *name == "1D L" { anchor.low }
@@ -675,7 +678,9 @@ let hq_line = if s.high_quality {
                     (s.side == "bullish" && long_only) ||
                     (s.side == "bearish" && !long_only)
                 );
-                let will_trade = s.reversal || hq_same_direction;
+                // 关键位(距离 < 100 USD 视为 1D 大级别关键位)— 也触发下单
+                let near_key_level = nearest_distance < 100.0;
+                let will_trade = s.reversal || hq_same_direction || near_key_level;
                 if will_trade && std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {
                     let api_key = std::env::var("BINANCE_API_KEY").unwrap_or_default();
                     let api_secret = std::env::var("BINANCE_API_SECRET").unwrap_or_default();
