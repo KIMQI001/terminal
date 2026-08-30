@@ -692,6 +692,7 @@ let hq_line = if s.high_quality {
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
                     let take_profit_rr: f64 = std::env::var("TAKE_PROFIT_RR")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(1.0);
+                    let _ = take_profit_rr; // 已废弃:TP 固定 ±200 USD,不再依赖 RR
                     let _take_profit_usd: f64 = std::env::var("TAKE_PROFIT_USD")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
                     let max_orders: u64 = std::env::var("MAX_OPEN_ORDERS")
@@ -800,12 +801,12 @@ let hq_line = if s.high_quality {
                         (entry_price + stop_loss_usd).min(candle.high)
                     };
 
-                    // 止盈:R 倍风险(stop 距离 × RR,默认 1.0 = 1:1 对称)
-                    let risk = (entry_price - stop_loss).abs();
+                    // 止盈:固定 entry ± 200 USD(不依赖 SL 距离,严格 200 一点)
+                    // 之前是 risk × take_profit_rr,经常不是 200
                     let take_profit = if s.side == "bullish" {
-                        entry_price + risk * take_profit_rr
+                        entry_price + 200.0
                     } else {
-                        entry_price - risk * take_profit_rr
+                        entry_price - 200.0
                     };
 
                     // 计算数量(基于账户余额 * 仓位百分比 * 固定 leverage)
