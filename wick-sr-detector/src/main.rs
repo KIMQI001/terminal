@@ -590,7 +590,7 @@ let tier_label = format!("{}{}", if s.side == "bullish" { "S" } else { "R" }, s.
                             else if *name == "1D OC mid" { anchor.oc_mid }
                             else if *name == "1D R level" { anchor.r_level.unwrap_or(0.0) }
                             else { anchor.s_level.unwrap_or(0.0) };
-                        let is_key = *dist < 90.0;
+                        let is_key = *dist < 50.0;
                         format!(
                             "\n- **1D 关键价位最近**: {} → ${:.2}(距 wick ${:.2} 仅 **{:.0} USD**{})",
                             name, key_level, s.level, dist,
@@ -679,7 +679,7 @@ let hq_line = if s.high_quality {
                     (s.side == "bearish" && !long_only)
                 );
                 // 关键位(距离 < 100 USD 视为 1D 大级别关键位)— 也触发下单
-                let near_key_level = nearest_distance < 90.0;
+                let near_key_level = nearest_distance < 50.0;
                 let will_trade = s.reversal || hq_same_direction || near_key_level;
                 if will_trade && std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {
                     let api_key = std::env::var("BINANCE_API_KEY").unwrap_or_default();
