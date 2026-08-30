@@ -836,16 +836,11 @@ let hq_line = if s.high_quality {
                         let side = if s.side == "bullish" { "BUY" } else { "SELL" };
                         let position_side = if s.side == "bullish" { "LONG" } else { "SHORT" };
                         let order_id = format!("wick_{}_{}_{}", s.side, s.time, s.tier);
-                        // 反转 + 高等级:市价立即成交(MARKET)
-                        // 普通反转:限价挂单(LIMIT)— entry_price 用极值 ± 200 vs close
-                        let use_market = s.reversal && s.high_quality;
-                        if use_market {
-                            info!("[Order] 反转 + 高等级 → 市价单立即入场(K 形态确认强度,不等挂单成交)");
-                        } else if hq_same_direction {
-                            info!("[Order] 20-24 高等级同向 → 限价单挂单 entry={}", entry_price);
-                        } else {
-                            info!("[Order] 普通反转 → 限价单挂单 entry={}", entry_price);
-                        }
+                        // 任何 wick 触发都市价立即成交(MARKET)按 close 入场
+                        // 之前区分反转+高等级 vs 限价,现在简化总是市价
+                        // (更"瞬时"反应 — 不等挂单 fill)
+                        let use_market = true;
+                        info!("[Order] 任何 wick → 市价单立即入场(按 close={})", entry_price);
                         match order::place_order_with_sl_tp(
                             &api_key, &api_secret, &base_url, &symbol,
                             side, position_side,
