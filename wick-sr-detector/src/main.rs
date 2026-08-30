@@ -680,7 +680,8 @@ let hq_line = if s.high_quality {
                 );
                 // 关键位(距离 < 100 USD 视为 1D 大级别关键位)— 也触发下单
                 let near_key_level = nearest_distance < 50.0;
-                let will_trade = s.reversal || hq_same_direction || near_key_level;
+                // 关键位必要 + 反转/高等级同向 二选一
+                let will_trade = near_key_level && (s.reversal || hq_same_direction);
                 if will_trade && std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {
                     let api_key = std::env::var("BINANCE_API_KEY").unwrap_or_default();
                     let api_secret = std::env::var("BINANCE_API_SECRET").unwrap_or_default();
