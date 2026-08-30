@@ -798,15 +798,17 @@ let hq_line = if s.high_quality {
                     //   否则 SL = entry - 200(标准距离)
                     //   同理 R 做空:min(entry + stop_loss, candle.high)
                     let stop_loss = if s.side == "bullish" {
-                        // 修正:链式 .min 优先取 min(candle.low),会被 50 USD 拉低
-                        // 正确链式:.min(标准 200, candle.low).max(最小 100)
-                        (entry_price - stop_loss_usd)
-                            .min(candle.low)
-                            .max(entry_price - stop_loss_min_usd)
+                        // 之前 .min(200, candle.low) 是 USD 价对比(candle.low < entry-200 时取 200 距,排除 candle.low)
+                        // 正确:用 USD 距算
+                        //   dist = min(200, entry - candle.low)
+                        //   sl = entry - max(100, dist)
+                        let dist_low = (entry_price - candle.low).abs();
+                        let capped_dist = dist_low.min(stop_loss_usd).max(stop_loss_min_usd);
+                        entry_price - capped_dist
                     } else {
-                        (entry_price + stop_loss_usd)
-                            .min(candle.high)
-                            .max(entry_price + stop_loss_min_usd)
+                        let dist_high = (candle.high - entry_price).abs();
+                        let capped_dist = dist_high.min(stop_loss_usd).max(stop_loss_min_usd);
+                        entry_price + capped_dist
                     };
 
                     // 止盈:固定 entry ± 200 USD(不依赖 SL 距离,严格 200 一点)
