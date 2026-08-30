@@ -798,15 +798,15 @@ let hq_line = if s.high_quality {
                     //   否则 SL = entry - 200(标准距离)
                     //   同理 R 做空:min(entry + stop_loss, candle.high)
                     let stop_loss = if s.side == "bullish" {
-                        // SL = max(entry - stop_loss_usd, entry - stop_loss_min_usd, candle.low)
-                        // 保证 SL 距 entry 在 [stop_loss_min_usd, stop_loss_usd] 之间,再取 K 极值
+                        // 修正:链式 .min 优先取 min(candle.low),会被 50 USD 拉低
+                        // 正确链式:.min(标准 200, candle.low).max(最小 100)
                         (entry_price - stop_loss_usd)
+                            .min(candle.low)
                             .max(entry_price - stop_loss_min_usd)
-                            .max(candle.low)
                     } else {
                         (entry_price + stop_loss_usd)
-                            .min(entry_price + stop_loss_min_usd)
                             .min(candle.high)
+                            .max(entry_price + stop_loss_min_usd)
                     };
 
                     // 止盈:固定 entry ± 200 USD(不依赖 SL 距离,严格 200 一点)
