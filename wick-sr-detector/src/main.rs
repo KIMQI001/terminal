@@ -163,6 +163,25 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
+
+        // 每 5 分钟重算一次 daily anchor(锚定 K 跟随 current_price 变)
+        let config_for_recompute = binance_config.clone();
+        let daily_anchor_for_recompute = daily_anchor.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(5 * 60)).await;
+                if let Ok(daily_k) = binance::fetch_daily_klines(&config_for_recompute, 30).await {
+                    if let Some(current_price) = daily_k.last().map(|c| c.close) {
+                        if let Some(anchor) = detector::build_daily_anchor(&daily_k, current_price) {
+                            debug!("[DailyAnchor] 重算: K={} O={} H={} L={} C={} OC={} R={:?} S={:?}",
+                                anchor.time, anchor.open, anchor.high, anchor.low, anchor.close,
+                                anchor.oc_mid, anchor.r_level, anchor.s_level);
+                            *daily_anchor_for_recompute.lock().await = Some(anchor);
+                        }
+                    }
+                }
+            }
+        });
         let fvg_info = detector::latest_fvg_direction(&last_fvg, fvg_min_gap_percent, &detect_options, 60);
         let (trend_label, trend_arrow, long_only, fvg_time_str, fvg_gap_str, source_label) = match fvg_info {
             Some((true, time, gap, "FVG+SR 一致 long")) => ("long (FVG+SR 一致)", "↑", true, format_beijing_time(time), format!("${:.2}", gap), "FVG+SR 一致".to_string()),
