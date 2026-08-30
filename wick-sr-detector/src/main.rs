@@ -690,6 +690,8 @@ let hq_line = if s.high_quality {
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(0.5);
                     let stop_loss_usd: f64 = std::env::var("STOP_LOSS_USD")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
+                    let stop_loss_min_usd: f64 = std::env::var("STOP_LOSS_MIN_USD")
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(100.0);
                     let take_profit_rr: f64 = std::env::var("TAKE_PROFIT_RR")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(1.0);
                     let _ = take_profit_rr; // 已废弃:TP 固定 ±200 USD,不再依赖 RR
@@ -796,9 +798,15 @@ let hq_line = if s.high_quality {
                     //   否则 SL = entry - 200(标准距离)
                     //   同理 R 做空:min(entry + stop_loss, candle.high)
                     let stop_loss = if s.side == "bullish" {
-                        (entry_price - stop_loss_usd).max(candle.low)
+                        // SL = max(entry - stop_loss_usd, entry - stop_loss_min_usd, candle.low)
+                        // 保证 SL 距 entry 在 [stop_loss_min_usd, stop_loss_usd] 之间,再取 K 极值
+                        (entry_price - stop_loss_usd)
+                            .max(entry_price - stop_loss_min_usd)
+                            .max(candle.low)
                     } else {
-                        (entry_price + stop_loss_usd).min(candle.high)
+                        (entry_price + stop_loss_usd)
+                            .min(entry_price + stop_loss_min_usd)
+                            .min(candle.high)
                     };
 
                     // 止盈:固定 entry ± 200 USD(不依赖 SL 距离,严格 200 一点)
