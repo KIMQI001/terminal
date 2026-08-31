@@ -52,7 +52,7 @@ const SYMBOL_PRECISION: &[(&str, u32, u32)] = &[
 ];
 
 /// 取 symbol 的 quantity/price 精度,默认 (3, 2)
-fn get_precision(symbol: &str) -> (u32, u32) {
+pub fn get_precision(symbol: &str) -> (u32, u32) {
     for (s, q, p) in SYMBOL_PRECISION {
         if *s == symbol {
             return (*q, *p);
@@ -157,7 +157,7 @@ async fn get_current_price(client: &Client, base_url: &str, symbol: &str) -> Opt
 
 /// 单次 Algo 单下单(带 clientAlgoId 字段— Algo API 官方字段名)
 /// 返回 Err 时调用方决定是否重试
-async fn place_algo_order(
+pub async fn place_algo_order(
     client: &Client,
     api_key: &str,
     api_secret: &str,
@@ -994,4 +994,118 @@ pub async fn ensure_protective_orders(
     }
 
     Ok(placed)
+}
+
+// ============================================================================
+// Protective Stop helpers(参考 pinbar-detector monitor_positions,pinbar 风格)
+// 用 mark_price 算 profit、用 tickSize tolerance、replace 策略
+// ============================================================================
+
+/// 查所有有仓位的 (symbol, positionSide, entry_price, mark_price, amt)
+/// 用于 [ProtectiveStop] task 扫仓位浮盈。
+/// 注意:这里返回 mark_price 而不是 unRealizedProfit。
+/// 计算 profit 时:`LONG: profit = mark_price - entry_price`,`SHORT: profit = entry_price - mark_price`。
+/// 这样跟手续费、funding fee 无关,精确反映价格差。
+pub async fn get_all_positions_with_mark(
+    api_key: &str,
+    api_secret: &str,
+    base_url: &str,
+) -> Vec<(String, String, f64, f64, f64)> {
+    // (symbol, position_side, entry, mark_price, amt)
+    if api_key.is_empty() || api_secret.is_empty() {
+        return Vec::new();
+    }
+    let client = Client::new();
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis()).unwrap_or(0);
+    let qs = format!("timestamp={}", ts);
+    let sig = sign_query(&qs, api_secret);
+    let url = format!("{}/fapi/v2/positionRisk?{}&signature={}", base_url, qs, sig);
+    let resp: serde_json::Value = match client.get(&url)
+        .header("X-MBX-APIKEY", api_key).send().await
+    {
+        Ok(r) => match r.json().await {
+            Ok(v) => v,
+            Err(_) => return Vec::new(),
+        },
+        Err(_) => return Vec::new(),
+    };
+    let mut out: Vec<(String, String, f64, f64, f64)> = Vec::new();
+    if let Some(arr) = resp.as_array() {
+        for p in arr {
+            let symbol_v = p.get("symbol").and_then(|v| v.as_str()).unwrap_or("");
+            let position_side_raw = p.get("positionSide").and_then(|v| v.as_str()).unwrap_or("");
+            if position_side_raw != "LONG" && position_side_raw != "SHORT" {
+                continue;
+            }
+            let amt = p.get("positionAmt").and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+            if amt.abs() < 0.0001 { continue; }
+            let entry = p.get("entryPrice").and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+            let mark = p.get("markPrice").and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+            out.push((symbol_v.to_string(), position_side_raw.to_string(), entry, mark, amt));
+        }
+    }
+    out
+}
+
+/// 查某仓位的现有 STOP_MARKET Algo 单
+/// 返回 Some((algo_id, trigger_price)) if found,None 表示没找到
+/// 对齐 pinbar get_algo_orders + filter by type=STOP_MARKET + positionSide
+pub async fn find_open_sl_for_position(
+    api_key: &str,
+    api_secret: &str,
+    base_url: &str,
+    symbol: &str,
+    position_side: &str,
+) -> Option<(u64, f64)> {
+    if api_key.is_empty() || api_secret.is_empty() {
+        return None;
+    }
+    let client = Client::new();
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis()).unwrap_or(0);
+    let qs = format!("timestamp={}", ts);
+    let sig = sign_query(&qs, api_secret);
+    let url = format!("{}/fapi/v1/openAlgoOrders?{}&signature={}", base_url, qs, sig);
+    let resp: serde_json::Value = match client.get(&url)
+        .header("X-MBX-APIKEY", api_key).send().await
+    {
+        Ok(r) => match r.json().await {
+            Ok(v) => v,
+            Err(_) => return None,
+        },
+        Err(_) => return None,
+    };
+    let arr = resp.as_array()?;
+    for a in arr {
+        let s = a.get("symbol").and_then(|v| v.as_str()).unwrap_or("");
+        if s != symbol { continue; }
+        let ps = a.get("positionSide").and_then(|v| v.as_str()).unwrap_or("");
+        if ps != position_side { continue; }
+        // 只关心 SL。Binance 返回的 type 字段可能缺失,这里宽松判
+        let algo_type = a.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        if !algo_type.is_empty() && algo_type != "STOP_MARKET" { continue; }
+        let algo_id = a.get("algoId").and_then(|v| v.as_u64()).unwrap_or(0);
+        if algo_id == 0 { continue; }
+        let trigger = a.get("triggerPrice").and_then(|v| v.as_str())
+            .and_then(|n| n.parse::<f64>().ok()).unwrap_or(0.0);
+        if trigger <= 0.0 { continue; }
+        return Some((algo_id, trigger));
+    }
+    None
+}
+
+/// 按 price precision 格式化价格(对齐前端 toFixed / pinbar format_price)
+/// 返回字符串,parse 回 f64 时去掉 f64 精度抖动
+pub fn format_price(price: f64, precision: u32) -> String {
+    format!("{:.*}", precision as usize, price)
+}
+
+/// 计算 price precision 对应的 tickSize 容忍度(0.5 tickSize)
+/// 对齐 pinbar protective_stop:tolerance = 0.5 / 10^precision
+pub fn price_tolerance(precision: u32) -> f64 {
+    0.5_f64 / 10f64.powi(precision as i32)
 }

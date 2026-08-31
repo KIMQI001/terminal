@@ -350,6 +350,159 @@ async fn main() -> anyhow::Result<()> {
             }
         });
 
+        // ===== [ProtectiveStop] task =====
+        // 参考 pinbar-detector/src/main.rs:744 monitor_positions 风格:
+        // - 用 mark_price(从 positionRisk 取)算 profit,不用 unRealizedProfit
+        //   (mark_price 不含手续费/funding,纯价格差)
+        // - profit ≥ PROTECTIVE_ACTIVATION_POINTS(默认 100)→ 把现有 SL 替换为 entry ± PROTECTIVE_STOP_POINTS(默认 20)
+        // - 已有 SL 价格跟目标差 > 0.5 * tickSize 才更新(防精度抖动)
+        // - 价格按 precision 格式化,避免浮点精度抖动
+        // - Replace 策略(cancel 旧 SL + 下新 SL)— 不像之前那样加第二个 SL
+        let protective_activation: f64 = std::env::var("PROTECTIVE_ACTIVATION_POINTS")
+            .ok().and_then(|s| s.parse().ok()).unwrap_or(100.0);
+        let protective_stop_points: f64 = std::env::var("PROTECTIVE_STOP_POINTS")
+            .ok().and_then(|s| s.parse().ok()).unwrap_or(20.0);
+        let protective_interval_secs: u64 = std::env::var("PROTECTIVE_INTERVAL_SECS")
+            .ok().and_then(|s| s.parse().ok()).unwrap_or(60);
+        let api_key_protect = api_key_global.clone();
+        let api_secret_protect = api_secret_global.clone();
+        let base_url_protect = base_url_global.clone();
+        let notify_protect = notify_clone.clone();
+        tokio::spawn(async move {
+            let mut rounds: u32 = 0;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(protective_interval_secs)).await;
+                rounds += 1;
+                let positions: Vec<(String, String, f64, f64, f64)> = order::get_all_positions_with_mark(
+                    &api_key_protect, &api_secret_protect, &base_url_protect,
+                ).await;
+                if positions.is_empty() {
+                    if rounds % 30 == 0 {
+                        info!("[ProtectiveStop] task alive, {} rounds, no open positions", rounds);
+                    }
+                    continue;
+                }
+                let pos_count = positions.len();
+                let mut triggered_count: u32 = 0;
+                for (sym, position_side, entry, mark_price, amt) in positions {
+                    if amt.abs() < 0.0001 || entry <= 0.0 || mark_price <= 0.0 {
+                        continue;
+                    }
+                    // 1) 算 profit(mark_price - entry,纯价格差)
+                    let profit = if position_side == "LONG" {
+                        mark_price - entry
+                    } else {
+                        entry - mark_price
+                    };
+                    if profit < protective_activation {
+                        continue;  // 浮盈不够,跳过
+                    }
+                    // 2) 算新 SL trigger + 按 precision 格式化
+                    let raw_sl = if position_side == "LONG" {
+                        entry + protective_stop_points
+                    } else {
+                        entry - protective_stop_points
+                    };
+                    let (_, price_precision) = order::get_precision(&sym);
+                    let sl_precise_str = order::format_price(raw_sl, price_precision);
+                    let sl_precise: f64 = sl_precise_str.parse().unwrap_or(raw_sl);
+                    let tolerance = order::price_tolerance(price_precision);
+                    // 3) 查现有 SL (cancel 前先看)
+                    let existing = order::find_open_sl_for_position(
+                        &api_key_protect, &api_secret_protect, &base_url_protect,
+                        &sym, &position_side,
+                    ).await;
+                    // 4) should_update:existing 跟新 SL 差距超过 tolerance 才更新
+                    // (持续提升,只要 profit 回落到新 SL 之下不会再触发)
+                    let should_update = match &existing {
+                        None => true,  // 没 SL,下个
+                        Some((_, ex)) => if position_side == "LONG" {
+                            (sl_precise - ex).abs() > tolerance
+                        } else {
+                            (ex - sl_precise).abs() > tolerance
+                        }
+                    };
+                    if !should_update {
+                        debug!(
+                            "[ProtectiveStop] {} {} SL @ {:.2} ≈ target {:.2}(within {:.4} tol),skip",
+                            sym, position_side,
+                            existing.as_ref().map(|x| x.1).unwrap_or(0.0),
+                            sl_precise, tolerance
+                        );
+                        continue;
+                    }
+                    // 5) cancel 现有 SL(如果有)+ 短暂等异步
+                    if let Some((algo_id, ex_trig)) = &existing {
+                        match order::cancel_single_algo(
+                            &api_key_protect, &api_secret_protect, &base_url_protect,
+                            &sym, *algo_id,
+                        ).await {
+                            Ok(true) => warn!(
+                                "[ProtectiveStop] {} {} cancel 旧 SL algoId={} trigger={:.2}(替换到 {:.2})",
+                                sym, position_side, algo_id, ex_trig, sl_precise
+                            ),
+                            Ok(false) => warn!(
+                                "[ProtectiveStop] {} {} cancel algoId={} 返回非 ok(可能已清)",
+                                sym, position_side, algo_id
+                            ),
+                            Err(e) => warn!(
+                                "[ProtectiveStop] {} {} cancel algoId={} 失败: {}",
+                                sym, position_side, algo_id, e
+                            ),
+                        }
+                        // 让 Binance 异步处理(几秒通常够)
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    }
+                    // 6) 下新 SL
+                    let close_side = if position_side == "LONG" { "SELL" } else { "BUY" };
+                    let qty = amt.abs();
+                    let side_short = if position_side == "LONG" { "L" } else { "S" };
+                    let ts_secs = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default().as_secs();
+                    let client_id = format!("protect_{}_{}_{}", sym.to_lowercase(), side_short, ts_secs);
+                    let client = reqwest::Client::new();
+                    match order::place_algo_order(
+                        &client, &api_key_protect, &api_secret_protect, &base_url_protect,
+                        &sym, close_side, &position_side, "STOP_MARKET",
+                        qty, sl_precise, &client_id,
+                    ).await {
+                        Ok(algo_id) => {
+                            warn!(
+                                "[ProtectiveStop] {} {} 浮盈 ${:.0} ≥ ${} → SL 替换到 ${:.2}(algoId={},精度 {})",
+                                sym, position_side, profit, protective_activation,
+                                sl_precise, algo_id, price_precision
+                            );
+                            let body = format!(
+                                "\n\n### 🛡️ Protective Stop 触发\n\n\
+- **仓位**: {} {}\n\
+- **浮盈**: ${:.2} USD(mark_price={:.2} - entry={:.2},触发点 ${})\n\
+- **新 SL trigger**: ${:.2}(entry ± {} USD,精度格式化)\n\
+- **algoId**: {}\n\
+- **clientAlgoId**: {}\n\
+- **策略**: replace(取消旧 SL + 下新 SL,tolerance = 0.5 tickSize = {:.4} USD)",
+                                sym, position_side, profit, mark_price, entry,
+                                protective_activation, sl_precise, protective_stop_points,
+                                algo_id, client_id, tolerance
+                            );
+                            let _ = broadcast(&notify_protect, "🛡️ Protective Stop 触发", &body).await;
+                            triggered_count += 1;
+                        }
+                        Err(e) => {
+                            warn!("[ProtectiveStop] {} {} 下新 SL 失败: {}", sym, position_side, e);
+                        }
+                    }
+                }
+                if rounds % 30 == 0 {
+                    info!(
+                        "[ProtectiveStop] task alive, {} rounds, {} positions scanned",
+                        rounds, pos_count
+                    );
+                }
+                let _ = triggered_count;  // suppress unused warning
+            }
+        });
+
         // 孤儿 Algo 单清理 v2:用 Binance createTime(真实时间戳)判定 age,
         // 阈值 45 分钟(足够保守,给 Binance 异步更新留充足时间)。
         // - 不依赖本程序 round 计数,程序重启/精度漂移都不影响
