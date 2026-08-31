@@ -627,17 +627,16 @@ let hq_line = if s.high_quality {
                 let body = format!(
                     "### 📐 wick SR 触发{}{}{}\n\n\
 - **交易对**: {}\n\
-- **方向**: {} ({} {})\n\
+- **方向**: {}\n\
 - **K 线时间(北京)**: {}\n\
 - **level**: ${:.2}\n\
 - **zone**: [${:.2}, ${:.2}]\n\
 - **wick 比例**: {:.0}%\n\
 - **层级**: {}\n\
-- **FVG 方向**: {} → {}{}{}{}",
+- **FVG 方向**: {} → {}{}{}{}{}",
                     reversal_tag, hq_tag, "".to_string(),
                     symbol,
                     side_label,
-                    tier_label,
                     format_beijing_time(s.time),
                     s.level,
                     s.zone_low, s.zone_high,
@@ -673,9 +672,11 @@ let hq_line = if s.high_quality {
                 let hq_trade_hour_end_min: u32 = std::env::var("HQ_TRADE_HOUR_END_MIN")
                     .ok().and_then(|s| s.parse().ok()).unwrap_or(22 * 60 + 30);
                 let now_beijing = chrono::Utc::now() + chrono::Duration::hours(8);
-                let current_min: u32 = now_beijing.format("%H:%M").to_string()
-                    .split(':').map(|s| s.parse::<u32>().unwrap_or(0)).fold(0u32, |acc, n| acc * 100 + n)
-                    % 10000;
+                // 当前分钟数 = HH*60 + MM(修复前用 `.fold(|acc, n| acc*100 + n)` 错算成 HHMM,
+                // 如 20:30 → 2030,跟区间 [start*60, end_min) 比较数学不对位,
+                // 导致 20:00-22:30 永远 false,反而 12:00-13:49 错位命中)
+                let current_min: u32 = now_beijing.format("%H").to_string().parse::<u32>().unwrap_or(0) * 60
+                    + now_beijing.format("%M").to_string().parse::<u32>().unwrap_or(0);
                 // 20:00 到 hq_trade_hour_end_min 分钟数(默认 22:30 = 1350 分)
                 let in_hq_trade_window = current_min >= hq_trade_hour_start * 60
                     && current_min < hq_trade_hour_end_min;
