@@ -687,7 +687,7 @@ let hq_line = if s.high_quality {
                 let near_key_level = nearest_distance < 50.0;
                 // 20-23 高等级同向(规则 2)直接下单,不需要关键位
                 // 关键位 + 反转 wick(规则 1 + 3)二选一也下单
-                let will_trade = (near_key_level && s.reversal) || hq_same_direction;
+                let will_trade = (near_key_level && (s.reversal || s.high_quality)) || hq_same_direction;
                 if will_trade && std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {
                     let api_key = std::env::var("BINANCE_API_KEY").unwrap_or_default();
                     let api_secret = std::env::var("BINANCE_API_SECRET").unwrap_or_default();
