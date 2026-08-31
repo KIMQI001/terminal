@@ -590,7 +590,7 @@ let tier_label = format!("{}{}", if s.side == "bullish" { "S" } else { "R" }, s.
                             else if *name == "1D OC mid" { anchor.oc_mid }
                             else if *name == "1D R level" { anchor.r_level.unwrap_or(0.0) }
                             else { anchor.s_level.unwrap_or(0.0) };
-                        let is_key = *dist < 50.0;
+                        let is_key = *dist < 80.0;
                         format!(
                             "\n- **1D 关键价位最近**: {} → ${:.2}(距 wick ${:.2} 仅 **{:.0} USD**{})",
                             name, key_level, s.level, dist,
@@ -684,7 +684,7 @@ let hq_line = if s.high_quality {
                     (s.side == "bearish" && !long_only)
                 );
                 // 关键位(距离 < 100 USD 视为 1D 大级别关键位)— 也触发下单
-                let near_key_level = nearest_distance < 50.0;
+                let near_key_level = nearest_distance < 80.0;
                 // 20-23 高等级同向(规则 2)直接下单,不需要关键位
                 // 关键位 + 反转 wick(规则 1 + 3)二选一也下单
                 let will_trade = (near_key_level && (s.reversal || s.high_quality)) || hq_same_direction;
