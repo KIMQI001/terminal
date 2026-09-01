@@ -633,6 +633,9 @@ async fn main() -> anyhow::Result<()> {
             let c_snapshot = candles.lock().await.clone();
             // 只检测最新一根 K 的 wick(不再扫历史)— 历史 wick 会在前一根 K close 时已经处理过
             let signals = detector::detect_wick_sr_for_last(&c_snapshot, &opts);
+            // 双 wick 信号检测:连续 2 根 K 同侧 wick zone 重叠
+            // 返回 HashSet<side>:"bullish" 表示当前 K 的 S 跟上一根 K 的 S zone 重叠
+            let double_wick_sides = detector::detect_double_wick_last(&c_snapshot, &opts);
 
             // 方向过滤:long 趋势只报 S(支撑),short 趋势只报 R(阻力)
             // - 最近 FVG 看涨 → long → true
@@ -707,6 +710,7 @@ async fn main() -> anyhow::Result<()> {
                 let side_label = if s.side == "bullish" { "支撑 S" } else { "阻力 R" };
                 let reversal_tag = if s.reversal { " 🔄反转" } else { "" };
                 let hq_tag = if s.high_quality { " ⭐高等级" } else { "" };
+                let is_double_wick = double_wick_sides.contains(&s.side);
 let tier_label = format!("{}{}", if s.side == "bullish" { "S" } else { "R" }, s.tier);
                 let title = format!(
                     "{arrow} wick {} ({} {}){}{}",
@@ -770,8 +774,41 @@ let hq_line = if s.high_quality {
                 } else {
                     String::new()
                 };
+                // 双 wick 信号描述段:跨 2 根 K 同侧 zone 重叠 → 强信号(独立 will_trade 规则)
+                let double_wick_line = if is_double_wick {
+                    // 算 zone 包含关系(扩展 / 收紧 / 部分重叠)
+                    let curr_zone_lo = s.zone_low;
+                    let curr_zone_hi = s.zone_high;
+                    let prev_zone_lo;
+                    let prev_zone_hi;
+                    if s.side == "bullish" {
+                        // S zone:[low, body_bottom]
+                        prev_zone_lo = c_snapshot[c_snapshot.len() - 2].low;
+                        prev_zone_hi = (c_snapshot[c_snapshot.len() - 2].open).min(c_snapshot[c_snapshot.len() - 2].close);
+                    } else {
+                        // R zone:[body_top, high]
+                        prev_zone_lo = (c_snapshot[c_snapshot.len() - 2].open).max(c_snapshot[c_snapshot.len() - 2].close);
+                        prev_zone_hi = c_snapshot[c_snapshot.len() - 2].high;
+                    }
+                    let overlap_type = if curr_zone_lo <= prev_zone_lo && curr_zone_hi >= prev_zone_hi {
+                        "当前 wick zone 吞掉前一根 K(扩展)"
+                    } else if prev_zone_lo <= curr_zone_lo && prev_zone_hi >= curr_zone_hi {
+                        "前一根 K 吞掉当前 wick zone(收紧)"
+                    } else {
+                        "两个 zone 部分重叠(独立测试)"
+                    };
+                    let side_label = if s.side == "bullish" { "双 S" } else { "双 R" };
+                    format!(
+                        "\n- **双 wick 信号**: {} 同侧 wick 跨 2 根 K zone 重叠({}) → **触发下单**(独立 will_trade 规则)\n",
+                        side_label, overlap_type
+                    )
+                } else {
+                    String::new()
+                };
                 let action_line = if s.reversal {
                     "\n- **动作**: 🔁 反转 wick → **触发下单**\n"
+                } else if is_double_wick {
+                    "\n- **动作**: 🔁 双 wick → **触发下单**\n"
                 } else if s.high_quality {
                     "\n- **动作**: ⭐高等级 → **仅报警,不下单**\n"
                 } else {
@@ -786,7 +823,7 @@ let hq_line = if s.high_quality {
 - **zone**: [${:.2}, ${:.2}]\n\
 - **wick 比例**: {:.0}%\n\
 - **层级**: {}\n\
-- **FVG 方向**: {} → {}{}{}{}{}",
+- **FVG 方向**: {} → {}{}{}{}{}{}",
                     reversal_tag, hq_tag, "".to_string(),
                     symbol,
                     side_label,
@@ -806,7 +843,8 @@ let hq_line = if s.high_quality {
                     reversal_line,
                     hq_line,
                     action_line,
-                    anchor_dist_line
+                    anchor_dist_line,
+                    double_wick_line
                 );
                 warn!("new wick SR: {}/{} @ {}", s.side, s.level, s.time);
                 if let Err(e) = broadcast(&notify, &title, &body).await {
@@ -839,9 +877,15 @@ let hq_line = if s.high_quality {
                 );
                 // 关键位(距离 < 100 USD 视为 1D 大级别关键位)— 也触发下单
                 let near_key_level = nearest_distance < 80.0;
+                // 双 wick 信号(规则 3):连续 2 根 K 同侧 wick zone 重叠
+                // 不依赖 1D 关键位、不依赖 20-22:30 时段
+                // (let is_double_wick 已在 alert body 段前面定义)
                 // 20-23 高等级同向(规则 2)直接下单,不需要关键位
                 // 关键位 + 反转 wick(规则 1 + 3)二选一也下单
-                let will_trade = (near_key_level && (s.reversal || s.high_quality)) || hq_same_direction;
+                // 双 wick(规则 3)叠加在前两条规则之上,独立触发
+                let will_trade = (near_key_level && (s.reversal || s.high_quality))
+                              || hq_same_direction
+                              || is_double_wick;
                 if will_trade && std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {
                     let api_key = std::env::var("BINANCE_API_KEY").unwrap_or_default();
                     let api_secret = std::env::var("BINANCE_API_SECRET").unwrap_or_default();

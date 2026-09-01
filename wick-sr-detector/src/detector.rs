@@ -654,3 +654,48 @@ pub fn build_daily_anchor(
         time: c.time,
     })
 }
+
+/// 检测最后 2 根 K(包括当前 K)的同侧 wick zone 重叠
+/// 返回 HashSet<side>:
+/// - "bullish" in set → 当前 K 的下影 S 跟上一根 K 的下影 S 有 zone 重叠(即"双 S"信号)
+/// - "bearish" in set → 当前 K 的上影 R 跟上一根 K 的上影 R 有 zone 重叠(即"双 R"信号)
+/// 重叠判定:任一(部分包含 / 被包含 / 完全包含)即算。强信号 = 同一价位被连续测试。
+pub fn detect_double_wick_last(
+    candles: &[crate::types::Candle],
+    options: &DetectOptions,
+) -> std::collections::HashSet<String> {
+    let mut result: std::collections::HashSet<String> = std::collections::HashSet::new();
+    if candles.len() < 2 { return result; }
+    let prev_c = &candles[candles.len() - 2];
+    let curr_c = &candles[candles.len() - 1];
+    let range_prev = prev_c.high - prev_c.low;
+    let range_curr = curr_c.high - curr_c.low;
+    if range_prev <= 0.0 || range_curr <= 0.0 { return result; }
+
+    // 上一根 K 的 wick ratio
+    let prev_body_top = prev_c.open.max(prev_c.close);
+    let prev_body_bottom = prev_c.open.min(prev_c.close);
+    let prev_upper_ratio = (prev_c.high - prev_body_top) / range_prev;
+    let prev_lower_ratio = (prev_body_bottom - prev_c.low) / range_prev;
+    // 当前 K 的 wick ratio
+    let curr_body_top = curr_c.open.max(curr_c.close);
+    let curr_body_bottom = curr_c.open.min(curr_c.close);
+    let curr_upper_ratio = (curr_c.high - curr_body_top) / range_curr;
+    let curr_lower_ratio = (curr_body_bottom - curr_c.low) / range_curr;
+
+    // 双 S:两 K 都有 ≥ wick_ratio 的下影,且 zone 重叠
+    // S zone = [c.low, body_bottom];重叠 ⇔ curr.low ≤ prev.body_bottom && prev.low ≤ curr.body_bottom
+    if prev_lower_ratio >= options.wick_ratio && curr_lower_ratio >= options.wick_ratio {
+        if curr_c.low <= prev_body_bottom && prev_c.low <= curr_body_bottom {
+            result.insert("bullish".to_string());
+        }
+    }
+    // 双 R:两 K 都有 ≥ wick_ratio 的上影,且 zone 重叠
+    // R zone = [body_top, c.high];重叠 ⇔ curr.body_top ≤ prev.high && prev.body_top ≤ curr.high
+    if prev_upper_ratio >= options.wick_ratio && curr_upper_ratio >= options.wick_ratio {
+        if curr_body_top <= prev_c.high && prev_body_top <= curr_c.high {
+            result.insert("bearish".to_string());
+        }
+    }
+    result
+}
