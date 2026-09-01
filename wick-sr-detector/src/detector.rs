@@ -655,9 +655,9 @@ pub fn build_daily_anchor(
     })
 }
 
-/// 双 wick 触发条件:K 线 range 上限(默认 200 USD)
-/// 跟 high_quality 的 range_max_usd(默认 250)独立 — 这里更严,过滤掉大 K + 长影线的伪信号
-const DOUBLE_WICK_RANGE_MAX_USD: f64 = 200.0;
+/// 双 wick 触发条件:K 线 range 上限(默认 250 USD)
+/// 跟 high_quality 的 range_max_usd 对齐 — 过滤掉大 K + 长影线的伪信号
+const DOUBLE_WICK_RANGE_MAX_USD: f64 = 250.0;
 
 /// 检测最后 2 根 K(包括当前 K)的同侧 wick zone 重叠
 /// 返回 HashSet<side>:
@@ -667,7 +667,7 @@ const DOUBLE_WICK_RANGE_MAX_USD: f64 = 200.0;
 ///
 /// 额外过滤条件:
 /// 1. 两 K 的实体 |open - close| 都 ≤ options.body_max_usd(默认 50 USD,doji/小实体)
-/// 2. 两 K 的 range (high - low) 都 ≤ DOUBLE_WICK_RANGE_MAX_USD(默认 200 USD,K 线不能太大)
+/// 2. 两 K 的 range (high - low) 都 ≤ DOUBLE_WICK_RANGE_MAX_USD(默认 250 USD,K 线不能太大)
 /// 这两个条件共同过滤"大 K + 长影线"的趋势性 K — 只有 doji/小实体 + 紧凑 K 才算合格信号。
 pub fn detect_double_wick_last(
     candles: &[crate::types::Candle],
