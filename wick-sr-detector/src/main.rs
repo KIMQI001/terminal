@@ -652,8 +652,27 @@ let hq_line = if s.high_quality {
                 } else {
                     String::new()
                 };
-                let action_line = if is_double_wick && !s.reversal {
+                // 安静时段判定(默认 22:45-隔日 07:30 北京,跨午夜)
+// 这里提前算:给 action_line / will_trade / 报警 body 共用
+                let quiet_start: u32 = std::env::var("QUIET_HOURS_START_MIN")
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(22 * 60 + 45);  // 22:45
+                let quiet_end: u32 = std::env::var("QUIET_HOURS_END_MIN")
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(7 * 60 + 30);   // 07:30
+                // current_min 在后面 will_trade 块算,这里复用先算的 now_beijing
+                // 由于 current_min 还没算,这里自己算一遍(简单)
+                let now_beijing_q = chrono::Utc::now() + chrono::Duration::hours(8);
+                let current_min_q: u32 = now_beijing_q.format("%H").to_string().parse::<u32>().unwrap_or(0) * 60
+                    + now_beijing_q.format("%M").to_string().parse::<u32>().unwrap_or(0);
+                // 跨午夜:start > end 时,in_quiet = (current >= start) || (current < end)
+                let in_quiet_hours = if quiet_start > quiet_end {
+                    current_min_q >= quiet_start || current_min_q < quiet_end
+                } else {
+                    current_min_q >= quiet_start && current_min_q < quiet_end
+                };
+let action_line = if is_double_wick && !s.reversal {
                     "\n- **动作**: 🔁 双 wick → **触发下单**\n"
+                } else if in_quiet_hours {
+                    "\n- **动作**: 🔇 安静时段(22:45-07:30),仅接受双 wick → **仅报警,不下单**\n"
                 } else if s.reversal {
                     "\n- **动作**: 🔁 反转 wick → **仅报警,不下单**(反转 wick 已禁用下单)\n"
                 } else if s.high_quality {
@@ -727,15 +746,21 @@ let hq_line = if s.high_quality {
                 // 双 wick 信号(规则 3):连续 2 根 K 同侧 wick zone 重叠
                 // 不依赖 1D 关键位、不依赖 20-22:30 时段
                 // (let is_double_wick 已在 alert body 段前面定义)
+                // 安静时段(默认 22:45-隔日 07:30 北京,跨午夜):只允许双 wick 下单
+                // 避免低活跃时段被假信号(规则 1/2 容易被噪音触发)误下单
+                // (let quiet_start / quiet_end / in_quiet_hours 已在 action_line 之前定义)
                 // 20-23 高等级同向(规则 2)直接下单,不需要关键位
                 // 关键位 + 高等级(规则 1)二选一也下单
                 // 双 wick(规则 3)叠加在前两条规则之上,独立触发
+                // 安静时段:仅 R3(双 wick)允许下单,R1/R2 失效(避免低活跃误触发)
                 // 反转 wick 不再触发任何规则(只报警,不下单)
-                let will_trade = !s.reversal && (
+                let will_trade = !s.reversal && if in_quiet_hours {
+                    is_double_wick
+                } else {
                     (near_key_level && s.high_quality)
                     || hq_same_direction
                     || is_double_wick
-                );
+                };
                 if will_trade && std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {
                     let api_key = std::env::var("BINANCE_API_KEY").unwrap_or_default();
                     let api_secret = std::env::var("BINANCE_API_SECRET").unwrap_or_default();
