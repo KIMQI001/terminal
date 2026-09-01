@@ -851,8 +851,6 @@ let hq_line = if s.high_quality {
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(0.5);
                     let stop_loss_usd: f64 = std::env::var("STOP_LOSS_USD")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
-                    let stop_loss_min_usd: f64 = std::env::var("STOP_LOSS_MIN_USD")
-                        .ok().and_then(|s| s.parse().ok()).unwrap_or(100.0);
                     let take_profit_rr: f64 = std::env::var("TAKE_PROFIT_RR")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(1.0);
                     let _ = take_profit_rr; // 已废弃:TP 固定 ±200 USD,不再依赖 RR
@@ -953,23 +951,13 @@ let hq_line = if s.high_quality {
                         }
                     }
 
-                    // 止损 = entry ± STOP_LOSS_USD 跟 K 极值取离 entry 较近的那个
-//   - S 做多:max(entry - stop_loss, candle.low)— 取较高(离 entry 较近 = 止损小)
-                    //   如果 candle.low 比 entry - 200 更接近 entry,SL = candle.low(更紧)
-                    //   否则 SL = entry - 200(标准距离)
-                    //   同理 R 做空:min(entry + stop_loss, candle.high)
+                    // 止损 = entry ± STOP_LOSS_USD(固定距离,不再比较 candle 极值 / 100 USD 下限)
+                    //   - S 做多:SL = entry - stop_loss_usd
+                    //   - R 做空:SL = entry + stop_loss_usd
                     let stop_loss = if s.side == "bullish" {
-                        // 之前 .min(200, candle.low) 是 USD 价对比(candle.low < entry-200 时取 200 距,排除 candle.low)
-                        // 正确:用 USD 距算
-                        //   dist = min(200, entry - candle.low)
-                        //   sl = entry - max(100, dist)
-                        let dist_low = (entry_price - candle.low).abs();
-                        let capped_dist = dist_low.min(stop_loss_usd).max(stop_loss_min_usd);
-                        entry_price - capped_dist
+                        entry_price - stop_loss_usd
                     } else {
-                        let dist_high = (candle.high - entry_price).abs();
-                        let capped_dist = dist_high.min(stop_loss_usd).max(stop_loss_min_usd);
-                        entry_price + capped_dist
+                        entry_price + stop_loss_usd
                     };
 
                     // 止盈:固定 entry ± 200 USD(不依赖 SL 距离,严格 200 一点)
