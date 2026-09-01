@@ -594,7 +594,7 @@ let tier_label = format!("{}{}", if s.side == "bullish" { "S" } else { "R" }, s.
                             else if *name == "1D OC mid" { anchor.oc_mid }
                             else if *name == "1D R level" { anchor.r_level.unwrap_or(0.0) }
                             else { anchor.s_level.unwrap_or(0.0) };
-                        let is_key = *dist < 80.0;
+                        let is_key = *dist < 85.0;
                         format!(
                             "\n- **1D 关键价位最近**: {} → ${:.2}(距 wick ${:.2} 仅 **{:.0} USD**{})",
                             name, key_level, s.level, dist,
@@ -723,7 +723,7 @@ let hq_line = if s.high_quality {
                     (s.side == "bearish" && !long_only)
                 );
                 // 关键位(距离 < 100 USD 视为 1D 大级别关键位)— 也触发下单
-                let near_key_level = nearest_distance < 80.0;
+                let near_key_level = nearest_distance < 85.0;
                 // 双 wick 信号(规则 3):连续 2 根 K 同侧 wick zone 重叠
                 // 不依赖 1D 关键位、不依赖 20-22:30 时段
                 // (let is_double_wick 已在 alert body 段前面定义)
