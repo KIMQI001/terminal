@@ -414,7 +414,10 @@ pub fn latest_fvg_direction(
     // 从右往左,起点 = max(2, candles.len() - fvg_lookback_count)
     let start = candles.len().saturating_sub(fvg_lookback_count).max(2);
     let mut fvg_info: Option<(bool, i64, f64)> = None;  // (direction, time, gap)
-    for i in (start..candles.len() - 1).rev() {
+    // 之前 `candles.len() - 1` 排除了最新 K,导致刚 close 那根 K 形成的 FVG 要滞后
+    // 一个 K 才被识别(K3 是最新 K 时,c3 = candles[len-1] 永远不会被扫到)。
+    // 改成 `candles.len()` — K close 后最新 K 已 finalized,可参与 FVG 判定。
+    for i in (start..candles.len()).rev() {
         if i < 2 {
             break;
         }
