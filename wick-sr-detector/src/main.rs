@@ -522,11 +522,36 @@ async fn main() -> anyhow::Result<()> {
             // 读 1D 锚点数据(启动时 fetch 一次,这里只读)
             let anchor_data = (*daily_anchor.lock().await).clone();
             for mut s in signals {
-                // 方向过滤
+                // 预算 nearest_distance(方向过滤之前算)— 用于判断反向 wick 是否近 1D 关键位
+                let mut nearest_distance: f64 = f64::INFINITY;
+                if let Some(anchor) = anchor_data.as_ref() {
+                    let mut distances: Vec<(&str, f64)> = vec![];
+                    distances.push(("1D O", (anchor.open - s.level).abs()));
+                    distances.push(("1D H", (anchor.high - s.level).abs()));
+                    distances.push(("1D L", (anchor.low - s.level).abs()));
+                    distances.push(("1D C", (anchor.close - s.level).abs()));
+                    distances.push(("1D OC mid", (anchor.oc_mid - s.level).abs()));
+                    if let Some(r) = anchor.r_level {
+                        distances.push(("1D R level", (r - s.level).abs()));
+                    }
+                    if let Some(sl) = anchor.s_level {
+                        distances.push(("1D S level", (sl - s.level).abs()));
+                    }
+                    distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                    if let Some((_, dist)) = distances.first() {
+                        nearest_distance = *dist;
+                    }
+                }
+                // 方向过滤:反向 wick 但距 1D 关键位 < 85 → 放行报警(不下单,见 will_trade 加 direction_match)
                 let side_is_bullish = s.side == "bullish";
                 if !s.reversal && ((side_is_bullish && !want_bullish) || (!side_is_bullish && !want_bearish)) {
-                    info!("filtered by direction: {} (long_only={})", s.side, long_only);
-                    continue;
+                    if nearest_distance < 85.0 {
+                        info!("反向 wick {} 距 1D 关键位 {:.0} < 85,放行报警(不下单)", s.side, nearest_distance);
+                        // 不 continue,放行
+                    } else {
+                        info!("filtered by direction: {} (long_only={},距 1D 关键位 {:.0} ≥ 85)", s.side, long_only, nearest_distance);
+                        continue;
+                    }
                 }
                 // 计算 tier:跨 K 累计序号
                 let side_key = (symbol.clone(), s.side.clone());
@@ -569,8 +594,7 @@ let tier_label = format!("{}{}", if s.side == "bullish" { "S" } else { "R" }, s.
                     String::new()
                 };
                 // 1D 锚点关键价位距离(取绝对值最小的那个)— 同时记下最近距离
-                // 用于 will_trade 判定:距离 < 100 USD 视为关键位,自动下单
-                let mut nearest_distance: f64 = f64::INFINITY;
+                // nearest_distance 已在方向过滤之前预算(避免重复算),这里只算 is_key / 描述
                 let anchor_dist_line = if let Some(anchor) = anchor_data.as_ref() {
                     let mut distances: Vec<(&str, f64)> = vec![];
                     distances.push(("1D O", (anchor.open - s.level).abs()));
@@ -669,12 +693,17 @@ let hq_line = if s.high_quality {
                 } else {
                     current_min_q >= quiet_start && current_min_q < quiet_end
                 };
-let action_line = if is_double_wick && !s.reversal {
+                // 方向匹配(wick 跟 FVG 方向)— 用于反向 wick 报警但不下单的判定
+                let direction_match = (s.side == "bullish" && long_only)
+                    || (s.side == "bearish" && !long_only);
+let action_line = if is_double_wick && !s.reversal && direction_match {
                     "\n- **动作**: 🔁 双 wick → **触发下单**\n"
-                } else if in_quiet_hours {
-                    "\n- **动作**: 🔇 安静时段(22:45-07:30),仅接受双 wick → **仅报警,不下单**\n"
                 } else if s.reversal {
                     "\n- **动作**: 🔁 反转 wick → **仅报警,不下单**(反转 wick 已禁用下单)\n"
+                } else if !direction_match && nearest_distance < 85.0 {
+                    "\n- **动作**: ⚠️ 反向 wick(近 1D 关键位 {:.0} USD)→ **仅报警,不下单**\n"
+                } else if in_quiet_hours {
+                    "\n- **动作**: 🔇 安静时段(22:45-07:00),仅接受双 wick → **仅报警,不下单**\n"
                 } else if s.high_quality {
                     "\n- **动作**: ⭐高等级 → **仅报警,不下单**\n"
                 } else {
@@ -754,12 +783,15 @@ let action_line = if is_double_wick && !s.reversal {
                 // 双 wick(规则 3)叠加在前两条规则之上,独立触发
                 // 安静时段:仅 R3(双 wick)允许下单,R1/R2 失效(避免低活跃误触发)
                 // 反转 wick 不再触发任何规则(只报警,不下单)
+                // 反向 wick(方向过滤已放行但不会下单)— direction_match 强制 R1/R3 要求同向
+                let direction_match = (s.side == "bullish" && long_only)
+                    || (s.side == "bearish" && !long_only);
                 let will_trade = !s.reversal && if in_quiet_hours {
-                    is_double_wick
+                    is_double_wick && direction_match
                 } else {
-                    (near_key_level && s.high_quality)
+                    (near_key_level && s.high_quality && direction_match)
                     || hq_same_direction
-                    || is_double_wick
+                    || (is_double_wick && direction_match)
                 };
                 if will_trade && std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {
                     let api_key = std::env::var("BINANCE_API_KEY").unwrap_or_default();
