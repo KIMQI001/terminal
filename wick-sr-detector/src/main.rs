@@ -911,12 +911,12 @@ let action_line = if is_double_wick && !s.reversal && direction_match {
                         entry_price + stop_loss_usd
                     };
 
-                    // 止盈:固定 entry ± 200 USD(不依赖 SL 距离,严格 200 一点)
+                    // 止盈:固定 entry ± 300 USD(不依赖 SL 距离,严格 300 一点)
                     // 之前是 risk × take_profit_rr,经常不是 200
                     let take_profit = if s.side == "bullish" {
-                        entry_price + 200.0
+                        entry_price + 300.0
                     } else {
-                        entry_price - 200.0
+                        entry_price - 300.0
                     };
 
                     // 计算数量(基于账户余额 * 仓位百分比 * 固定 leverage)
