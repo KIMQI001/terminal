@@ -693,10 +693,18 @@ let hq_line = if s.high_quality {
                 } else {
                     current_min_q >= quiet_start && current_min_q < quiet_end
                 };
+                // 激活时段(默认 08:00-10:00 北京,每日)— 该时段反转 wick 允许下单
+                let active_start: u32 = std::env::var("ACTIVE_HOURS_START_MIN")
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(8 * 60);   // 08:00
+                let active_end: u32 = std::env::var("ACTIVE_HOURS_END_MIN")
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(10 * 60);  // 10:00
+                let in_active_hours = current_min_q >= active_start && current_min_q < active_end;
                 // 方向匹配(wick 跟 FVG 方向)— 用于反向 wick 报警但不下单的判定
                 let direction_match = (s.side == "bullish" && long_only)
                     || (s.side == "bearish" && !long_only);
-let action_line = if is_double_wick && !s.reversal && direction_match {
+let action_line = if s.reversal && in_active_hours {
+                    "\n- **动作**: 🔁 反转 wick(active hours 08:00-10:00) → **触发下单**\n"
+                } else if is_double_wick && !s.reversal && direction_match {
                     "\n- **动作**: 🔁 双 wick → **触发下单**\n"
                 } else if s.reversal {
                     "\n- **动作**: 🔁 反转 wick → **仅报警,不下单**(反转 wick 已禁用下单)\n"
@@ -782,13 +790,18 @@ let action_line = if is_double_wick && !s.reversal && direction_match {
                 // 关键位 + 高等级(规则 1)二选一也下单
                 // 双 wick(规则 3)叠加在前两条规则之上,独立触发
                 // 安静时段:仅 R3(双 wick)允许下单,R1/R2 失效(避免低活跃误触发)
-                // 反转 wick 不再触发任何规则(只报警,不下单)
+                // 反转 wick 平时不下单,但 active hours(默认 08:00-10:00)内反转 wick 允许下
                 // 反向 wick(方向过滤已放行但不会下单)— direction_match 强制 R1/R3 要求同向
                 let direction_match = (s.side == "bullish" && long_only)
                     || (s.side == "bearish" && !long_only);
-                let will_trade = !s.reversal && if in_quiet_hours {
+                let will_trade = if s.reversal {
+                    // 反转 wick:仅 active hours 内允许下单
+                    in_active_hours
+                } else if in_quiet_hours {
+                    // 安静时段:仅 R3(双 wick)且同向
                     is_double_wick && direction_match
                 } else {
+                    // 正常时段:三规则并行,反转 wick 排除
                     (near_key_level && s.high_quality && direction_match)
                     || hq_same_direction
                     || (is_double_wick && direction_match)
