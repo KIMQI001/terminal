@@ -801,7 +801,7 @@ let action_line = if is_double_wick && !s.reversal && direction_match {
                     let position_pct: f64 = std::env::var("POSITION_PCT")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(0.5);
                     let stop_loss_usd: f64 = std::env::var("STOP_LOSS_USD")
-                        .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(150.0);
                     let take_profit_rr: f64 = std::env::var("TAKE_PROFIT_RR")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(1.0);
                     let _ = take_profit_rr; // 已废弃:TP 固定 ±200 USD,不再依赖 RR
