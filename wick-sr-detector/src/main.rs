@@ -291,7 +291,7 @@ async fn main() -> anyhow::Result<()> {
     let base_url_global = std::env::var("BINANCE_BASE_URL")
         .unwrap_or_else(|_| "https://fapi.binance.com".to_string());
 
-    // 后台仓位保护 task:每 30s 检查"有持仓但没 SL/TP Algo"的仓位,自动补上(对齐 pinbar 默认 200 USD)
+    // 后台仓位保护 task:每 30s 检查"有持仓但没 SL/TP Algo"的仓位,自动补上(默认 SL=100/TP=400)
     if !api_key_global.is_empty() && !api_secret_global.is_empty() {
         let protective_stop_usd: f64 = std::env::var("PROTECTIVE_STOP_USD")
             .ok().and_then(|s| s.parse().ok()).unwrap_or(100.0);
