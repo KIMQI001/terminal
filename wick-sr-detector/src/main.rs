@@ -289,9 +289,9 @@ async fn main() -> anyhow::Result<()> {
     // 后台仓位保护 task:每 30s 检查"有持仓但没 SL/TP Algo"的仓位,自动补上(对齐 pinbar 默认 200 USD)
     if !api_key_global.is_empty() && !api_secret_global.is_empty() {
         let protective_stop_usd: f64 = std::env::var("PROTECTIVE_STOP_USD")
-            .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
+            .ok().and_then(|s| s.parse().ok()).unwrap_or(100.0);
         let protective_tp_usd: f64 = std::env::var("PROTECTIVE_TP_USD")
-            .ok().and_then(|s| s.parse().ok()).unwrap_or(200.0);
+            .ok().and_then(|s| s.parse().ok()).unwrap_or(400.0);
         let api_key_protect = api_key_global.clone();
         let api_secret_protect = api_secret_global.clone();
         let base_url_protect = base_url_global.clone();
