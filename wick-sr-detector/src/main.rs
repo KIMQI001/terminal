@@ -76,6 +76,11 @@ async fn main() -> anyhow::Result<()> {
         "starting wick-sr-detector symbol={} timeframe={} lookback={}",
         binance_config.symbol, binance_config.timeframe, lookback
     );
+    info!(
+        "SL/TP defaults: STOP_LOSS_USD={} TAKE_PROFIT_USD={} (SL env var 可覆盖)",
+        std::env::var("STOP_LOSS_USD").ok().and_then(|s| s.parse().ok()).unwrap_or(100.0),
+        std::env::var("TAKE_PROFIT_USD").ok().and_then(|s| s.parse().ok()).unwrap_or(400.0)
+    );
 
     // 拉历史 K 线
     let candles = Arc::new(Mutex::new(Vec::<types::Candle>::new()));
