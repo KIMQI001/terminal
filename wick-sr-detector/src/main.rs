@@ -825,7 +825,7 @@ let action_line = if s.reversal && in_active_hours {
                     let base_url = std::env::var("BINANCE_BASE_URL")
                         .unwrap_or_else(|_| "https://fapi.binance.com".to_string());
                     let position_pct: f64 = std::env::var("POSITION_PCT")
-                        .ok().and_then(|s| s.parse().ok()).unwrap_or(0.5);
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(0.375);
                     let stop_loss_usd: f64 = std::env::var("STOP_LOSS_USD")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(100.0);
                     let take_profit_rr: f64 = std::env::var("TAKE_PROFIT_RR")
