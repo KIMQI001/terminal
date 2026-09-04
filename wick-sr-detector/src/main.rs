@@ -686,7 +686,7 @@ let hq_line = if s.high_quality {
                 let quiet_start: u32 = std::env::var("QUIET_HOURS_START_MIN")
                     .ok().and_then(|s| s.parse().ok()).unwrap_or(22 * 60 + 45);  // 22:45
                 let quiet_end: u32 = std::env::var("QUIET_HOURS_END_MIN")
-                    .ok().and_then(|s| s.parse().ok()).unwrap_or(7 * 60);   // 07:00
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(8 * 60);   // 08:00
                 // current_min 在后面 will_trade 块算,这里复用先算的 now_beijing
                 // 由于 current_min 还没算,这里自己算一遍(简单)
                 let now_beijing_q = chrono::Utc::now() + chrono::Duration::hours(8);
