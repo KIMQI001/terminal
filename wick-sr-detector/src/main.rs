@@ -693,11 +693,19 @@ let hq_line = if s.high_quality {
                 let current_min_q: u32 = now_beijing_q.format("%H").to_string().parse::<u32>().unwrap_or(0) * 60
                     + now_beijing_q.format("%M").to_string().parse::<u32>().unwrap_or(0);
                 // 跨午夜:start > end 时,in_quiet = (current >= start) || (current < end)
-                let in_quiet_hours = if quiet_start > quiet_end {
+                let in_quiet_v1 = if quiet_start > quiet_end {
                     current_min_q >= quiet_start || current_min_q < quiet_end
                 } else {
                     current_min_q >= quiet_start && current_min_q < quiet_end
                 };
+                // 安静时段 2(默认 10:00-15:00 北京)— 不跨午夜,简单区间
+                let quiet2_start: u32 = std::env::var("QUIET_HOURS_2_START_MIN")
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(10 * 60);   // 10:00
+                let quiet2_end: u32 = std::env::var("QUIET_HOURS_2_END_MIN")
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(19 * 60);   // 19:00
+                let in_quiet_v2 = current_min_q >= quiet2_start && current_min_q < quiet2_end;
+                // 两个安静时段取并集
+                let in_quiet_hours = in_quiet_v1 || in_quiet_v2;
                 // 激活时段(默认 08:00-10:00 北京,每日)— 该时段反转 wick 允许下单
                 let active_start: u32 = std::env::var("ACTIVE_HOURS_START_MIN")
                     .ok().and_then(|s| s.parse().ok()).unwrap_or(8 * 60);   // 08:00
