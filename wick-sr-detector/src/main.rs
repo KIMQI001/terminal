@@ -706,6 +706,13 @@ let hq_line = if s.high_quality {
                 let in_quiet_v2 = current_min_q >= quiet2_start && current_min_q < quiet2_end;
                 // 两个安静时段取并集
                 let in_quiet_hours = in_quiet_v1 || in_quiet_v2;
+                // 周末流动性差,默认周六全天 + 周日 20:00 前停止下单
+                let weekend_resume_min: u32 = std::env::var("WEEKEND_RESUME_MIN")
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(20 * 60);  // 周日 20:00
+                // chrono `%w`:0=周日, 1=周一, ..., 6=周六
+                let weekday_num: u32 = now_beijing_q.format("%w").to_string().parse().unwrap_or(0);
+                let is_weekend_block = weekday_num == 6
+                    || (weekday_num == 0 && current_min_q < weekend_resume_min);
                 // 激活时段(默认 08:00-10:00 北京,每日)— 该时段反转 wick 允许下单
                 let active_start: u32 = std::env::var("ACTIVE_HOURS_START_MIN")
                     .ok().and_then(|s| s.parse().ok()).unwrap_or(8 * 60);   // 08:00
@@ -715,7 +722,9 @@ let hq_line = if s.high_quality {
                 // 方向匹配(wick 跟 FVG 方向)— 用于反向 wick 报警但不下单的判定
                 let direction_match = (s.side == "bullish" && long_only)
                     || (s.side == "bearish" && !long_only);
-let action_line = if s.reversal && in_active_hours {
+let action_line = if is_weekend_block {
+                    "\n- **动作**: 🚫 周末(周六全天 + 周日 20:00 前)流动性差 → **仅报警,暂停下单**\n"
+                } else if s.reversal && in_active_hours {
                     "\n- **动作**: 🔁 反转 wick(active hours 08:00-10:00) → **触发下单**\n"
                 } else if is_double_wick && !s.reversal && direction_match {
                     "\n- **动作**: 🔁 双 wick → **触发下单**\n"
@@ -807,7 +816,10 @@ let action_line = if s.reversal && in_active_hours {
                 // 反向 wick(方向过滤已放行但不会下单)— direction_match 强制 R1/R3 要求同向
                 let direction_match = (s.side == "bullish" && long_only)
                     || (s.side == "bearish" && !long_only);
-                let will_trade = if s.reversal {
+                let will_trade = if is_weekend_block {
+                    // 周末(周六全天 + 周日 20:00 前)流动性差,暂停下单
+                    false
+                } else if s.reversal {
                     // 反转 wick:仅 active hours 内允许下单
                     in_active_hours
                 } else if in_quiet_hours {
