@@ -702,7 +702,7 @@ let hq_line = if s.high_quality {
                 let quiet2_start: u32 = std::env::var("QUIET_HOURS_2_START_MIN")
                     .ok().and_then(|s| s.parse().ok()).unwrap_or(10 * 60);   // 10:00
                 let quiet2_end: u32 = std::env::var("QUIET_HOURS_2_END_MIN")
-                    .ok().and_then(|s| s.parse().ok()).unwrap_or(19 * 60);   // 19:00
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(20 * 60);   // 20:00
                 let in_quiet_v2 = current_min_q >= quiet2_start && current_min_q < quiet2_end;
                 // 两个安静时段取并集
                 let in_quiet_hours = in_quiet_v1 || in_quiet_v2;
