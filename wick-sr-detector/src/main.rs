@@ -736,8 +736,10 @@ let action_line = if is_weekend_block {
                     "\n- **动作**: ⚠️ 反向 wick(近 1D 关键位 {:.0} USD)→ **仅报警,不下单**\n"
                 } else if in_quiet_hours {
                     "\n- **动作**: 🔇 安静时段(22:45-07:00),仅接受双 wick → **仅报警,不下单**\n"
+                } else if nearest_distance < 85.0 && s.high_quality && direction_match {
+                    "\n- **动作**: ✅ R1 触发(1D 关键位 {:.0} USD + 高等级 + 方向匹配)→ **触发下单**\n"
                 } else if s.high_quality {
-                    "\n- **动作**: ⭐高等级 → **仅报警,不下单**\n"
+                    "\n- **动作**: ⭐高等级 → **仅报警,不下单**(未近 1D 关键位,R1 不触发)\n"
                 } else {
                     "\n- **动作**: 普通 wick → **仅报警,不下单**\n"
                 };
