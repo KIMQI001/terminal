@@ -976,9 +976,15 @@ let action_line = if is_weekend_block {
                         entry_price + stop_loss_usd
                     };
 
-                    // 止盈:固定 entry ± 400 USD(不依赖 SL 距离,严格 400 一点)
-                    // 之前是 risk × take_profit_rr,经常不是 200
-                    let take_profit = if s.side == "bullish" {
+                    // 止盈:静默时段(双 wick)用 200 USD,其他时段 400 USD
+                    // 静默时段信号弱、双 wick 单独入场,缩短止盈更稳
+                    let take_profit = if in_quiet_hours {
+                        if s.side == "bullish" {
+                            entry_price + 200.0
+                        } else {
+                            entry_price - 200.0
+                        }
+                    } else if s.side == "bullish" {
                         entry_price + 400.0
                     } else {
                         entry_price - 400.0
