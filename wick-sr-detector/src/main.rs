@@ -724,8 +724,10 @@ let hq_line = if s.high_quality {
                     || (s.side == "bearish" && !long_only);
 let action_line = if is_weekend_block {
                     "\n- **动作**: 🚫 周末(周六全天 + 周日 20:00 前)流动性差 → **仅报警,暂停下单**\n"
-                } else if s.reversal && in_active_hours {
+                } else if in_active_hours && s.reversal {
                     "\n- **动作**: 🔁 反转 wick(active hours 08:00-10:00) → **触发下单**\n"
+                } else if in_active_hours {
+                    "\n- **动作**: ⏰ 激活时段(08:00-10:00)仅接受反转 wick → **仅报警,不下单**\n"
                 } else if is_double_wick && !s.reversal && direction_match {
                     "\n- **动作**: 🔁 双 wick → **触发下单**\n"
                 } else if s.reversal {
@@ -819,14 +821,17 @@ let action_line = if is_weekend_block {
                 let will_trade = if is_weekend_block {
                     // 周末(周六全天 + 周日 20:00 前)流动性差,暂停下单
                     false
+                } else if in_active_hours {
+                    // 激活时段(08:00-10:00):仅反转 wick 允许下单(R1/R2/R3 全部失效)
+                    s.reversal
                 } else if s.reversal {
-                    // 反转 wick:仅 active hours 内允许下单
-                    in_active_hours
+                    // 反转 wick 在其他时段不下单
+                    false
                 } else if in_quiet_hours {
                     // 安静时段:仅 R3(双 wick)且同向
                     is_double_wick && direction_match
                 } else {
-                    // 正常时段:三规则并行,反转 wick 排除
+                    // 正常时段:三规则并行
                     (near_key_level && s.high_quality && direction_match)
                     || hq_same_direction
                     || (is_double_wick && direction_match)
@@ -940,10 +945,29 @@ let action_line = if is_weekend_block {
                         }
                     }
 
-                    // 止损 = entry ± STOP_LOSS_USD(固定距离,不再比较 candle 极值 / 100 USD 下限)
-                    //   - S 做多:SL = entry - stop_loss_usd
-                    //   - R 做空:SL = entry + stop_loss_usd
-                    let stop_loss = if s.side == "bullish" {
+                    // 止损:
+                    //   - 反转 wick:SL = entry ± distance(distance clamp [REVERSAL_SL_MIN, REVERSAL_SL_MAX])
+                    //     distance = |entry - s.zone_low/zone_high| 即 entry 跟 S/R zone 边界的距离
+                    //     然后 clamp 到 [100, 150] USD 区间(防止太紧/太远)
+                    //     S 反转做多:SL = entry - clamped_distance(S 支撑位下方)
+                    //     R 反转做空:SL = entry + clamped_distance(R 阻力位上方)
+                    //   - 普通/高等级/双 wick:固定 entry ± STOP_LOSS_USD USD
+                    let reversal_sl_min: f64 = std::env::var("REVERSAL_SL_MIN")
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(100.0);
+                    let reversal_sl_max: f64 = std::env::var("REVERSAL_SL_MAX")
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(150.0);
+                    let stop_loss = if s.reversal {
+                        let zone_target = if s.side == "bullish" { s.zone_low } else { s.zone_high };
+                        let raw_distance = (entry_price - zone_target).abs();
+                        let clamped_distance = raw_distance
+                            .max(reversal_sl_min)
+                            .min(reversal_sl_max);
+                        if s.side == "bullish" {
+                            entry_price - clamped_distance
+                        } else {
+                            entry_price + clamped_distance
+                        }
+                    } else if s.side == "bullish" {
                         entry_price - stop_loss_usd
                     } else {
                         entry_price + stop_loss_usd
