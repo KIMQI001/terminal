@@ -896,55 +896,23 @@ let action_line = if is_weekend_block {
 
                     // 风控:持仓数上限(查 /fapi/v2/positionRisk)
                     // hedge 模式下 MAX_OPEN_ORDERS 生效;one-way 模式恒 ≤ 1
+                    // 有仓位 → 任何方向都跳过(不自动反向,避免市价单滑点)
                     let side_label = if s.side == "bullish" { "支撑 S" } else { "阻力 R" };
                     let pos_count = order::get_position_count(&api_key, &api_secret, &base_url, &symbol).await;
-                    // 检测"反向仓位":有仓位 + 仓位方向跟新信号方向相反
-                    // 反向 = 趋势变了 → 市价平仓现有仓位再开新方向(AUTO_REVERSE_POSITION 控制)
-                    let new_pos_side = if s.side == "bullish" { "LONG" } else { "SHORT" };
-                    let current_positions = order::get_positions_for_reverse(&api_key, &api_secret, &base_url, &symbol).await;
-                    let has_reverse_position = current_positions.iter()
-                        .any(|p| p.1 == order::opposite(&new_pos_side));
-
-                    let auto_reverse: bool = std::env::var("AUTO_REVERSE_POSITION")
-                        .ok().and_then(|s| s.parse().ok()).unwrap_or(true);
 
                     if (pos_count as u64) >= max_orders {
-                        // 已有仓位 + MAX_OPEN_ORDERS 上限已到
-                        if has_reverse_position && auto_reverse {
-                            // 反向仓位 → 市价平仓现有 + 跳过新方向(下一步发)
-                            warn!(
-                                "[Reverse] {} 现有仓位方向跟新信号 {} 相反,自动市价平仓并跳过本信号",
-                                symbol, new_pos_side
-                            );
-                            for p in &current_positions {
-                                let close_side = if p.1 == "LONG" { "SELL".to_string() } else { "BUY".to_string() };
-                                let qty = p.2.abs();
-                                if qty < 0.0001 { continue; }
-                                match order::place_close_position_market(
-                                    &api_key, &api_secret, &base_url,
-                                    &symbol, &close_side, &p.1, qty,
-                                ).await {
-                                    Ok(id) => warn!("[Reverse] {} 平仓单 orderId={} qty={}", symbol, id, qty),
-                                    Err(e) => warn!("[Reverse] {} 平仓失败: {}", symbol, e),
-                                }
-                            }
-                            // 等几秒让平仓单成交(Binance 异步)
-                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                            // 不 continue — 继续走流程,正常下新方向单
-                            // 平仓后仓位=0,MAX_OPEN_ORDERS 检查通过
-                        } else {
-                            warn!(
-                                "[Order] skip: position count {} >= MAX_OPEN_ORDERS={} (symbol={})— 已有仓位,新信号不开单",
-                                pos_count, max_orders, symbol
-                            );
-                            let skip_title = "⏸ 已有仓位,跳过新单";
-                            let skip_body = format!(
-                                "\n\n### ⏸ 已有仓位,跳过本次下单\n\n- **symbol**: {}\n- **当前持仓数**: {} (已有仓位不开新单)\n- **MAX_OPEN_ORDERS**: {}\n- **本信号**: {} @ ${:.2}\n\n> 计数口径:仅当前监控 symbol 的有持仓方向数(hedge 模式 LONG/SHORT 独立)。MAX_OPEN_ORDERS=1 时,有仓位就跳过",
-                                symbol, pos_count, max_orders, side_label, s.level
-                            );
-                            let _ = broadcast(&notify, skip_title, &(body.clone() + &skip_body)).await;
-                            continue;
-                        }
+                        // 已有仓位 + MAX_OPEN_ORDERS 上限已到 → 跳过(不区分同向/反向)
+                        warn!(
+                            "[Order] skip: position count {} >= MAX_OPEN_ORDERS={} (symbol={})— 已有仓位,新信号不开单",
+                            pos_count, max_orders, symbol
+                        );
+                        let skip_title = "⏸ 已有仓位,跳过新单";
+                        let skip_body = format!(
+                            "\n\n### ⏸ 已有仓位,跳过本次下单\n\n- **symbol**: {}\n- **当前持仓数**: {} (已有仓位不开新单)\n- **MAX_OPEN_ORDERS**: {}\n- **本信号**: {} @ ${:.2}\n\n> 计数口径:仅当前监控 symbol 的有持仓方向数(hedge 模式 LONG/SHORT 独立)。MAX_OPEN_ORDERS=1 时,有仓位就跳过。新信号跟当前仓位同向或反向都不下,等仓位关闭后下一根 K 信号再入场。",
+                            symbol, pos_count, max_orders, side_label, s.level
+                        );
+                        let _ = broadcast(&notify, skip_title, &(body.clone() + &skip_body)).await;
+                        continue;
                     }
 
                     // 止损:
