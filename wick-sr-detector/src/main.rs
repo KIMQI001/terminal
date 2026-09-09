@@ -724,6 +724,8 @@ let hq_line = if s.high_quality {
                     || (s.side == "bearish" && !long_only);
 let action_line = if is_weekend_block {
                     "\n- **动作**: 🚫 周末(周六全天 + 周日 20:00 前)流动性差 → **仅报警,暂停下单**\n"
+                } else if current_min_q >= 8 * 60 && current_min_q < 8 * 60 + 15 && s.high_quality && direction_match {
+                    "\n- **动作**: 🎯 8 点特殊窗口(8:00-8:15,1D K 进行中)高等级 → **触发下单**\n"
                 } else if in_active_hours && s.reversal {
                     "\n- **动作**: 🔁 反转 wick(active hours 08:00-10:45) → **触发下单**\n"
                 } else if in_active_hours {
@@ -823,8 +825,13 @@ let action_line = if is_weekend_block {
                 let will_trade = if is_weekend_block {
                     // 周末(周六全天 + 周日 20:00 前)流动性差,暂停下单
                     false
+                } else if current_min_q >= 8 * 60 && current_min_q < 8 * 60 + 15 {
+                    // 8 点特殊窗口(8:00-8:15):1D K 还在进行中关键位不稳定
+                    // 高等级 + 方向匹配 → 直接下,不看 1D 距离
+                    // 8 点 K close 时间 = 7:45(WS 延迟到 8:00 处理),仍按 8:00 窗口特殊处理
+                    s.high_quality && direction_match
                 } else if in_active_hours {
-                    // 激活时段(08:00-10:00):仅反转 wick 允许下单(R1/R2/R3 全部失效)
+                    // 激活时段(08:00-10:45,不含 8:00-8:15 特殊窗口):反转 wick 允许下单
                     s.reversal
                 } else if s.reversal {
                     // 反转 wick 在其他时段不下单
