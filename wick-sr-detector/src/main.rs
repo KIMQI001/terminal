@@ -758,29 +758,29 @@ let hq_line = if s.high_quality {
                 let direction_match = (s.side == "bullish" && long_only)
                     || (s.side == "bearish" && !long_only);
 let action_line = if is_weekend_block {
-                    "\n- **动作**: 🚫 周末(周六全天 + 周日 20:00 前)流动性差 → **仅报警,暂停下单**\n"
+                    "\n- **动作**: 🚫 周末(周六全天 + 周日 20:00 前)流动性差 → **仅报警,暂停下单**\n".to_string()
                 } else if current_min_q == 8 * 60 + 15 {
-                    "\n- **动作**: 🔇 8:15 黑名单(日 K 刚开盘,关键位不稳)→ **仅报警,不下单**\n"
+                    "\n- **动作**: 🔇 8:15 黑名单(日 K 刚开盘,关键位不稳)→ **仅报警,不下单**\n".to_string()
                 } else if current_min_q >= 8 * 60 && current_min_q < 8 * 60 + 15 && s.high_quality && direction_match {
-                    "\n- **动作**: 🎯 8 点特殊窗口(8:00-8:14)高等级 → **触发下单**\n"
+                    "\n- **动作**: 🎯 8 点特殊窗口(8:00-8:14)高等级 → **触发下单**\n".to_string()
                 } else if in_active_hours && s.reversal {
-                    "\n- **动作**: 🔁 反转 wick(active hours 08:00-10:45) → **触发下单**\n"
+                    "\n- **动作**: 🔁 反转 wick(active hours 08:00-10:45) → **触发下单**\n".to_string()
                 } else if in_active_hours {
-                    "\n- **动作**: ⏰ 激活时段(08:00-10:45)仅接受反转 wick → **仅报警,不下单**\n"
+                    "\n- **动作**: ⏰ 激活时段(08:00-10:45)仅接受反转 wick → **仅报警,不下单**\n".to_string()
                 } else if is_double_wick && !s.reversal && direction_match {
-                    "\n- **动作**: 🔁 双 wick → **触发下单**\n"
+                    "\n- **动作**: 🔁 双 wick → **触发下单**\n".to_string()
                 } else if s.reversal {
-                    "\n- **动作**: 🔁 反转 wick → **仅报警,不下单**(反转 wick 已禁用下单)\n"
+                    "\n- **动作**: 🔁 反转 wick → **仅报警,不下单**(反转 wick 已禁用下单)\n".to_string()
                 } else if !direction_match && nearest_distance < 85.0 {
-                    "\n- **动作**: ⚠️ 反向 wick(近 1D 关键位 {:.0} USD)→ **仅报警,不下单**\n"
+                    format!("\n- **动作**: ⚠️ 反向 wick(近 1D 关键位 {:.0} USD)→ **仅报警,不下单**\n", nearest_distance)
                 } else if in_quiet_hours {
-                    "\n- **动作**: 🔇 安静时段(22:45-07:00 或 10:45-20:00),仅接受双 wick → **仅报警,不下单**\n"
+                    "\n- **动作**: 🔇 安静时段(22:45-07:00 或 10:45-20:00),仅接受双 wick → **仅报警,不下单**\n".to_string()
                 } else if nearest_distance < 85.0 && s.high_quality && direction_match {
-                    "\n- **动作**: ✅ R1 触发(1D 关键位 {:.0} USD + 高等级 + 方向匹配)→ **触发下单**\n"
+                    format!("\n- **动作**: ✅ R1 触发(1D 关键位 {:.0} USD + 高等级 + 方向匹配)→ **触发下单**\n", nearest_distance)
                 } else if s.high_quality {
-                    "\n- **动作**: ⭐高等级 → **仅报警,不下单**(未近 1D 关键位,R1 不触发)\n"
+                    "\n- **动作**: ⭐高等级 → **仅报警,不下单**(未近 1D 关键位,R1 不触发)\n".to_string()
                 } else {
-                    "\n- **动作**: 普通 wick → **仅报警,不下单**\n"
+                    "\n- **动作**: 普通 wick → **仅报警,不下单**\n".to_string()
                 };
                 let body = format!(
                     "### 📐 wick SR 触发{}{}{}\n\n\
