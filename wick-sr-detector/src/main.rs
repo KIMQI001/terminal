@@ -658,11 +658,22 @@ let tier_label = format!("{}{}", if s.side == "bullish" { "S" } else { "R" }, s.
                         nearest_distance = *dist;
                     }
                     let mut lines = vec![format!("\n- **1D 关键价位距离** (wick level = ${:.2}):", s.level)];
+                    // wick 方向判定同向/反向:
+                    //   - bullish(看涨):希望价格向上,关键位 > wick.level → 同向
+                    //   - bearish(看跌):希望价格向下,关键位 < wick.level → 同向
+                    let is_bullish = s.side == "bullish";
                     for (name, key_level, dist) in &distances {
                         let is_key = *dist < 85.0;
+                        let arrow = if *key_level > s.level { "↑" } else { "↓" };
+                        let same_dir = if is_bullish {
+                            *key_level > s.level
+                        } else {
+                            *key_level < s.level
+                        };
+                        let color = if same_dir { "🟢" } else { "🔴" };
                         lines.push(format!(
-                            "  - {} → ${:.2}(距 **{:.0} USD**{})",
-                            name, key_level, dist,
+                            "  - {} {} → ${:.2}({}{:.0} USD{})",
+                            color, name, key_level, arrow, dist,
                             if is_key { " ★关键位" } else { "" }
                         ));
                     }
