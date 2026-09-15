@@ -31,6 +31,28 @@ fn format_beijing_time(secs: i64) -> String {
         .unwrap_or_else(|| "?".to_string())
 }
 
+/// [Protect] 任务计算 TP 距离(USDT):
+/// - 用户显式设 PROTECTIVE_TP_USD → 用用户值(覆盖时段逻辑)
+/// - 没设 → 按时段动态:
+///   - quiet hours(22:45-7:30 跨午夜 或 10:45-20:00):200 USD(信号弱保守)
+///   - 正常时段(激活 08:00-10:45 + 纽约 20:00-22:30 北京):400 USD(1:4)
+fn protective_tp_usd_dynamic(user_override: Option<f64>) -> f64 {
+    if let Some(v) = user_override {
+        return v;
+    }
+    let now_beijing = chrono::Utc::now() + chrono::Duration::hours(8);
+    let current_min_q: u32 = now_beijing.format("%H").to_string().parse::<u32>().unwrap_or(0) * 60
+        + now_beijing.format("%M").to_string().parse::<u32>().unwrap_or(0);
+    let quiet1_start: u32 = 22 * 60 + 45;
+    let quiet1_end: u32 = 7 * 60 + 30;
+    let quiet2_start: u32 = 10 * 60 + 45;
+    let quiet2_end: u32 = 20 * 60;
+    // quiet1 跨午夜
+    let in_q1 = current_min_q >= quiet1_start || current_min_q < quiet1_end;
+    let in_q2 = current_min_q >= quiet2_start && current_min_q < quiet2_end;
+    if in_q1 || in_q2 { 200.0 } else { 400.0 }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // 初始化日志
@@ -295,8 +317,21 @@ async fn main() -> anyhow::Result<()> {
     if !api_key_global.is_empty() && !api_secret_global.is_empty() {
         let protective_stop_usd: f64 = std::env::var("PROTECTIVE_STOP_USD")
             .ok().and_then(|s| s.parse().ok()).unwrap_or(100.0);
-        let protective_tp_usd: f64 = std::env::var("PROTECTIVE_TP_USD")
-            .ok().and_then(|s| s.parse().ok()).unwrap_or(400.0);
+        // protective_tp_usd:用户没设 PROTECTIVE_TP_USD 时,按 quiet hours 动态决定
+        //   - quiet hours:200 USD(跟主下单路径一致)
+        //   - 正常时段:400 USD(1:4)
+        // 用户显式设 PROTECTIVE_TP_USD → 用固定值(覆盖时段逻辑)
+        let protective_tp_usd_user_override: Option<f64> = std::env::var("PROTECTIVE_TP_USD")
+            .ok().and_then(|s| s.parse().ok());
+        // quiet hours 配置(跟主路径一致)
+        let quiet1_start: u32 = std::env::var("QUIET_HOURS_1_START_MIN")
+            .ok().and_then(|s| s.parse().ok()).unwrap_or(22 * 60 + 45);
+        let quiet1_end: u32 = std::env::var("QUIET_HOURS_1_END_MIN")
+            .ok().and_then(|s| s.parse().ok()).unwrap_or(7 * 60 + 30);
+        let quiet2_start: u32 = std::env::var("QUIET_HOURS_2_START_MIN")
+            .ok().and_then(|s| s.parse().ok()).unwrap_or(10 * 60 + 45);
+        let quiet2_end: u32 = std::env::var("QUIET_HOURS_2_END_MIN")
+            .ok().and_then(|s| s.parse().ok()).unwrap_or(20 * 60);
         let api_key_protect = api_key_global.clone();
         let api_secret_protect = api_secret_global.clone();
         let base_url_protect = base_url_global.clone();
@@ -322,7 +357,9 @@ async fn main() -> anyhow::Result<()> {
                     &api_secret_protect,
                     &base_url_protect,
                     protective_stop_usd,
-                    protective_tp_usd,
+                    // 每次循环重算 quiet hours,决定 TP 距离
+                    // 用户显式设 PROTECTIVE_TP_USD → 用用户值;否则按时段动态
+                    protective_tp_usd_dynamic(protective_tp_usd_user_override),
                 ).await {
                     Ok(0) => {
                         if rounds % 30 == 0 {
@@ -343,10 +380,12 @@ async fn main() -> anyhow::Result<()> {
                         );
                         recently_attempted.insert(key_sl, std::time::Instant::now());
                         recently_attempted.insert(key_tp, std::time::Instant::now());
-                        warn!("[Protect] 给 {} 个仓位补了 SL/TP(默认 {} USD 距离)", n, protective_stop_usd);
+                        let tp_actual = protective_tp_usd_dynamic(protective_tp_usd_user_override);
+                        warn!("[Protect] 给 {} 个仓位补了 SL/TP(SL={} USD, TP={} USD;TP 按 quiet hours={})",
+                            n, protective_stop_usd, tp_actual, tp_actual == 200.0);
                         let body = format!(
-                            "\n\n### 🛡️ 仓位保护\n\n- **补单数量**: {}\n- **止损距离**: ${}\n- **止盈距离**: ${}\n\n> 检测到仓位但缺 SL/TP,自动补上(防止裸奔)。60s 内同 (symbol, side, type) 不重试",
-                            n, protective_stop_usd, protective_tp_usd
+                            "\n\n### 🛡️ 仓位保护\n\n- **补单数量**: {}\n- **止损距离**: ${}\n- **止盈距离**: ${}\n\n> 检测到仓位但缺 SL/TP,自动补上(防止裸奔)。60s 内同 (symbol, side, type) 不重试。quiet hours TP 自动 200,正常时段 400",
+                            n, protective_stop_usd, tp_actual
                         );
                         let _ = broadcast(&notify_protect, "🛡️ 仓位 SL/TP 已补", &body).await;
                     }
