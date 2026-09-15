@@ -598,40 +598,36 @@ let tier_label = format!("{}{}", if s.side == "bullish" { "S" } else { "R" }, s.
                 } else {
                     String::new()
                 };
-                // 1D 锚点关键价位距离(取绝对值最小的那个)— 同时记下最近距离
+                // 1D 锚点关键价位距离:列出全部,按距离升序,★ 标记 < 85 USD 关键位
                 // nearest_distance 已在方向过滤之前预算(避免重复算),这里只算 is_key / 描述
                 let anchor_dist_line = if let Some(anchor) = anchor_data.as_ref() {
-                    let mut distances: Vec<(&str, f64)> = vec![];
-                    distances.push(("1D O", (anchor.open - s.level).abs()));
-                    distances.push(("1D H", (anchor.high - s.level).abs()));
-                    distances.push(("1D L", (anchor.low - s.level).abs()));
-                    distances.push(("1D C", (anchor.close - s.level).abs()));
-                    distances.push(("1D OC mid", (anchor.oc_mid - s.level).abs()));
+                    let mut distances: Vec<(&str, f64, f64)> = vec![];  // (name, key_level, dist)
+                    distances.push(("1D O", anchor.open, (anchor.open - s.level).abs()));
+                    distances.push(("1D H", anchor.high, (anchor.high - s.level).abs()));
+                    distances.push(("1D L", anchor.low, (anchor.low - s.level).abs()));
+                    distances.push(("1D C", anchor.close, (anchor.close - s.level).abs()));
+                    distances.push(("1D OC mid", anchor.oc_mid, (anchor.oc_mid - s.level).abs()));
                     if let Some(r) = anchor.r_level {
-                        distances.push(("1D R level", (r - s.level).abs()));
+                        distances.push(("1D R level", r, (r - s.level).abs()));
                     }
                     if let Some(sl) = anchor.s_level {
-                        distances.push(("1D S level", (sl - s.level).abs()));
+                        distances.push(("1D S level", sl, (sl - s.level).abs()));
                     }
-                    distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-                    if let Some((name, dist)) = distances.first() {
+                    distances.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+                    // 记录最近的(给 will_trade R1 / 方向过滤用)
+                    if let Some((_, _, dist)) = distances.first() {
                         nearest_distance = *dist;
-                        let key_level = if *name == "1D O" { anchor.open }
-                            else if *name == "1D H" { anchor.high }
-                            else if *name == "1D L" { anchor.low }
-                            else if *name == "1D C" { anchor.close }
-                            else if *name == "1D OC mid" { anchor.oc_mid }
-                            else if *name == "1D R level" { anchor.r_level.unwrap_or(0.0) }
-                            else { anchor.s_level.unwrap_or(0.0) };
-                        let is_key = *dist < 85.0;
-                        format!(
-                            "\n- **1D 关键价位最近**: {} → ${:.2}(距 wick ${:.2} 仅 **{:.0} USD**{})",
-                            name, key_level, s.level, dist,
-                            if is_key { " ★关键位" } else { "" }
-                        )
-                    } else {
-                        String::new()
                     }
+                    let mut lines = vec![format!("\n- **1D 关键价位距离** (wick level = ${:.2}):", s.level)];
+                    for (name, key_level, dist) in &distances {
+                        let is_key = *dist < 85.0;
+                        lines.push(format!(
+                            "  - {} → ${:.2}(距 **{:.0} USD**{})",
+                            name, key_level, dist,
+                            if is_key { " ★关键位" } else { "" }
+                        ));
+                    }
+                    lines.join("\n")
                 } else {
                     String::new()
                 };
