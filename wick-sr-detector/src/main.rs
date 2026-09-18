@@ -938,17 +938,38 @@ let action_line = if is_weekend_block {
                 } else if in_active_hours {
                     // 激活时段(08:00-10:45,不含 8:00-8:15 特殊窗口)
                     // - 反转 wick 允许下单
-                    // - 高质量信号 + 距 OC mid < OC_MID_NEAR_USD(默认 50)也允许下单
-                    //   场景:开盘下跌后到 OC mid 反应,是强反弹/反转信号
+                    // - 莲花局(长上影阳 K + 短下影 + wick 距 OC mid 近 + 高质量)也允许下单
+                    //   长上影 = 卖方强力抛压,阳 K = 多头收盘,短下影 = 下杀不深
+                    //   莲花局时,价格回到 OC mid 附近是强反弹信号
                     if s.reversal {
                         true
                     } else {
-                        let oc_mid_dist = anchor_data.as_ref()
-                            .map(|a| (a.oc_mid - s.level).abs())
-                            .unwrap_or(f64::INFINITY);
-                        let oc_mid_near_usd: f64 = std::env::var("OC_MID_NEAR_USD")
+                        // 莲花局判定:
+                        //   - 阳 K(close > open)
+                        //   - 长上影:upper_wick / total_range ≥ LOTUS_UPPER_WICK_RATIO(默认 0.4)
+                        //   - 短下影:lower_wick / total_range ≤ LOTUS_LOWER_WICK_RATIO(默认 0.2)
+                        //   - wick 距 OC mid < LOTUS_OC_MID_NEAR_USD(默认 50)
+                        //   - wick 高质量
+                        let upper_ratio: f64 = std::env::var("LOTUS_UPPER_WICK_RATIO")
+                            .ok().and_then(|s| s.parse().ok()).unwrap_or(0.4);
+                        let lower_ratio: f64 = std::env::var("LOTUS_LOWER_WICK_RATIO")
+                            .ok().and_then(|s| s.parse().ok()).unwrap_or(0.2);
+                        let oc_mid_near_usd: f64 = std::env::var("LOTUS_OC_MID_NEAR_USD")
                             .ok().and_then(|s| s.parse().ok()).unwrap_or(50.0);
-                        s.high_quality && oc_mid_dist < oc_mid_near_usd
+                        anchor_data.as_ref().map(|a| {
+                            let body = (a.close - a.open).abs();
+                            let upper_wick = a.high - a.open.max(a.close);
+                            let lower_wick = a.open.min(a.close) - a.low;
+                            let total_range = a.high - a.low;
+                            if total_range <= 0.0 { return false; }
+                            let is_bullish_1d = a.close > a.open;
+                            let long_upper = upper_wick / total_range >= upper_ratio;
+                            let short_lower = lower_wick / total_range <= lower_ratio;
+                            let oc_mid_dist = (a.oc_mid - s.level).abs();
+                            let near_oc_mid = oc_mid_dist < oc_mid_near_usd;
+                            is_bullish_1d && long_upper && short_lower
+                                && s.high_quality && near_oc_mid
+                        }).unwrap_or(false)
                     }
                 } else if s.reversal {
                     // 反转 wick 在其他时段不下单
