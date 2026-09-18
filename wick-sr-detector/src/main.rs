@@ -492,6 +492,8 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // 给 stream_klines 闭包一个独立的 binance_config 副本(便于 8:00 force 重算 daily_anchor)
+    let binance_config_for_closure = binance_config.clone();
     binance::stream_klines(&binance_config, move |candle, is_closed| {
         let candles = candles_clone.clone();
         let reported = reported_clone.clone();
@@ -500,6 +502,7 @@ async fn main() -> anyhow::Result<()> {
         let notify = notify_clone.clone();
         let opts = detect_options_clone.clone();
         let symbol = symbol.clone();
+        let binance_config = binance_config_for_closure.clone();
         async move {
             // 更新最后一根 K(收盘就 append,进行中就 update 最后一根)
             {
@@ -519,6 +522,29 @@ async fn main() -> anyhow::Result<()> {
             if !is_closed {
                 debug!("candle update time={} (not closed, skip)", candle.time);
                 return;
+            }
+
+            // 8:00 北京强制重算 daily_anchor:日 K 刚收盘,新 OHLC 必须立刻生效
+            // 不等 5 分钟定时器(可能错过 8:00-8:14 窗口的前几根 K)
+            // current_min_q 在下面会算,这里先粗略算一下当前北京分钟
+            let now_beijing_force = chrono::Utc::now() + chrono::Duration::hours(8);
+            let force_refresh_hour: u32 = now_beijing_force.format("%H").to_string().parse::<u32>().unwrap_or(99);
+            let force_refresh_min: u32 = now_beijing_force.format("%M").to_string().parse::<u32>().unwrap_or(99);
+            // 8:00-8:14 北京(或 0:00-0:14 UTC)+ K 刚刚收盘(在 1 分钟内)→ 立即重算
+            if (force_refresh_hour == 0 || force_refresh_hour == 8)
+                && force_refresh_min < 15
+                && (candle.time - chrono::Utc::now().timestamp()).abs() < 90
+            {
+                if let Ok(daily_k) = binance::fetch_daily_klines(&binance_config, 30).await {
+                    if let Some(current_price) = daily_k.last().map(|c| c.close) {
+                        if let Some(anchor) = detector::build_daily_anchor(&daily_k, current_price) {
+                            info!("[DailyAnchor] 8:00 北京 force 重算: K={} O={} H={} L={} C={} OC={} R={:?} S={:?}",
+                                anchor.time, anchor.open, anchor.high, anchor.low, anchor.close,
+                                anchor.oc_mid, anchor.r_level, anchor.s_level);
+                            *daily_anchor.lock().await = Some(anchor);
+                        }
+                    }
+                }
             }
 
             let c_snapshot = candles.lock().await.clone();
