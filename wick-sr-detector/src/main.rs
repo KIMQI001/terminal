@@ -770,12 +770,32 @@ let hq_line = if s.high_quality {
                 // 方向匹配(wick 跟 FVG 方向)— 用于反向 wick 报警但不下单的判定
                 let direction_match = (s.side == "bullish" && long_only)
                     || (s.side == "bearish" && !long_only);
+                // 8:00-8:14 特殊窗口额外检查:当天 OC 距离 < OC_DISTANCE_MIN_USD 时不开空单
+                // 理由:8:00 UTC 日 K 刚收盘,OC 距离小 → 价格易先到 OC mid 反转打止损
+                let oc_distance = anchor_data.as_ref()
+                    .map(|a| (a.open - a.close).abs())
+                    .unwrap_or(0.0);
+                let oc_distance_threshold: f64 = std::env::var("OC_DISTANCE_MIN_USD")
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(400.0);
+                // 8:00-8:14 + 空单 + OC < 阈值 → 不下
+                let oc_too_tight_for_short = current_min_q >= 8 * 60
+                    && current_min_q < 8 * 60 + 15
+                    && s.side == "bearish"
+                    && oc_distance > 0.0
+                    && oc_distance < oc_distance_threshold;
 let action_line = if is_weekend_block {
                     "\n- **动作**: 🚫 周末(周六全天 + 周日 20:00 前)流动性差 → **仅报警,暂停下单**\n".to_string()
                 } else if current_min_q == 8 * 60 + 15 {
                     "\n- **动作**: 🔇 8:15 黑名单(日 K 刚开盘,关键位不稳)→ **仅报警,不下单**\n".to_string()
                 } else if current_min_q >= 8 * 60 && current_min_q < 8 * 60 + 15 && s.high_quality && direction_match {
-                    "\n- **动作**: 🎯 8 点特殊窗口(8:00-8:14)高等级 → **触发下单**\n".to_string()
+                    if oc_too_tight_for_short {
+                        format!(
+                            "\n- **动作**: 🎯 8 点特殊窗口(8:00-8:14)高等级 + 空单 + OC 距离 {:.0} < {} USD → **仅报警,不开空**\n",
+                            oc_distance, oc_distance_threshold
+                        ).to_string()
+                    } else {
+                        "\n- **动作**: 🎯 8 点特殊窗口(8:00-8:14)高等级 → **触发下单**\n".to_string()
+                    }
                 } else if in_active_hours && s.reversal {
                     "\n- **动作**: 🔁 反转 wick(active hours 08:00-10:45) → **触发下单**\n".to_string()
                 } else if in_active_hours {
@@ -882,7 +902,13 @@ let action_line = if is_weekend_block {
                 } else if current_min_q >= 8 * 60 && current_min_q < 8 * 60 + 15 {
                     // 8:00-8:14 特殊窗口:WS 延迟较短的信号可用
                     // 高等级 + 方向匹配 → 直接下,不看 1D 距离
-                    s.high_quality && direction_match
+                    // 但**空单 + 当天 OC < OC_DISTANCE_MIN_USD(默认 400)→ 不下**
+                    //   理由:8:00 UTC 日 K 刚收盘,OC 距离小 → 价格易先到 OC mid 反转打止损
+                    if oc_too_tight_for_short {
+                        false
+                    } else {
+                        s.high_quality && direction_match
+                    }
                 } else if in_active_hours {
                     // 激活时段(08:00-10:45,不含 8:00-8:15 特殊窗口):反转 wick 允许下单
                     s.reversal
