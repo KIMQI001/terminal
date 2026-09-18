@@ -944,12 +944,12 @@ let action_line = if is_weekend_block {
                     if s.reversal {
                         true
                     } else {
-                        // 莲花局判定:
-                        //   - 阳 K(close > open)
-                        //   - 长上影:upper_wick / total_range ≥ LOTUS_UPPER_WICK_RATIO(默认 0.4)
-                        //   - 短下影:lower_wick / total_range ≤ LOTUS_LOWER_WICK_RATIO(默认 0.2)
-                        //   - wick 距 OC mid < LOTUS_OC_MID_NEAR_USD(默认 50)
-                        //   - wick 高质量
+                        // 莲花局两种变种(任一满足):
+                        //   变种 1(阳 K):close > open + 长上影 + 短下影 + 距 OC mid 近 + 高质量 → 看涨
+                        //   变种 2(阴 K):close < open + 短上影 + 长下影 + 距 OC mid 近 + 高质量 → 看跌
+                        // 莲花局形态:
+                        //   长影线 = 占总范围 ≥ LOTUS_UPPER_WICK_RATIO(默认 0.4)
+                        //   短影线 = 占总范围 ≤ LOTUS_LOWER_WICK_RATIO(默认 0.2)
                         let upper_ratio: f64 = std::env::var("LOTUS_UPPER_WICK_RATIO")
                             .ok().and_then(|s| s.parse().ok()).unwrap_or(0.4);
                         let lower_ratio: f64 = std::env::var("LOTUS_LOWER_WICK_RATIO")
@@ -963,12 +963,18 @@ let action_line = if is_weekend_block {
                             let total_range = a.high - a.low;
                             if total_range <= 0.0 { return false; }
                             let is_bullish_1d = a.close > a.open;
+                            let is_bearish_1d = a.close < a.open;
                             let long_upper = upper_wick / total_range >= upper_ratio;
+                            let short_upper = upper_wick / total_range <= lower_ratio;
+                            let long_lower = lower_wick / total_range >= upper_ratio;
                             let short_lower = lower_wick / total_range <= lower_ratio;
                             let oc_mid_dist = (a.oc_mid - s.level).abs();
                             let near_oc_mid = oc_mid_dist < oc_mid_near_usd;
-                            is_bullish_1d && long_upper && short_lower
-                                && s.high_quality && near_oc_mid
+                            // 变种 1:阳 K + 长上影 + 短下影(看涨莲花)
+                            let lotus_bull = is_bullish_1d && long_upper && short_lower;
+                            // 变种 2:阴 K + 短上影 + 长下影(看跌莲花)
+                            let lotus_bear = is_bearish_1d && short_upper && long_lower;
+                            (lotus_bull || lotus_bear) && s.high_quality && near_oc_mid
                         }).unwrap_or(false)
                     }
                 } else if s.reversal {
