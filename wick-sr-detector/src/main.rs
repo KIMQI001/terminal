@@ -979,7 +979,14 @@ let action_line = if is_weekend_block {
                     }
                 } else if s.reversal {
                     // 反转 wick 在其他时段不下单
-                    false
+                    // 例外:晚上 20:00-21:30 反转 wick 也下(用户原话"晚上 20-21:30 也可以做反转")
+                    let rev_start: u32 = std::env::var("REVERSAL_HOURS_START")
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(20);
+                    let rev_end: u32 = std::env::var("REVERSAL_HOURS_END_MIN")
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(21 * 60 + 30);
+                    let in_reversal_window = current_min_q >= rev_start * 60
+                        && current_min_q < rev_end;
+                    in_reversal_window
                 } else if in_quiet_hours {
                     // 安静时段:仅 R3(双 wick)且同向
                     is_double_wick && direction_match
