@@ -936,8 +936,20 @@ let action_line = if is_weekend_block {
                         s.high_quality && direction_match
                     }
                 } else if in_active_hours {
-                    // 激活时段(08:00-10:45,不含 8:00-8:15 特殊窗口):反转 wick 允许下单
-                    s.reversal
+                    // 激活时段(08:00-10:45,不含 8:00-8:15 特殊窗口)
+                    // - 反转 wick 允许下单
+                    // - 高质量信号 + 距 OC mid < OC_MID_NEAR_USD(默认 50)也允许下单
+                    //   场景:开盘下跌后到 OC mid 反应,是强反弹/反转信号
+                    if s.reversal {
+                        true
+                    } else {
+                        let oc_mid_dist = anchor_data.as_ref()
+                            .map(|a| (a.oc_mid - s.level).abs())
+                            .unwrap_or(f64::INFINITY);
+                        let oc_mid_near_usd: f64 = std::env::var("OC_MID_NEAR_USD")
+                            .ok().and_then(|s| s.parse().ok()).unwrap_or(50.0);
+                        s.high_quality && oc_mid_dist < oc_mid_near_usd
+                    }
                 } else if s.reversal {
                     // 反转 wick 在其他时段不下单
                     false
