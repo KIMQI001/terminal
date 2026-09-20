@@ -1116,7 +1116,33 @@ let action_line = if is_weekend_block {
                     // - 其他时段:TP = 400 USD(1:4)
                     let is_in_2030_reversal_window = current_min_q >= 20 * 60
                         && current_min_q < 21 * 60 + 30;
-                    let take_profit = if s.reversal && is_in_2030_reversal_window {
+                    // 莲花局判定(跟 will_trade 内的 lotus_setup 相同逻辑)
+                    // 莲花局 TP 用 700 USD(跟反转 wick 对齐)— 强反转信号
+                    let upper_ratio_lotus: f64 = std::env::var("LOTUS_UPPER_WICK_RATIO")
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(0.4);
+                    let lower_ratio_lotus: f64 = std::env::var("LOTUS_LOWER_WICK_RATIO")
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(0.2);
+                    let oc_mid_near_lotus: f64 = std::env::var("LOTUS_OC_MID_NEAR_USD")
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(50.0);
+                    let is_lotus_setup_for_tp = anchor_data.as_ref().map(|a| {
+                        let upper_wick_l = a.high - a.open.max(a.close);
+                        let lower_wick_l = a.open.min(a.close) - a.low;
+                        let total_range_l = a.high - a.low;
+                        if total_range_l <= 0.0 { return false; }
+                        let is_bullish_1d_l = a.close > a.open;
+                        let is_bearish_1d_l = a.close < a.open;
+                        let long_upper_l = upper_wick_l / total_range_l >= upper_ratio_lotus;
+                        let short_upper_l = upper_wick_l / total_range_l <= lower_ratio_lotus;
+                        let long_lower_l = lower_wick_l / total_range_l >= upper_ratio_lotus;
+                        let short_lower_l = lower_wick_l / total_range_l <= lower_ratio_lotus;
+                        let lotus_bull_l = is_bullish_1d_l && long_upper_l && short_lower_l;
+                        let lotus_bear_l = is_bearish_1d_l && short_upper_l && long_lower_l;
+                        let near_oc_l = (a.oc_mid - s.level).abs() < oc_mid_near_lotus;
+                        (lotus_bull_l || lotus_bear_l) && s.high_quality && near_oc_l
+                    }).unwrap_or(false);
+                    let take_profit = if (s.reversal && is_in_2030_reversal_window) || is_lotus_setup_for_tp {
+                        // 20:00-21:30 反转 wick 或莲花局 → TP = 700 USD
+                        // 强信号,1:7 风险回报
                         if s.side == "bullish" {
                             entry_price + 700.0
                         } else {
