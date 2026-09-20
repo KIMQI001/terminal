@@ -1110,9 +1110,19 @@ let action_line = if is_weekend_block {
                         entry_price + stop_loss_usd
                     };
 
-                    // 止盈:静默时段(双 wick)用 200 USD,其他时段 400 USD
-                    // 静默时段信号弱、双 wick 单独入场,缩短止盈更稳
-                    let take_profit = if in_quiet_hours {
+                    // 止盈:
+                    // - 20:00-21:30 反转 wick:TP = 700 USD(用户原话'如果在这个时间段反转,一般是大行情')
+                    // - 静默时段(双 wick):TP = 200 USD(信号弱)
+                    // - 其他时段:TP = 400 USD(1:4)
+                    let is_in_2030_reversal_window = current_min_q >= 20 * 60
+                        && current_min_q < 21 * 60 + 30;
+                    let take_profit = if s.reversal && is_in_2030_reversal_window {
+                        if s.side == "bullish" {
+                            entry_price + 700.0
+                        } else {
+                            entry_price - 700.0
+                        }
+                    } else if in_quiet_hours {
                         if s.side == "bullish" {
                             entry_price + 200.0
                         } else {
