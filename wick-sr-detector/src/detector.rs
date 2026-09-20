@@ -709,9 +709,15 @@ pub fn detect_double_wick_last(
     // 双 S:两 K 都有 ≥ wick_ratio 的下影,且 zone 重叠
     // S zone = [c.low, body_bottom];重叠 ⇔ curr.low ≤ prev.body_bottom && prev.low ≤ curr.body_bottom
     // 两 K 必须两边都有影线(> 0)— 排除光头 K,代表双方激烈争夺
+    // 两边的影线都 > body(实体)— 双方争夺激烈,影线大于实体
     let prev_both_sides = prev_lower_ratio > 0.0 && prev_upper_ratio > 0.0;
     let curr_both_sides = curr_lower_ratio > 0.0 && curr_upper_ratio > 0.0;
+    let prev_wicks_gt_body = prev_lower_ratio * range_prev > prev_body_size
+        && prev_upper_ratio * range_prev > prev_body_size;
+    let curr_wicks_gt_body = curr_lower_ratio * range_curr > curr_body_size
+        && curr_upper_ratio * range_curr > curr_body_size;
     if prev_both_sides && curr_both_sides
+        && prev_wicks_gt_body && curr_wicks_gt_body
         && prev_lower_ratio >= options.wick_ratio && curr_lower_ratio >= options.wick_ratio
     {
         if curr_c.low <= prev_body_bottom && prev_c.low <= curr_body_bottom {
@@ -721,6 +727,7 @@ pub fn detect_double_wick_last(
     // 双 R:两 K 都有 ≥ wick_ratio 的上影,且 zone 重叠
     // R zone = [body_top, c.high];重叠 ⇔ curr.body_top ≤ prev.high && prev.body_top ≤ curr.high
     if prev_both_sides && curr_both_sides
+        && prev_wicks_gt_body && curr_wicks_gt_body
         && prev_upper_ratio >= options.wick_ratio && curr_upper_ratio >= options.wick_ratio
     {
         if curr_body_top <= prev_c.high && prev_body_top <= curr_c.high {
