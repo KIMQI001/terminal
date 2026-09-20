@@ -995,6 +995,13 @@ let action_line = if is_weekend_block {
                     let in_reversal_window = current_min_q >= rev_start * 60
                         && current_min_q < rev_end;
                     in_reversal_window
+                } else if !direction_match
+                    && current_min_q >= 20 * 60 && current_min_q < 21 * 60 + 30
+                {
+                    // 20:00-21:30 所有反向 wick(s.reversal=false + direction_match=false)
+                    // 用户原话:'20:00-21:30 的反转 wick 就是所有反向 wick,这时候都 tp 700'
+                    // 跟反转 wick 一样:大行情时段,所有反向形态都做
+                    true
                 } else if in_quiet_hours {
                     // 安静时段:仅 R3(双 wick)且同向
                     is_double_wick && direction_match
@@ -1140,9 +1147,21 @@ let action_line = if is_weekend_block {
                         let near_oc_l = (a.oc_mid - s.level).abs() < oc_mid_near_lotus;
                         (lotus_bull_l || lotus_bear_l) && s.high_quality && near_oc_l
                     }).unwrap_or(false);
+                    // 20:00-21:30 反向 wick 也按 TP=700 处理
+                    let is_2030_aggressive = is_in_2030_reversal_window
+                        || (!direction_match && current_min_q >= 20 * 60
+                            && current_min_q < 21 * 60 + 30);
                     let take_profit = if (s.reversal && is_in_2030_reversal_window) || is_lotus_setup_for_tp {
                         // 20:00-21:30 反转 wick 或莲花局 → TP = 700 USD
                         // 强信号,1:7 风险回报
+                        if s.side == "bullish" {
+                            entry_price + 700.0
+                        } else {
+                            entry_price - 700.0
+                        }
+                    } else if is_2030_aggressive && !s.reversal && !direction_match {
+                        // 20:00-21:30 普通反向 wick(s.reversal=false)
+                        // 用户原话:'20:00-21:30 的反转 wick 就是所有反向 wick,这时候都 tp 700'
                         if s.side == "bullish" {
                             entry_price + 700.0
                         } else {
