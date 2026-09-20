@@ -613,10 +613,18 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
                 // 方向过滤:反向 wick 但距 1D 关键位 < 85 → 放行报警(不下单,见 will_trade 加 direction_match)
+                // 例外:晚上 20:00-21:30 反向 wick 不论距离多远都报(用户原话'晚上 20:00-21:30 普通 wick + 反向 + 距离远(≥ 85)也报')
                 let side_is_bullish = s.side == "bullish";
+                let now_beijing_filter = chrono::Utc::now() + chrono::Duration::hours(8);
+                let current_min_filter: u32 = now_beijing_filter.format("%H").to_string().parse::<u32>().unwrap_or(0) * 60
+                    + now_beijing_filter.format("%M").to_string().parse::<u32>().unwrap_or(0);
+                let in_2030_window = current_min_filter >= 20 * 60 && current_min_filter < 21 * 60 + 30;
                 if !s.reversal && ((side_is_bullish && !want_bullish) || (!side_is_bullish && !want_bearish)) {
                     if nearest_distance < 85.0 {
                         info!("反向 wick {} 距 1D 关键位 {:.0} < 85,放行报警(不下单)", s.side, nearest_distance);
+                        // 不 continue,放行
+                    } else if in_2030_window {
+                        info!("反向 wick {} 距 1D 关键位 {:.0} ≥ 85,但 20:00-21:30 放行(用户策略)", s.side, nearest_distance);
                         // 不 continue,放行
                     } else {
                         info!("filtered by direction: {} (long_only={},距 1D 关键位 {:.0} ≥ 85)", s.side, long_only, nearest_distance);
