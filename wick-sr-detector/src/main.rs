@@ -995,12 +995,12 @@ let action_line = if is_weekend_block {
                     let in_reversal_window = current_min_q >= rev_start * 60
                         && current_min_q < rev_end;
                     in_reversal_window
-                } else if !direction_match
-                    && current_min_q >= 20 * 60 && current_min_q < 21 * 60 + 30
-                {
-                    // 20:00-21:30 所有反向 wick(s.reversal=false + direction_match=false)
-                    // 用户原话:'20:00-21:30 的反转 wick 就是所有反向 wick,这时候都 tp 700'
-                    // 跟反转 wick 一样:大行情时段,所有反向形态都做
+                } else if current_min_q >= 20 * 60 && current_min_q < 21 * 60 + 30 {
+                    // 20:00-21:30 所有 wick(不论方向,反转 wick 走前面分支)
+                    // 用户原话:'a' — 去掉 !direction_match 条件
+                    // 之前:只反向 wick 下单
+                    // 现在:同向 + 反向 + 反转 wick(反转 wick 走前面分支)都下
+                    // 配合 TP=700 规则:这个时段所有 wick 都按'大行情'处理
                     true
                 } else if in_quiet_hours {
                     // 安静时段:仅 R3(双 wick)且同向
