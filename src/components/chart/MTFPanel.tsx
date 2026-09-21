@@ -8,6 +8,8 @@ import {
   TrendType,
   MultiTimeframeEquilibriumEntry,
 } from "@/stores/indicatorStore";
+import { useChartStore } from "@/stores/chartStore";
+import { detectFVGs } from "@/lib/chart/indicators/fvg";
 import { ZoneSide } from "@/lib/chart/indicators/equilibrium";
 import { AlwaysInDirection } from "@/lib/chart/indicators/initialBalance";
 import { AsiaBiasDirection } from "@/lib/chart/indicators/asiaBias";
@@ -159,6 +161,34 @@ export function MTFPanel() {
   };
 
   const { multiTimeframeTrend, multiTimeframeEquilibrium, initialBalance, asiaBias, europeBias } = useIndicatorStore();
+  const { candles } = useChartStore();
+
+  // FVG 灯:检测当前 candles 最新未填充 FVG
+  // bullish FVG → 绿底 L(多方进攻)
+  // bearish FVG → 红底 S(空方进攻)
+  // 没有未填充 FVG → 灰色 — (等待)
+  const fvgLight: { type: 'bullish' | 'bearish' | 'none' } = (() => {
+    if (candles.length < 3) return { type: 'none' };
+    const fvgs = detectFVGs(candles);  // 已过滤 fillPercentage < 80
+    if (fvgs.length === 0) return { type: 'none' };
+    const latest = fvgs[fvgs.length - 1];  // 最新(按 time 正序)
+    return { type: latest.type === 'bullish' ? 'bullish' : 'bearish' };
+  })();
+  const fvgLightClass = fvgLight.type === 'bullish'
+    ? 'border-green-500 text-green-700'
+    : fvgLight.type === 'bearish'
+      ? 'border-red-500 text-red-700'
+      : 'border-gray-300 text-gray-400';
+  const fvgLightDot = fvgLight.type === 'bullish'
+    ? 'bg-green-500'
+    : fvgLight.type === 'bearish'
+      ? 'bg-red-500'
+      : 'bg-gray-400';
+  const fvgLightText = fvgLight.type === 'bullish'
+    ? 'L'
+    : fvgLight.type === 'bearish'
+      ? 'S'
+      : '—';
 
   const consensus = getConsensus(multiTimeframeTrend);
 
@@ -187,7 +217,24 @@ export function MTFPanel() {
   );
 
   return (
-    <div className="relative">
+    <div className="flex items-center gap-1">
+      {/* FVG 灯:最新未填充 FVG 方向 */}
+      <Button
+        variant="outline"
+        size="sm"
+        className={cn("px-2 h-7 text-xs gap-1", fvgLightClass)}
+        title={fvgLight.type === 'bullish'
+          ? '最新未填充 FVG:看涨(下方有缺口)— 多方进攻'
+          : fvgLight.type === 'bearish'
+            ? '最新未填充 FVG:看跌(上方有缺口)— 空方进攻'
+            : '没有未填充 FVG'
+        }
+      >
+        <div className={cn("w-2 h-2 rounded-full", fvgLightDot)} />
+        <span>{fvgLightText}</span>
+      </Button>
+
+      <div className="relative">
       <Button
         ref={buttonRef}
         variant="outline"
@@ -357,6 +404,7 @@ export function MTFPanel() {
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }
