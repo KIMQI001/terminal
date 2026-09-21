@@ -94,7 +94,10 @@ export function DailyKPanel() {
 
     const load = async () => {
       try {
-        const dailyData = await fetchKlines(symbol, "1d", 200);
+        // 拉 365 天 1D K(覆盖 1 年完整波段)
+        // 对齐 wick-sr-detector 的 DAILY_KLINES_LIMIT=365
+        // 用户反馈:新高锚点在 260 天前,200 天不够
+        const dailyData = await fetchKlines(symbol, "1d", 365);
         if (cancelled || dailyData.length < 2) return;
 
         // 1D 锚点
