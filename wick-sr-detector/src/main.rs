@@ -190,9 +190,10 @@ async fn main() -> anyhow::Result<()> {
         let last_fvg = candles.lock().await.clone();
         // 顺便 fetch 1D K 算 daily anchor(用于报警显示跟 1D 锚点的关键价位距离)
         // 对齐前端 DailyKPanel.tsx:46 findAnchor:用日 K 数组最后一根 K 的 close 作 current_price
-        // 拉 90 天(默认 30 天太短,BTC 突破 30 天新高时旧高点不在范围)
+        // 拉 365 天(覆盖 1 年完整波段)
+        // 用户反馈:'这个新高的锚点,在 260 天' — 90 天不够,要 1 年
         let daily_klines_limit: usize = std::env::var("DAILY_KLINES_LIMIT")
-            .ok().and_then(|s| s.parse().ok()).unwrap_or(90);
+            .ok().and_then(|s| s.parse().ok()).unwrap_or(365);
         if let Ok(daily_k) = binance::fetch_daily_klines(&binance_config, daily_klines_limit).await {
             if let Some(current_price) = daily_k.last().map(|c| c.close) {
                 if let Some(anchor) = detector::build_daily_anchor(&daily_k, current_price) {
