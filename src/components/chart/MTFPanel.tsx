@@ -218,7 +218,21 @@ export function MTFPanel() {
 
   return (
     <div className="flex items-center gap-1">
-      {/* FVG 灯:最新未填充 FVG 方向 */}
+      <div className="relative">
+      <Button
+        ref={buttonRef}
+        variant="outline"
+        size="sm"
+        onClick={handleToggle}
+        className={activeClass}
+        title={`Current session: ${activeSession}`}
+      >
+        <div className={cn("w-2 h-2 rounded-full", activeDotColor)} />
+        <span>MTF · {activeSession}</span>
+        <ChevronDown className={cn("w-3 h-3 transition-transform", isExpanded && "rotate-180")} />
+      </Button>
+
+      {/* FVG 灯:最新未填充 FVG 方向(MTF 右边) */}
       <Button
         variant="outline"
         size="sm"
@@ -232,20 +246,6 @@ export function MTFPanel() {
       >
         <div className={cn("w-2 h-2 rounded-full", fvgLightDot)} />
         <span>{fvgLightText}</span>
-      </Button>
-
-      <div className="relative">
-      <Button
-        ref={buttonRef}
-        variant="outline"
-        size="sm"
-        onClick={handleToggle}
-        className={activeClass}
-        title={`Current session: ${activeSession}`}
-      >
-        <div className={cn("w-2 h-2 rounded-full", activeDotColor)} />
-        <span>MTF · {activeSession}</span>
-        <ChevronDown className={cn("w-3 h-3 transition-transform", isExpanded && "rotate-180")} />
       </Button>
 
       {isExpanded && dropdownPos && (
