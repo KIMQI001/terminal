@@ -34,6 +34,7 @@ fn format_beijing_time(secs: i64) -> String {
 /// [Protect] 任务计算 TP 距离(USDT):
 /// - 用户显式设 PROTECTIVE_TP_USD → 用用户值(覆盖时段逻辑)
 /// - 没设 → 按时段动态:
+///   - 20:00-21:30 大行情时段(反转 wick 或反向 wick 触发):700 USD(对齐 will_trade 下单 TP)
 ///   - quiet hours(22:45-7:30 跨午夜 或 10:45-20:00):200 USD(信号弱保守)
 ///   - 正常时段(激活 08:00-10:45 + 纽约 20:00-22:30 北京):400 USD(1:4)
 fn protective_tp_usd_dynamic(user_override: Option<f64>) -> f64 {
@@ -43,6 +44,12 @@ fn protective_tp_usd_dynamic(user_override: Option<f64>) -> f64 {
     let now_beijing = chrono::Utc::now() + chrono::Duration::hours(8);
     let current_min_q: u32 = now_beijing.format("%H").to_string().parse::<u32>().unwrap_or(0) * 60
         + now_beijing.format("%M").to_string().parse::<u32>().unwrap_or(0);
+    // 20:00-21:30 大行情时段:700 USD(对齐 will_trade TP)
+    let rev_start: u32 = 20 * 60;
+    let rev_end: u32 = 21 * 60 + 30;
+    if current_min_q >= rev_start && current_min_q < rev_end {
+        return 700.0;
+    }
     let quiet1_start: u32 = 22 * 60 + 45;
     let quiet1_end: u32 = 7 * 60 + 30;
     let quiet2_start: u32 = 10 * 60 + 45;
