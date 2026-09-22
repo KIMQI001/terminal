@@ -565,6 +565,60 @@ async fn main() -> anyhow::Result<()> {
             // 返回 HashSet<side>:"bullish" 表示当前 K 的 S 跟上一根 K 的 S zone 重叠
             let double_wick_sides = detector::detect_double_wick_last(&c_snapshot, &opts);
 
+            // 8:00 K 线早盘走势预测(8:00 北京 = UTC 0:00,15m K):
+            // - 阴 K + 光头(close = high,上影=0)→ 抛压强势,8:16-10:45 押下跌
+            // - 阳 K + 光脚(open = low,下影=0)→ 买盘强势,8:16-10:45 押上涨
+            // - 其他形态 → 正常规则
+            // 8:00 K 是 UTC 0:00 那根 15m K(close 在 0:14:59)
+            // 8:16-10:45 是 UTC 0:16-2:45,8:00 K 已 close
+            // 用 c_snapshot[-2] 取 8:00 K(倒序最后第二根,排除当前正在检测的 8:15 K)
+            // 实际更准确:8:15 K close 时,c_snapshot[-1] = 8:15,c_snapshot[-2] = 8:00
+            let bias_8am: Option<(&'static str, f64)> = if c_snapshot.len() >= 2 {
+                let k_8am = &c_snapshot[c_snapshot.len() - 2];  // 8:00 北京 K
+                // 校验:这根 K 必须是 UTC 0:00(8:00 北京)
+                let k_8am_h_beijing = (k_8am.time + 8 * 3600) % 86400 / 3600;
+                let k_8am_m_beijing = ((k_8am.time + 8 * 3600) % 3600) / 60;
+                if k_8am_h_beijing == 0 && k_8am_m_beijing == 0 {
+                    let range_k = k_8am.high - k_8am.low;
+                    if range_k > 0.0 {
+                        let is_bull = k_8am.close > k_8am.open;
+                        let is_bear = k_8am.close < k_8am.open;
+                        let upper_k = k_8am.high - k_8am.open.max(k_8am.close);
+                        let lower_k = k_8am.open.min(k_8am.close) - k_8am.low;
+                        let upper_pct = upper_k / range_k;
+                        let lower_pct = lower_k / range_k;
+                        // 光头:close == high → 上影 = 0
+                        let is_bald_top = (k_8am.close - k_8am.high).abs() < 0.01;
+                        // 光脚:open == low → 下影 = 0
+                        let is_bald_bottom = (k_8am.open - k_8am.low).abs() < 0.01;
+                        if is_bear && is_bald_top {
+                            // 阴 K + 光头:抛压强势 → 看跌
+                            let pct = lower_pct * 100.0;
+                            info!("[8:00K 走势预测] 阴 K + 光头(close=high={},下影={:.0}%)→ 8:16-10:45 押下跌",
+                                k_8am.close, pct);
+                            Some(("bearish", pct))
+                        } else if is_bull && is_bald_bottom {
+                            // 阳 K + 光脚:买盘强势 → 看涨
+                            let pct = upper_pct * 100.0;
+                            info!("[8:00K 走势预测] 阳 K + 光脚(open=low={},上影={:.0}%)→ 8:16-10:45 押上涨",
+                                k_8am.open, pct);
+                            Some(("bullish", pct))
+                        } else {
+                            // 其他形态不预测,正常规则
+                            info!("[8:00K 走势预测] 非极端形态(阳K={},阴K={},光头={},光脚={})→ 正常规则",
+                                is_bull, is_bear, is_bald_top, is_bald_bottom);
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             // 方向过滤:long 趋势只报 S(支撑),short 趋势只报 R(阻力)
             // - 最近 FVG 看涨 → long → true
             // - 最近 FVG 看跌 → short → false
@@ -960,6 +1014,7 @@ let action_line = if is_weekend_block {
                     // - 莲花局(长上影阳 K + 短下影 + wick 距 OC mid 近 + 高质量)也允许下单
                     //   长上影 = 卖方强力抛压,阳 K = 多头收盘,短下影 = 下杀不深
                     //   莲花局时,价格回到 OC mid 附近是强反弹信号
+                    // - 8:00 K 走势预测(阴 K+光头 → 押跌;阳 K+光脚 → 押涨)— 反方向 wick 不下
                     if s.reversal {
                         true
                     } else {
@@ -969,6 +1024,10 @@ let action_line = if is_weekend_block {
                         // 莲花局形态:
                         //   长影线 = 占总范围 ≥ LOTUS_UPPER_WICK_RATIO(默认 0.4)
                         //   短影线 = 占总范围 ≤ LOTUS_LOWER_WICK_RATIO(默认 0.2)
+                        // 8:00 K 走势预测规则:
+                        //   阴 K + 光头(close=high,上影=0)→ 押下跌,S 支撑不下单
+                        //   阳 K + 光脚(open=low,下影=0)→ 押上涨,R 阻力不下单
+                        //   其他形态 → 不影响,正常莲花局判定
                         let upper_ratio: f64 = std::env::var("LOTUS_UPPER_WICK_RATIO")
                             .ok().and_then(|s| s.parse().ok()).unwrap_or(0.4);
                         let lower_ratio: f64 = std::env::var("LOTUS_LOWER_WICK_RATIO")
@@ -993,7 +1052,22 @@ let action_line = if is_weekend_block {
                             let lotus_bull = is_bullish_1d && long_upper && short_lower;
                             // 变种 2:阴 K + 短上影 + 长下影(看跌莲花)
                             let lotus_bear = is_bearish_1d && short_upper && long_lower;
-                            (lotus_bull || lotus_bear) && s.high_quality && near_oc_mid
+                            let lotus_pass = (lotus_bull || lotus_bear)
+                                && s.high_quality && near_oc_mid;
+                            // 8:00 K 走势预测:反方向 wick 不下单
+                            //   阴 K + 光头 → 押跌(S 支撑不看涨,S 不下单)
+                            //   阳 K + 光脚 → 押涨(R 阻力不看跌,R 不下单)
+                            //   其他形态 → 不影响(lotus_pass 保持原值)
+                            let bias_blocks = match bias_8am {
+                                Some(("bearish", _)) => s.side == "bullish",  // 押跌 → S 支撑不看
+                                Some(("bullish", _)) => s.side == "bearish",  // 押涨 → R 阻力不看
+                                _ => false,
+                            };
+                            if !lotus_pass || bias_blocks {
+                                info!("[激活时段 wick] {} 不下单(lotus={},bias_blocks={})",
+                                    s.side, lotus_pass, bias_blocks);
+                            }
+                            lotus_pass && !bias_blocks
                         }).unwrap_or(false)
                     }
                 } else if s.reversal {
