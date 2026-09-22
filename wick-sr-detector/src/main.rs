@@ -587,10 +587,13 @@ async fn main() -> anyhow::Result<()> {
                         let lower_k = k_8am.open.min(k_8am.close) - k_8am.low;
                         let upper_pct = upper_k / range_k;
                         let lower_pct = lower_k / range_k;
-                        // 光头:close == high → 上影 = 0
-                        let is_bald_top = (k_8am.close - k_8am.high).abs() < 0.01;
-                        // 光脚:open == low → 下影 = 0
-                        let is_bald_bottom = (k_8am.open - k_8am.low).abs() < 0.01;
+                        // 光头/光脚定义放宽:一侧影线 ≤ 总范围的 X%(用户原话:'还是用 10% 的 wick 吧')
+                        // 1% 在 BTC 8 万价 = 800 USD 太宽;10% = 8000 USD 也太宽
+                        // 实际 8:00 K 15m range 通常 200-500 USD,10% = 20-50 USD,合理
+                        let bald_threshold: f64 = std::env::var("MORNING_K_BALD_THRESHOLD")
+                            .ok().and_then(|s| s.parse().ok()).unwrap_or(0.10);
+                        let is_bald_top = upper_pct <= bald_threshold;
+                        let is_bald_bottom = lower_pct <= bald_threshold;
                         if is_bear && is_bald_top {
                             // 阴 K + 光头:抛压强势 → 看跌
                             let pct = lower_pct * 100.0;
