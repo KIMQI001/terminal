@@ -35,7 +35,8 @@ fn format_beijing_time(secs: i64) -> String {
 /// - 用户显式设 PROTECTIVE_TP_USD → 用用户值(覆盖时段逻辑)
 /// - 没设 → 按时段动态:
 ///   - 20:00-21:30 大行情时段(反转 wick 或反向 wick 触发):700 USD(对齐 will_trade 下单 TP)
-///   - quiet hours(22:45-7:30 跨午夜 或 10:45-20:00):200 USD(信号弱保守)
+///   - 16:00-18:00 伦敦盘(HQ 信号):400 USD(对齐 will_trade 下单 TP)
+///   - quiet hours(22:45-7:30 跨午夜 或 10:45-16:00 或 18:00-20:00):200 USD(信号弱保守)
 ///   - 正常时段(激活 08:00-10:45 + 纽约 20:00-22:30 北京):400 USD(1:4)
 fn protective_tp_usd_dynamic(user_override: Option<f64>) -> f64 {
     if let Some(v) = user_override {
@@ -50,14 +51,25 @@ fn protective_tp_usd_dynamic(user_override: Option<f64>) -> f64 {
     if current_min_q >= rev_start && current_min_q < rev_end {
         return 700.0;
     }
+    // 16:00-18:00 伦敦盘:400 USD(对齐 will_trade 下单 TP)
+    // 用户原话'16-18 点,补单 protect 是 400 吧'
+    let london_start: u32 = 16 * 60;
+    let london_end: u32 = 18 * 60;
+    if current_min_q >= london_start && current_min_q < london_end {
+        return 400.0;
+    }
+    // quiet hours:22:45-7:30 跨午夜,18:00-20:00,10:45-16:00(避开伦敦盘)
     let quiet1_start: u32 = 22 * 60 + 45;
     let quiet1_end: u32 = 7 * 60 + 30;
     let quiet2_start: u32 = 10 * 60 + 45;
-    let quiet2_end: u32 = 20 * 60;
+    let quiet2_end: u32 = 16 * 60;  // 改:quiet2 改成 10:45-16:00(避开 16-18 伦敦盘)
+    let quiet3_start: u32 = 18 * 60;
+    let quiet3_end: u32 = 20 * 60;
     // quiet1 跨午夜
     let in_q1 = current_min_q >= quiet1_start || current_min_q < quiet1_end;
     let in_q2 = current_min_q >= quiet2_start && current_min_q < quiet2_end;
-    if in_q1 || in_q2 { 200.0 } else { 400.0 }
+    let in_q3 = current_min_q >= quiet3_start && current_min_q < quiet3_end;
+    if in_q1 || in_q2 || in_q3 { 200.0 } else { 400.0 }
 }
 
 #[tokio::main]
