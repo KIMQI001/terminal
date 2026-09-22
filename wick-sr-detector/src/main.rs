@@ -1083,14 +1083,18 @@ let action_line = if is_weekend_block {
                     }
                 } else if s.reversal {
                     // 反转 wick 在其他时段不下单
-                    // 例外:晚上 20:00-21:30 反转 wick 也下(用户原话"晚上 20-21:30 也可以做反转")
+                    // 例外:
+                    //   - 晚上 20:00-21:30 反转 wick 也下(用户原话"晚上 20-21:30 也可以做反转")
+                    //   - 下午 16:00-18:00 伦敦盘 反转 wick 也下(用户原话"16-18 反转也可以")
                     let rev_start: u32 = std::env::var("REVERSAL_HOURS_START")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(20);
                     let rev_end: u32 = std::env::var("REVERSAL_HOURS_END_MIN")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(21 * 60 + 30);
                     let in_reversal_window = current_min_q >= rev_start * 60
                         && current_min_q < rev_end;
-                    in_reversal_window
+                    // 16:00-18:00 伦敦盘(in_london_window 已经在上面算过)
+                    // 20:00-21:30 反转窗口(in_reversal_window)
+                    in_london_window || in_reversal_window
                 } else if current_min_q >= 20 * 60 && current_min_q < 21 * 60 + 30 {
                     // 20:00-21:30 所有 wick(不论方向,反转 wick 走前面分支)
                     // 用户原话:'a' — 去掉 !direction_match 条件
@@ -1244,9 +1248,13 @@ let action_line = if is_weekend_block {
                         (lotus_bull_l || lotus_bear_l) && s.high_quality && near_oc_l
                     }).unwrap_or(false);
                     // 20:00-21:30 反向 wick 也按 TP=700 处理
+                    // 16:00-18:00 伦敦盘的反转 wick 用户原话'16-18 反转也可以,tp 都为 400'
+                    // → 伦敦盘反转 wick 用 TP=400(正常时段 1:4),不走大行情 TP=700
                     let is_2030_aggressive = is_in_2030_reversal_window
                         || (!direction_match && current_min_q >= 20 * 60
                             && current_min_q < 21 * 60 + 30);
+                    // 16-18 伦敦盘反转 wick(走 fallback TP=400,不走 700)
+                    let london_reversal = in_london_window && s.reversal;
                     let take_profit = if (s.reversal && is_in_2030_reversal_window) || is_lotus_setup_for_tp {
                         // 20:00-21:30 反转 wick 或莲花局 → TP = 700 USD
                         // 强信号,1:7 风险回报
