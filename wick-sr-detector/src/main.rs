@@ -45,6 +45,16 @@ fn protective_tp_usd_dynamic(user_override: Option<f64>) -> f64 {
     let now_beijing = chrono::Utc::now() + chrono::Duration::hours(8);
     let current_min_q: u32 = now_beijing.format("%H").to_string().parse::<u32>().unwrap_or(0) * 60
         + now_beijing.format("%M").to_string().parse::<u32>().unwrap_or(0);
+    let weekday_num: u32 = now_beijing.format("%w").to_string().parse().unwrap_or(0);
+    // 周六(6)+ 周日(0 20:00 前)全天不交易
+    // 用户原话:'周六周日的 16-18 点是不交易的'
+    // is_weekend_block 已在 will_trade 头判断,这里同步保护补单 TP:
+    //   周末任何时段返回默认 400,不走 london/quiet/reversal 等特殊路径
+    let is_weekend_block = weekday_num == 6
+        || (weekday_num == 0 && current_min_q < 20 * 60);
+    if is_weekend_block {
+        return 400.0;
+    }
     // 20:00-21:30 大行情时段:700 USD(对齐 will_trade TP)
     let rev_start: u32 = 20 * 60;
     let rev_end: u32 = 21 * 60 + 30;
