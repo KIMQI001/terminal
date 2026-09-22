@@ -1086,15 +1086,17 @@ let action_line = if is_weekend_block {
                     // 例外:
                     //   - 晚上 20:00-21:30 反转 wick 也下(用户原话"晚上 20-21:30 也可以做反转")
                     //   - 下午 16:00-18:00 伦敦盘 反转 wick 也下(用户原话"16-18 反转也可以")
+                    // 16-18 限定:反转也要 HQ(s.high_quality == true)
                     let rev_start: u32 = std::env::var("REVERSAL_HOURS_START")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(20);
                     let rev_end: u32 = std::env::var("REVERSAL_HOURS_END_MIN")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(21 * 60 + 30);
                     let in_reversal_window = current_min_q >= rev_start * 60
                         && current_min_q < rev_end;
-                    // 16:00-18:00 伦敦盘(in_london_window 已经在上面算过)
-                    // 20:00-21:30 反转窗口(in_reversal_window)
-                    in_london_window || in_reversal_window
+                    // 20:00-21:30 反转窗口:反转即可(不限 HQ)
+                    // 16:00-18:00 伦敦盘:反转 + HQ 都要
+                    let london_reversal_pass = in_london_window && s.high_quality;
+                    in_reversal_window || london_reversal_pass
                 } else if current_min_q >= 20 * 60 && current_min_q < 21 * 60 + 30 {
                     // 20:00-21:30 所有 wick(不论方向,反转 wick 走前面分支)
                     // 用户原话:'a' — 去掉 !direction_match 条件
