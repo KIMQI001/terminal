@@ -965,6 +965,11 @@ let action_line = if is_weekend_block {
                     .ok().and_then(|s| s.parse().ok()).unwrap_or(20);
                 let hq_trade_hour_end_min: u32 = std::env::var("HQ_TRADE_HOUR_END_MIN")
                     .ok().and_then(|s| s.parse().ok()).unwrap_or(22 * 60 + 30);
+                // 伦敦盘 16:00-18:00 北京(8:00-10:00 伦敦时间)— 用户原话'加 16-18 点的伦敦盘,主要做高等级信号'
+                let london_hour_start: u32 = std::env::var("LONDON_HOUR_START")
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(16);
+                let london_hour_end_min: u32 = std::env::var("LONDON_HOUR_END_MIN")
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(18 * 60);
                 let now_beijing = chrono::Utc::now() + chrono::Duration::hours(8);
                 // 当前分钟数 = HH*60 + MM(修复前用 `.fold(|acc, n| acc*100 + n)` 错算成 HHMM,
                 // 如 20:30 → 2030,跟区间 [start*60, end_min) 比较数学不对位,
@@ -974,7 +979,10 @@ let action_line = if is_weekend_block {
                 // 20:00 到 hq_trade_hour_end_min 分钟数(默认 22:30 = 1350 分)
                 let in_hq_trade_window = current_min >= hq_trade_hour_start * 60
                     && current_min < hq_trade_hour_end_min;
-                let hq_same_direction = s.high_quality && in_hq_trade_window && (
+                // 伦敦盘 16:00-18:00 北京
+                let in_london_window = current_min >= london_hour_start * 60
+                    && current_min < london_hour_end_min;
+                let hq_same_direction = s.high_quality && (in_hq_trade_window || in_london_window) && (
                     (s.side == "bullish" && long_only) ||
                     (s.side == "bearish" && !long_only)
                 );
