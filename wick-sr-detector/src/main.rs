@@ -108,7 +108,7 @@ async fn main() -> anyhow::Result<()> {
         reversal_lookback: std::env::var("REVERSAL_LOOKBACK")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(5),  // 默认从 10 → 5(用户原话'他也是反转,不过他是 6 根最低':更短回溯能识别更多反转 wick)
+            .unwrap_or(6),  // 默认从 10 → 6(用户原话'他也是反转,不过他是 6 根最低':更短回溯能识别更多反转 wick)
         body_max_usd: std::env::var("WICK_BODY_MAX_USD")
             .ok()
             .and_then(|s| s.parse().ok())
