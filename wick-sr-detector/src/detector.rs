@@ -101,7 +101,13 @@ pub fn detect_wick_sr(
         let lower_ratio = lower_wick / range;
 
         // 上影(阻力,bearish) — R 在阳 K = 高等级(卖方没压住,收盘价入场)
-        if upper_ratio >= options.wick_ratio {
+        // 用户原话:'加条件,如果影线在 40-60%区间内,另一头影线必须大于 10%,如果大于 60%,则不用管另一头'
+        // 长影 ≥ 60% range → 任何 wick 都触发(不用管另一头)
+        // 长影 40-60% range → 另一头影 > 10% range 才触发
+        let upper_wick_strong = upper_ratio >= options.wick_ratio;
+        let upper_wick_conditional =
+            upper_ratio >= 0.40 && upper_ratio < 0.60 && lower_ratio > 0.10;
+        if upper_wick_strong || upper_wick_conditional {
             let level = (body_top + c.high) / 2.0;
             let zone_low = body_top;
             let zone_high = c.high;
@@ -139,7 +145,13 @@ pub fn detect_wick_sr(
         }
 
         // 下影(支撑,bullish) — S 在阴 K = 高等级(买方没接住,收盘价入场)
-        if lower_ratio >= options.wick_ratio {
+        // 用户原话:'加条件,如果影线在 40-60%区间内,另一头影线必须大于 10%'
+        // 长影 ≥ 60% range → 任何 wick 都触发
+        // 长影 40-60% range → 另一头影 > 10% range 才触发
+        let lower_wick_strong = lower_ratio >= options.wick_ratio;
+        let lower_wick_conditional =
+            lower_ratio >= 0.40 && lower_ratio < 0.60 && upper_ratio > 0.10;
+        if lower_wick_strong || lower_wick_conditional {
             let level = (c.low + body_bottom) / 2.0;
             let zone_low = c.low;
             let zone_high = body_bottom;
