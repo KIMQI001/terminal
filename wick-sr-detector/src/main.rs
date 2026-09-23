@@ -1335,10 +1335,20 @@ let action_line = if is_weekend_block {
                             entry_price - 700.0
                         }
                     } else if in_quiet_hours {
-                        if s.side == "bullish" {
-                            entry_price + 200.0
+                        // 16:00-18:00 伦敦盘:TP=400(用户原话'400点')
+                        // 其他安静时段:TP=200
+                        if current_min_q >= 16 * 60 && current_min_q < 18 * 60 {
+                            if s.side == "bullish" {
+                                entry_price + 400.0
+                            } else {
+                                entry_price - 400.0
+                            }
                         } else {
-                            entry_price - 200.0
+                            if s.side == "bullish" {
+                                entry_price + 200.0
+                            } else {
+                                entry_price - 200.0
+                            }
                         }
                     } else if s.side == "bullish" {
                         entry_price + 400.0
