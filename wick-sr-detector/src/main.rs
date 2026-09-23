@@ -943,7 +943,20 @@ let action_line = if is_weekend_block {
                 } else if !direction_match && nearest_distance < 85.0 {
                     format!("\n- **动作**: ⚠️ 反向 wick(近 1D 关键位 {:.0} USD)→ **仅报警,不下单**\n", nearest_distance)
                 } else if in_quiet_hours {
-                    "\n- **动作**: 🔇 安静时段(22:45-07:00 或 10:45-20:00),仅接受双 wick → **仅报警,不下单**\n".to_string()
+                    // 16:00-18:00 伦敦盘窗口强制:wick_ratio ≥ 0.4 就下(用户原话'b')
+                    // 跟 8:00 强制一样逻辑,不要求 HQ + 方向匹配
+                    if current_min_q >= 16 * 60 && current_min_q < 18 * 60 {
+                        if s.ratio >= 0.4 {
+                            format!(
+                                "\n- **动作**: 🇬🇧 伦敦盘(16:00-18:00)wick ≥ 0.4 → **触发下单**"
+                            )
+                        } else {
+                            "\n- **动作**: 🔇 安静时段(16:00-18:00 伦敦盘)普通 K → **仅报警,不下单**\n".to_string()
+                        }
+                    } else {
+                        // 其他安静时段:仅接受双 wick → 仅报警,不下单
+                        "\n- **动作**: 🔇 安静时段(22:45-07:00 或 10:45-16:00 或 18:00-20:00),仅接受双 wick → **仅报警,不下单**\n".to_string()
+                    }
                 } else if nearest_distance < 85.0 && s.high_quality && direction_match {
                     format!("\n- **动作**: ✅ R1 触发(1D 关键位 {:.0} USD + 高等级 + 方向匹配)→ **触发下单**\n", nearest_distance)
                 } else if s.high_quality {
@@ -1147,8 +1160,14 @@ let action_line = if is_weekend_block {
                     // 配合 TP=700 规则:这个时段所有 wick 都按'大行情'处理
                     true
                 } else if in_quiet_hours {
-                    // 安静时段:仅 R3(双 wick)且同向
-                    is_double_wick && direction_match
+                    // 16:00-18:00 伦敦盘窗口强制:wick_ratio ≥ 0.4 就下(用户原话'b')
+                    // 跟 8:00 强制一样逻辑,不要求 HQ + 方向匹配
+                    if current_min_q >= 16 * 60 && current_min_q < 18 * 60 {
+                        s.ratio >= 0.4
+                    } else {
+                        // 其他安静时段:仅 R3(双 wick)且同向
+                        is_double_wick && direction_match
+                    }
                 } else {
                     // 正常时段:三规则并行
                     (near_key_level && s.high_quality && direction_match)
