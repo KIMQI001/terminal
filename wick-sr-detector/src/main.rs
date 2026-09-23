@@ -911,14 +911,25 @@ let action_line = if is_weekend_block {
                     "\n- **动作**: 🚫 周末(周六全天 + 周日 20:00 前)流动性差 → **仅报警,暂停下单**\n".to_string()
                 } else if current_min_q == 8 * 60 + 15 {
                     "\n- **动作**: 🔇 8:15 黑名单(日 K 刚开盘,关键位不稳)→ **仅报警,不下单**\n".to_string()
-                } else if current_min_q >= 8 * 60 && current_min_q < 8 * 60 + 15 && s.high_quality && direction_match {
+                } else if current_min_q == 8 * 60 && direction_match {
+                    // 8:00 强制下(只要方向匹配,不限 HQ)— 用户原话'只要8点报信号就下'
                     if oc_too_tight_for_short {
                         format!(
-                            "\n- **动作**: 🎯 8 点特殊窗口(8:00-8:14)高等级 + 空单 + OC 距离 {:.0} < {} USD → **仅报警,不开空**\n",
+                            "\n- **动作**: 🎯 8 点强制(8:00)空单 + OC 距离 {:.0} < {} USD → **仅报警,不开空**\n",
                             oc_distance, oc_distance_threshold
                         ).to_string()
                     } else {
-                        "\n- **动作**: 🎯 8 点特殊窗口(8:00-8:14)高等级 → **触发下单**\n".to_string()
+                        "\n- **动作**: 🎯 8 点强制(8:00)→ **触发下单**\n".to_string()
+                    }
+                } else if current_min_q >= 8 * 60 && current_min_q < 8 * 60 + 15 && s.high_quality && direction_match {
+                    // 8:01-8:14 仍要 HQ(只有 8:00 那一刻强制下)
+                    if oc_too_tight_for_short {
+                        format!(
+                            "\n- **动作**: 🎯 8 点特殊窗口(8:01-8:14)高等级 + 空单 + OC 距离 {:.0} < {} USD → **仅报警,不开空**\n",
+                            oc_distance, oc_distance_threshold
+                        ).to_string()
+                    } else {
+                        "\n- **动作**: 🎯 8 点特殊窗口(8:01-8:14)高等级 → **触发下单**\n".to_string()
                     }
                 } else if in_active_hours && s.reversal {
                     "\n- **动作**: 🔁 反转 wick(active hours 08:00-10:45) → **触发下单**\n".to_string()
