@@ -1058,9 +1058,10 @@ let action_line = if is_weekend_block {
                     false
                 } else if current_min_q >= 8 * 60 && current_min_q < 8 * 60 + 15 {
                     // 8:00-8:14 特殊窗口:WS 延迟较短的信号可用
-                    // 8:00 强制:只要有 wick(wick_ratio ≥ 0.4)就下,不看 HQ 不看方向匹配
+                    // 8:00 强制 + 8:01-8:14 强制:s.ratio ≥ 0.4(等价于 check_wick_threshold 通过)
+                    // detector::detect_wick_sr 已用分档阈值过滤 wicks(60% free + 40-60% + 对侧 > 10%)
+                    // 进入 will_trade 入口的 wicks 都满足 ≥ 0.4,无需重复判定分档
                     // 用户原话:'8:00 强制只要 wick,不要求 HQ'
-                    // 8:01-8:14 仍要 HQ + direction_match
                     if current_min_q == 8 * 60 {
                         if oc_too_tight_for_short {
                             false
@@ -1160,8 +1161,9 @@ let action_line = if is_weekend_block {
                     // 配合 TP=700 规则:这个时段所有 wick 都按'大行情'处理
                     true
                 } else if in_quiet_hours {
-                    // 16:00-18:00 伦敦盘窗口强制:wick_ratio ≥ 0.4 就下(用户原话'b')
-                    // 跟 8:00 强制一样逻辑,不要求 HQ + 方向匹配
+                    // 16:00-18:00 伦敦盘窗口强制:s.ratio ≥ 0.4(等价于 check_wick_threshold 通过)
+                    // detector::detect_wick_sr 已用分档阈值过滤 wicks
+                    // 进入 will_trade 入口的 wicks 都满足 ≥ 0.4,无需重复判定分档
                     if current_min_q >= 16 * 60 && current_min_q < 18 * 60 {
                         s.ratio >= 0.4
                     } else {
