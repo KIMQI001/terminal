@@ -912,14 +912,15 @@ let action_line = if is_weekend_block {
                 } else if current_min_q == 8 * 60 + 15 {
                     "\n- **动作**: 🔇 8:15 黑名单(日 K 刚开盘,关键位不稳)→ **仅报警,不下单**\n".to_string()
                 } else if current_min_q == 8 * 60 {
-                    // 8:00 强制下(只要有信号就下,不要求方向匹配)— 用户原话'也不需要方向匹配啊,我说的是 只要有信号就下'
+                    // 8:00 强制下:只要 wick(wick_ratio ≥ 0.4)就下,不看 HQ 不看方向匹配
+                    // 用户原话:'a, 8:00 强制只要 wick,不要求 HQ'
                     if oc_too_tight_for_short {
                         format!(
                             "\n- **动作**: 🎯 8 点强制(8:00)空单 + OC 距离 {:.0} < {} USD → **仅报警,不开空**\n",
                             oc_distance, oc_distance_threshold
                         ).to_string()
                     } else {
-                        "\n- **动作**: 🎯 8 点强制(8:00)有信号就下 → **触发下单**\n".to_string()
+                        "\n- **动作**: 🎯 8 点强制(8:00)只要 wick → **触发下单**\n".to_string()
                     }
                 } else if current_min_q >= 8 * 60 && current_min_q < 8 * 60 + 15 && s.high_quality && direction_match {
                     // 8:01-8:14 仍要 HQ(只有 8:00 那一刻强制下)
@@ -1044,13 +1045,21 @@ let action_line = if is_weekend_block {
                     false
                 } else if current_min_q >= 8 * 60 && current_min_q < 8 * 60 + 15 {
                     // 8:00-8:14 特殊窗口:WS 延迟较短的信号可用
-                    // 高等级 + 方向匹配 → 直接下,不看 1D 距离
-                    // 但**空单 + 当天 OC < OC_DISTANCE_MIN_USD(默认 400)→ 不下**
-                    //   理由:8:00 UTC 日 K 刚收盘,OC 距离小 → 价格易先到 OC mid 反转打止损
-                    if oc_too_tight_for_short {
-                        false
+                    // 8:00 强制:只要有 wick(wick_ratio ≥ 0.4)就下,不看 HQ 不看方向匹配
+                    // 用户原话:'8:00 强制只要 wick,不要求 HQ'
+                    // 8:01-8:14 仍要 HQ + direction_match
+                    if current_min_q == 8 * 60 {
+                        if oc_too_tight_for_short {
+                            false
+                        } else {
+                            s.ratio >= 0.4
+                        }
                     } else {
-                        s.high_quality && direction_match
+                        if oc_too_tight_for_short {
+                            false
+                        } else {
+                            s.high_quality && direction_match
+                        }
                     }
                 } else if in_active_hours {
                     // 激活时段(08:00-10:45,不含 8:00-8:15 特殊窗口)
