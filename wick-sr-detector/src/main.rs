@@ -688,7 +688,8 @@ async fn main() -> anyhow::Result<()> {
             for mut s in signals {
                 // 预算 volume_pass(成交量监控,报警 + will_trade 共用)
                 // 用户原话:'高等级 + 成交量 2x 以上 也是个好信号,把它弄成和双 wick 一样的交易时间'
-                // 复用:报警展示(显示 Nx ✓/✗)+ will_trade 新规则(s.high_quality && volume_pass && direction_match → 下单)
+                // 用户原话:'不用管方向 HQ + 成交量 2x 以上'(R4 不依赖 direction_match)
+                // 复用:报警展示(显示 Nx ✓/✗)+ will_trade R4 规则(不管方向,反向 wick 也走)
                 let (curr_vol, prev_vol, volume_pass) = if c_snapshot.len() >= 2 {
                     let prev_vol = c_snapshot[c_snapshot.len() - 2].volume;
                     let curr_vol = candle.volume;
@@ -722,14 +723,22 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
                 // 方向过滤:反向 wick 但距 1D 关键位 < 85 → 放行报警(不下单,见 will_trade 加 direction_match)
-                // 例外:晚上 20:00-21:30 反向 wick 不论距离多远都报(用户原话'晚上 20:00-21:30 普通 wick + 反向 + 距离远(≥ 85)也报')
+                // 例外:
+                //   - 晚上 20:00-21:30 反向 wick 不论距离多远都报(用户原话'晚上 20:00-21:30 普通 wick + 反向 + 距离远(≥ 85)也报')
+                //   - R4(HQ + 成交量 ≥ 阈值)不管方向(用户原话:'不用管方向 HQ + 成交量 2x 以上')
                 let side_is_bullish = s.side == "bullish";
                 let now_beijing_filter = chrono::Utc::now() + chrono::Duration::hours(8);
                 let current_min_filter: u32 = now_beijing_filter.format("%H").to_string().parse::<u32>().unwrap_or(0) * 60
                     + now_beijing_filter.format("%M").to_string().parse::<u32>().unwrap_or(0);
                 let in_2030_window = current_min_filter >= 20 * 60 && current_min_filter < 21 * 60 + 30;
+                // R4 信号标记(用于方向过滤例外)— 提前算避免重复
+                let is_hq_volume_signal = s.high_quality && volume_pass && !s.reversal;
                 if !s.reversal && ((side_is_bullish && !want_bullish) || (!side_is_bullish && !want_bearish)) {
-                    if nearest_distance < 85.0 {
+                    if is_hq_volume_signal {
+                        // R4 例外:反向 wick + HQ + 成交量 ≥ 阈值 → 不管方向,放行报警 + 走 R4 下单
+                        info!("反向 wick {} 但 HQ + 成交量 ≥ {:.1}x,放行报警(走 R4,不管方向)", s.side, vol_ratio_threshold);
+                        // 不 continue,放行
+                    } else if nearest_distance < 85.0 {
                         info!("反向 wick {} 距 1D 关键位 {:.0} < 85,放行报警(不下单)", s.side, nearest_distance);
                         // 不 continue,放行
                     } else if in_2030_window {
@@ -957,11 +966,12 @@ let action_line = if is_weekend_block {
                     "\n- **动作**: ⏰ 激活时段(08:00-10:45)仅接受反转 wick → **仅报警,不下单**\n".to_string()
                 } else if is_double_wick && !s.reversal && direction_match {
                     "\n- **动作**: 🔁 双 wick → **触发下单**\n".to_string()
-                } else if s.high_quality && volume_pass && direction_match && !s.reversal {
-                    // HQ + 成交量 ≥ 2x + 方向匹配(交易时间跟双 wick 一样)
+                } else if s.high_quality && volume_pass && !s.reversal {
+                    // R4 HQ + 成交量 ≥ 2x(交易时间跟双 wick 一样,不管方向)
                     // 用户原话:'高等级 + 成交量 2x 以上 也是个好信号,把它弄成和双 wick 一样的交易时间'
+                    // 用户原话:'不用管方向 HQ + 成交量 2x 以上'
                     format!(
-                        "\n- **动作**: 📊 HQ + 成交量 ≥ {:.1}x → **触发下单**\n",
+                        "\n- **动作**: 📊 HQ + 成交量 ≥ {:.1}x → **触发下单**(不管方向)\n",
                         vol_ratio_threshold
                     )
                 } else if s.reversal {
@@ -1215,18 +1225,18 @@ let action_line = if is_weekend_block {
                     if current_min_q >= 16 * 60 && current_min_q < 18 * 60 {
                         s.ratio >= 0.4
                     } else {
-                        // 其他安静时段:R3 双 wick + R4(HQ + 成交量 ≥ 阈值),均需同向
-                        // 跟双 wick 一样的交易时间(HQ + 成交量 2x 也是个好信号)
-                        (is_double_wick || (s.high_quality && volume_pass))
-                            && direction_match
+                        // 其他安静时段:R3 双 wick(要 direction_match) + R4 HQ+成交量(不管方向)
+                        // R4 不管方向(用户原话:'不用管方向 HQ + 成交量 2x 以上')
+                        ((is_double_wick && direction_match)
+                            || (s.high_quality && volume_pass))
                             && !s.reversal
                     }
                 } else {
-                    // 正常时段:四规则并行
+                    // 正常时段:四规则并行(R4 不管方向,其他三规则仍要 direction_match)
                     (near_key_level && s.high_quality && direction_match)
                     || hq_same_direction
                     || (is_double_wick && direction_match)
-                    || (s.high_quality && volume_pass && direction_match && !s.reversal)
+                    || (s.high_quality && volume_pass && !s.reversal)
                 };
                 if will_trade && std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {
                     let api_key = std::env::var("BINANCE_API_KEY").unwrap_or_default();
