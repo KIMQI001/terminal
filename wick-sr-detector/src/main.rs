@@ -955,6 +955,14 @@ let action_line = if is_weekend_block {
                     "\n- **动作**: 🔁 反转 wick(active hours 08:00-10:45) → **触发下单**\n".to_string()
                 } else if in_active_hours {
                     "\n- **动作**: ⏰ 激活时段(08:00-10:45)仅接受反转 wick → **仅报警,不下单**\n".to_string()
+                } else if current_min_q >= 16 * 60 && current_min_q < 18 * 60 && s.reversal {
+                    // 16:00-18:00 伦敦盘反转也下(用户原话:'16-18 所有单子都下',跟 will_trade 对齐)
+                    // 跟非反转 wick 的 s.ratio ≥ 0.4 路径统一:伦敦盘不限 HQ 都下
+                    // in_london_window 在 will_trade 块内 1085 行才定义,这里用 current_min_q inline 判断等价
+                    "\n- **动作**: 🇬🇧 反转 wick(伦敦盘 16:00-18:00) → **触发下单**\n".to_string()
+                } else if current_min_q >= 20 * 60 && current_min_q < 21 * 60 + 30 && s.reversal {
+                    // 20:00-21:30 反转也下(用户原话:'晚上 20-21:30 也可以做反转')
+                    "\n- **动作**: 🔁 反转 wick(20:00-21:30) → **触发下单**\n".to_string()
                 } else if is_double_wick && !s.reversal && direction_match {
                     "\n- **动作**: 🔁 双 wick → **触发下单**\n".to_string()
                 } else if s.high_quality && volume_pass && direction_match && !s.reversal {
@@ -1189,8 +1197,8 @@ let action_line = if is_weekend_block {
                     // 反转 wick 在其他时段不下单
                     // 例外:
                     //   - 晚上 20:00-21:30 反转 wick 也下(用户原话"晚上 20-21:30 也可以做反转")
-                    //   - 下午 16:00-18:00 伦敦盘 反转 wick 也下(用户原话"16-18 反转也可以")
-                    // 16-18 限定:反转也要 HQ(s.high_quality == true)
+                    //   - 下午 16:00-18:00 伦敦盘 反转 wick 也下(用户原话"16-18 所有单子都下")
+                    // 16-18 跟 in_quiet_hours 16-18 分支一致:任意 wick 不限 HQ 都下(对齐)
                     let rev_start: u32 = std::env::var("REVERSAL_HOURS_START")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(20);
                     let rev_end: u32 = std::env::var("REVERSAL_HOURS_END_MIN")
@@ -1198,9 +1206,9 @@ let action_line = if is_weekend_block {
                     let in_reversal_window = current_min_q >= rev_start * 60
                         && current_min_q < rev_end;
                     // 20:00-21:30 反转窗口:反转即可(不限 HQ)
-                    // 16:00-18:00 伦敦盘:反转 + HQ 都要
-                    let london_reversal_pass = in_london_window && s.high_quality;
-                    in_reversal_window || london_reversal_pass
+                    // 16:00-18:00 伦敦盘:反转也下(不限 HQ,跟非反转 wick 的 s.ratio >= 0.4 路径一致)
+                    // 跟 will_trade 块下面 1085 行 in_london_window 等价(都基于当前北京时间分钟数)
+                    in_reversal_window || (current_min_q >= 16 * 60 && current_min_q < 18 * 60)
                 } else if current_min_q >= 20 * 60 && current_min_q < 21 * 60 + 30 {
                     // 20:00-21:30 所有 wick(不论方向,反转 wick 走前面分支)
                     // 用户原话:'a' — 去掉 !direction_match 条件
