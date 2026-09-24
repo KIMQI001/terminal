@@ -964,6 +964,35 @@ let action_line = if is_weekend_block {
                 } else {
                     "\n- **动作**: 普通 wick → **仅报警,不下单**\n".to_string()
                 };
+                // 成交量倍率展示(纯监控用)— 当前 K 成交量 / 前一根 K 成交量
+                // 用户原话:'监控成交量,报警时加一个标记,前一根 2x 以上'
+                // 阈值通过 REVERSAL_VOLUME_RATIO env 可配,默认 2.0
+                // 仅展示,不动 will_trade 任何过滤逻辑(用户需要再观察一段时间)
+                let vol_ratio_threshold: f64 = std::env::var("REVERSAL_VOLUME_RATIO")
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
+                let volume_ratio_line = if c_snapshot.len() >= 2 {
+                    let prev_c = &c_snapshot[c_snapshot.len() - 2];
+                    let prev_vol = prev_c.volume;
+                    let curr_vol = candle.volume;
+                    if prev_vol > 0.0 {
+                        let ratio = curr_vol / prev_vol;
+                        let mark = if ratio >= vol_ratio_threshold {
+                            format!("✓ ≥ {:.1}x", vol_ratio_threshold)
+                        } else {
+                            format!("✗ < {:.1}x", vol_ratio_threshold)
+                        };
+                        format!(
+                            "\n- **📊 成交量倍率**(当前 K / 前一根 K,纯监控): {:.2}x {} | 当前 {:.2} / 前一根 {:.2}\n",
+                            ratio, mark, curr_vol, prev_vol
+                        )
+                    } else {
+                        format!(
+                            "\n- **📊 成交量倍率**(当前 K / 前一根 K,纯监控): 前一根成交量为 0,跳过\n"
+                        )
+                    }
+                } else {
+                    String::new()
+                };
                 let body = format!(
                     "### 📐 wick SR 触发{}{}{}\n\n\
 - **交易对**: {}\n\
@@ -973,7 +1002,7 @@ let action_line = if is_weekend_block {
 - **zone**: [${:.2}, ${:.2}]\n\
 - **wick 比例**: {:.0}%\n\
 - **层级**: {}\n\
-- **FVG 方向**: {} → {}{}{}{}{}{}",
+- **FVG 方向**: {} → {}{}{}{}{}{}{}",
                     reversal_tag, hq_tag, "".to_string(),
                     symbol,
                     side_label,
@@ -994,7 +1023,8 @@ let action_line = if is_weekend_block {
                     hq_line,
                     action_line,
                     anchor_dist_line,
-                    double_wick_line
+                    double_wick_line,
+                    volume_ratio_line
                 );
                 warn!("new wick SR: {}/{} @ {}", s.side, s.level, s.time);
                 if let Err(e) = broadcast(&notify, &title, &body).await {
