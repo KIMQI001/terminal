@@ -685,6 +685,11 @@ async fn main() -> anyhow::Result<()> {
             // 提到循环外只读一次 env,避免每条 wick 都 parse
             let vol_ratio_threshold: f64 = std::env::var("REVERSAL_VOLUME_RATIO")
                 .ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
+            // wick 最大长度阈值(env 可配,默认 300 USD)— 超过的 wick 不下单
+            // 用户原话:'这种超过 300 点的 wick 就别下单,sr 太远,很容易回测,让我们出局'
+            // 提到循环外只读一次 env
+            let wick_max_usd: f64 = std::env::var("REVERSAL_WICK_MAX_USD")
+                .ok().and_then(|s| s.parse().ok()).unwrap_or(300.0);
             for mut s in signals {
                 // 预算 volume_pass(成交量监控,报警 + will_trade 共用)
                 // 用户原话:'高等级 + 成交量 2x 以上 也是个好信号,把它弄成和双 wick 一样的交易时间'
@@ -926,7 +931,13 @@ let hq_line = if s.high_quality {
                     && s.side == "bearish"
                     && oc_distance > 0.0
                     && oc_distance < oc_distance_threshold;
-let action_line = if is_weekend_block {
+let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
+                    // wick 长度 ≥ 阈值 → SR 太远,易回测,不下单(用户原话:'让我们出局')
+                    format!(
+                        "\n- **动作**: 📏 wick 长度 {:.0} USD ≥ {:.0} USD(太长,易回测)→ **仅报警,不下单**\n",
+                        s.zone_high - s.zone_low, wick_max_usd
+                    )
+                } else if is_weekend_block {
                     "\n- **动作**: 🚫 周末(周六全天 + 周日 20:00 前)流动性差 → **仅报警,暂停下单**\n".to_string()
                 } else if current_min_q == 8 * 60 + 15 {
                     "\n- **动作**: 🔇 8:15 黑名单(日 K 刚开盘,关键位不稳)→ **仅报警,不下单**\n".to_string()
@@ -1105,7 +1116,11 @@ let action_line = if is_weekend_block {
                 // 反向 wick(方向过滤已放行但不会下单)— direction_match 强制 R1/R3 要求同向
                 let direction_match = (s.side == "bullish" && long_only)
                     || (s.side == "bearish" && !long_only);
-                let will_trade = if is_weekend_block {
+                let will_trade = if s.zone_high - s.zone_low >= wick_max_usd {
+                    // wick 长度 ≥ 阈值 → SR 太远,易回测,不下单(用户原话:'让我们出局')
+                    // 跟 action_line 的首条判断对齐,所有时段统一拦截
+                    false
+                } else if is_weekend_block {
                     // 周末(周六全天 + 周日 20:00 前)流动性差,暂停下单
                     false
                 } else if current_min_q == 8 * 60 + 15 {
