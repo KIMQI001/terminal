@@ -681,7 +681,26 @@ async fn main() -> anyhow::Result<()> {
             let mut last_wick_lock = last_wick.lock().await;
             // 读 1D 锚点数据(启动时 fetch 一次,这里只读)
             let anchor_data = (*daily_anchor.lock().await).clone();
+            // 成交量阈值(env 可配,默认 2.0)— 报警展示 + will_trade 新规则共用
+            // 提到循环外只读一次 env,避免每条 wick 都 parse
+            let vol_ratio_threshold: f64 = std::env::var("REVERSAL_VOLUME_RATIO")
+                .ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
             for mut s in signals {
+                // 预算 volume_pass(成交量监控,报警 + will_trade 共用)
+                // 用户原话:'高等级 + 成交量 2x 以上 也是个好信号,把它弄成和双 wick 一样的交易时间'
+                // 复用:报警展示(显示 Nx ✓/✗)+ will_trade 新规则(s.high_quality && volume_pass && direction_match → 下单)
+                let (curr_vol, prev_vol, volume_pass) = if c_snapshot.len() >= 2 {
+                    let prev_vol = c_snapshot[c_snapshot.len() - 2].volume;
+                    let curr_vol = candle.volume;
+                    if prev_vol > 0.0 {
+                        let ratio = curr_vol / prev_vol;
+                        (curr_vol, prev_vol, ratio >= vol_ratio_threshold)
+                    } else {
+                        (curr_vol, prev_vol, false)
+                    }
+                } else {
+                    (0.0, 0.0, false)
+                };
                 // 预算 nearest_distance(方向过滤之前算)— 用于判断反向 wick 是否近 1D 关键位
                 let mut nearest_distance: f64 = f64::INFINITY;
                 if let Some(anchor) = anchor_data.as_ref() {
@@ -938,6 +957,13 @@ let action_line = if is_weekend_block {
                     "\n- **动作**: ⏰ 激活时段(08:00-10:45)仅接受反转 wick → **仅报警,不下单**\n".to_string()
                 } else if is_double_wick && !s.reversal && direction_match {
                     "\n- **动作**: 🔁 双 wick → **触发下单**\n".to_string()
+                } else if s.high_quality && volume_pass && direction_match && !s.reversal {
+                    // HQ + 成交量 ≥ 2x + 方向匹配(交易时间跟双 wick 一样)
+                    // 用户原话:'高等级 + 成交量 2x 以上 也是个好信号,把它弄成和双 wick 一样的交易时间'
+                    format!(
+                        "\n- **动作**: 📊 HQ + 成交量 ≥ {:.1}x → **触发下单**\n",
+                        vol_ratio_threshold
+                    )
                 } else if s.reversal {
                     "\n- **动作**: 🔁 反转 wick → **仅报警,不下单**(反转 wick 已禁用下单)\n".to_string()
                 } else if !direction_match && nearest_distance < 85.0 {
@@ -966,17 +992,11 @@ let action_line = if is_weekend_block {
                 };
                 // 成交量倍率展示(纯监控用)— 当前 K 成交量 / 前一根 K 成交量
                 // 用户原话:'监控成交量,报警时加一个标记,前一根 2x 以上'
-                // 阈值通过 REVERSAL_VOLUME_RATIO env 可配,默认 2.0
-                // 仅展示,不动 will_trade 任何过滤逻辑(用户需要再观察一段时间)
-                let vol_ratio_threshold: f64 = std::env::var("REVERSAL_VOLUME_RATIO")
-                    .ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
+                // 复用 for 循环顶部预算的 curr_vol / prev_vol / volume_pass,避免重复算
                 let volume_ratio_line = if c_snapshot.len() >= 2 {
-                    let prev_c = &c_snapshot[c_snapshot.len() - 2];
-                    let prev_vol = prev_c.volume;
-                    let curr_vol = candle.volume;
                     if prev_vol > 0.0 {
                         let ratio = curr_vol / prev_vol;
-                        let mark = if ratio >= vol_ratio_threshold {
+                        let mark = if volume_pass {
                             format!("✓ ≥ {:.1}x", vol_ratio_threshold)
                         } else {
                             format!("✗ < {:.1}x", vol_ratio_threshold)
@@ -986,9 +1006,7 @@ let action_line = if is_weekend_block {
                             ratio, mark, curr_vol, prev_vol
                         )
                     } else {
-                        format!(
-                            "\n- **📊 成交量倍率**(当前 K / 前一根 K,纯监控): 前一根成交量为 0,跳过\n"
-                        )
+                        "\n- **📊 成交量倍率**(当前 K / 前一根 K,纯监控): 前一根成交量为 0,跳过\n".to_string()
                     }
                 } else {
                     String::new()
@@ -1197,14 +1215,18 @@ let action_line = if is_weekend_block {
                     if current_min_q >= 16 * 60 && current_min_q < 18 * 60 {
                         s.ratio >= 0.4
                     } else {
-                        // 其他安静时段:仅 R3(双 wick)且同向
-                        is_double_wick && direction_match
+                        // 其他安静时段:R3 双 wick + R4(HQ + 成交量 ≥ 阈值),均需同向
+                        // 跟双 wick 一样的交易时间(HQ + 成交量 2x 也是个好信号)
+                        (is_double_wick || (s.high_quality && volume_pass))
+                            && direction_match
+                            && !s.reversal
                     }
                 } else {
-                    // 正常时段:三规则并行
+                    // 正常时段:四规则并行
                     (near_key_level && s.high_quality && direction_match)
                     || hq_same_direction
                     || (is_double_wick && direction_match)
+                    || (s.high_quality && volume_pass && direction_match && !s.reversal)
                 };
                 if will_trade && std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {
                     let api_key = std::env::var("BINANCE_API_KEY").unwrap_or_default();
