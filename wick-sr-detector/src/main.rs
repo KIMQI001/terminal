@@ -690,6 +690,11 @@ async fn main() -> anyhow::Result<()> {
             // 提到循环外只读一次 env
             let wick_max_usd: f64 = std::env::var("REVERSAL_WICK_MAX_USD")
                 .ok().and_then(|s| s.parse().ok()).unwrap_or(300.0);
+            // R5 短 wick 侧:实体小(body < 阈值)的实体最大 USD 值(env 可配,默认 50)
+            // 用户原话:'一般看到这种实体很小,两边都有的,且不是反转的,应该选 wick 短的那一个方向'
+            // 提到循环外只读一次 env
+            let short_wick_body_max_usd: f64 = std::env::var("SHORT_WICK_BODY_MAX_USD")
+                .ok().and_then(|s| s.parse().ok()).unwrap_or(50.0);
             for mut s in signals {
                 // 预算 volume_pass(成交量监控,报警 + will_trade 共用)
                 // 用户原话:'高等级 + 成交量 2x 以上 也是个好信号,把它弄成和双 wick 一样的交易时间'
@@ -706,6 +711,26 @@ async fn main() -> anyhow::Result<()> {
                 } else {
                     (0.0, 0.0, false)
                 };
+                // 预算 R5 短 wick 侧:实体小 + 双边都有影线 + 非反转 + 当前 wick 是较短的那侧
+                // 用户原话:'一般看到这种实体很小,两边都有的,且不是反转的,应该选 wick 短的那一个方向,这个应该下s'
+                // 语义:wick 短的那侧代表市场倾向(body 不会被拉到那一边),顺势入场
+                // - 上影短 → 卖压试探一下就被压回 → 偏多 → 做多(S)
+                // - 下影短 → 买盘试探一下就被拉回 → 偏空 → 做空(R)
+                // 复用:报警展示(显示 wick 长/短比)+ will_trade R5 规则
+                let body_top_k = candle.open.max(candle.close);
+                let body_bottom_k = candle.open.min(candle.close);
+                let upper_wick_len = candle.high - body_top_k;
+                let lower_wick_len = body_bottom_k - candle.low;
+                let body_size_k = (candle.close - candle.open).abs();
+                let small_body_k = body_size_k < short_wick_body_max_usd;
+                let has_both_wicks_k = upper_wick_len > 0.0 && lower_wick_len > 0.0;
+                let curr_wick_len = s.zone_high - s.zone_low;
+                let other_wick_len = if s.side == "bearish" { lower_wick_len } else { upper_wick_len };
+                // 当前 wick ≤ 另一侧 wick → 当前是短 wick 侧
+                let is_short_wick_setup = small_body_k
+                    && has_both_wicks_k
+                    && !s.reversal
+                    && curr_wick_len <= other_wick_len;
                 // 预算 nearest_distance(方向过滤之前算)— 用于判断反向 wick 是否近 1D 关键位
                 let mut nearest_distance: f64 = f64::INFINITY;
                 if let Some(anchor) = anchor_data.as_ref() {
@@ -976,6 +1001,14 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                     "\n- **动作**: 🔁 反转 wick(20:00-21:30) → **触发下单**\n".to_string()
                 } else if is_double_wick && !s.reversal && direction_match {
                     "\n- **动作**: 🔁 双 wick → **触发下单**\n".to_string()
+                } else if is_short_wick_setup {
+                    // R5 实体小 + 双边都有影线 + 非反转 + 短 wick 侧 → 下单
+                    // 用户原话:'一般看到这种实体很小,两边都有的,且不是反转的,应该选 wick 短的那一个方向,这个应该下s'
+                    // 显示当前 wick / 另一侧 wick 比对,便于验证哪一侧是短 wick
+                    format!(
+                        "\n- **动作**: 📏 短 wick 侧(doji+双边影线,wick={:.0}/{:.0} USD,当前是短侧)→ **触发下单**\n",
+                        curr_wick_len, other_wick_len
+                    )
                 } else if s.high_quality && volume_pass && direction_match && !s.reversal {
                     // HQ + 成交量 ≥ 2x + 方向匹配(交易时间跟双 wick 一样)
                     // 用户原话:'高等级 + 成交量 2x 以上 也是个好信号,把它弄成和双 wick 一样的交易时间'
@@ -1230,6 +1263,11 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                     // 之前:只反向 wick 下单
                     // 现在:同向 + 反向 + 反转 wick(反转 wick 走前面分支)都下
                     // 配合 TP=700 规则:这个时段所有 wick 都按'大行情'处理
+                    true
+                } else if is_short_wick_setup {
+                    // R5 短 wick 侧:实体小 + 双边都有影线 + 非反转 + 当前 wick 是较短的那侧
+                    // 用户原话:'一般看到这种实体很小,两边都有的,且不是反转的,应该选 wick 短的那一个方向,这个应该下s'
+                    // 优先级:反转 wick 之后 / 20:00-21:30 之后(它已经无条件 true);安静时段 + 正常时段都适用
                     true
                 } else if in_quiet_hours {
                     // 16:00-18:00 伦敦盘窗口强制:s.ratio ≥ 0.4(等价于 check_wick_threshold 通过)
