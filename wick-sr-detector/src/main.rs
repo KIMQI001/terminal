@@ -172,6 +172,13 @@ async fn main() -> anyhow::Result<()> {
         info!("initial detection: {} wick zones", sigs.len());
         sigs
     };
+    // ===== MTF 5m 初始检测(同 15m)=====
+    let signals_5m: Vec<crate::types::WickSR> = {
+        let c5 = candles_5m.lock().await;
+        let sigs = detect_wick_sr(&c5, &[], &detect_options);
+        info!("[MTF 5m] initial detection: {} wick zones", sigs.len());
+        sigs
+    };
 
     // 启动时如果配置了 DINGTALK_WEBHOOK 或 Telegram,发个启动通知(含最近的 wick)
     info!(
@@ -197,6 +204,24 @@ async fn main() -> anyhow::Result<()> {
                 )
             }
             None => "\n\n### 📌 历史回溯中未发现 wick SR".to_string(),
+        };
+        // ===== 5m 历史最近一个 wick(同 15m 格式)=====
+        let latest_5m = signals_5m.iter().max_by_key(|s| s.time);
+        let wick_5m_section = match latest_5m {
+            Some(w) => {
+                let arrow = if w.side == "bullish" { "↑" } else { "↓" };
+                let side_label = if w.side == "bullish" { "支撑 S" } else { "阻力 R" };
+                let reversal_tag = if w.reversal { " 🔄反转" } else { "" };
+                let hq_tag = if w.high_quality { " ⭐高等级" } else { "" };
+                let time_str = format_beijing_time(w.time);
+                format!(
+                    "\n\n### 📌 5m 历史最近一个 wick\n\n- **方向**: {} {}{}{}\n- **level**: ${:.2}\n- **zone**: [${:.2}, ${:.2}]\n- **wick 比例**: {:.0}%\n- **层级**: {}\n- **time(北京时间)**: {}",
+                    arrow, side_label, reversal_tag, hq_tag,
+                    w.level, w.zone_low, w.zone_high,
+                    w.ratio * 100.0, w.tier, time_str,
+                )
+            }
+            None => "\n\n### 📌 5m 历史回溯中未发现 wick SR".to_string(),
         };
         let auto_trade = if std::env::var("BINANCE_API_KEY")
             .ok()
@@ -334,10 +359,10 @@ async fn main() -> anyhow::Result<()> {
 - **回溯**: {} 根 K\n\
 - **Wick 阈值**: {:.2}\n\
 - **反转回溯**: {} 根\n\
-- **自动下单**: {}{}{}{}{}{}",
+- **自动下单**: {}{}{}{}{}{}{}",
             binance_config.symbol, binance_config.timeframe,
             lookback, detect_options.wick_ratio,
-            detect_options.reversal_lookback, auto_trade, leverage_section, wick_section, fvg_section, sr_fallback_section, anchor_section
+            detect_options.reversal_lookback, auto_trade, leverage_section, wick_section, wick_5m_section, fvg_section, sr_fallback_section, anchor_section
         );
         debug!("startup body =\n{}", &body);
         match broadcast(&notify_config, "wick-sr-detector 启动", &body).await {
