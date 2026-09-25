@@ -142,6 +142,21 @@ async fn main() -> anyhow::Result<()> {
         *c = historical;
     }
 
+    // ===== MTF 5m 双流 =====
+    // 5m BinanceConfig:同 symbol,timeframe="5m",用于跨周期一致性确认
+    // 抛弃 last_5m_signals 缓存,15m close 时主动按 close time 找对应的 5m K
+    let binance_config_5m = BinanceConfig {
+        timeframe: "5m".to_string(),
+        ..binance_config.clone()
+    };
+    let candles_5m: Arc<Mutex<Vec<types::Candle>>> = Arc::new(Mutex::new(Vec::new()));
+    let historical_5m = binance::fetch_klines(&binance_config_5m, lookback).await?;
+    info!(
+        "[MTF 5m] loaded {} historical 5m klines",
+        historical_5m.len()
+    );
+    *candles_5m.lock().await = historical_5m;
+
     // 初始检测 + 报警
     // reported: HashMap<(candle_time, side), 报警 unix 秒>
     // 同一信号在 cooldown_secs 内不重复报警 + 下单
@@ -527,6 +542,46 @@ async fn main() -> anyhow::Result<()> {
 
     // 给 stream_klines 闭包一个独立的 binance_config 副本(便于 8:00 force 重算 daily_anchor)
     let binance_config_for_closure = binance_config.clone();
+
+    // ===== 启动 5m WS task(独立 task 跟 15m 并行)=====
+    // 闭包内只更新 candles_5m(同 15m 现有逻辑:if last.time == candle.time 替换,否则 push)
+    // 5m detector 在 15m close 触发时才跑(check_mtf_5m_match),不维护缓存
+    let candles_5m_for_task = candles_5m.clone();
+    let binance_config_5m_for_task = binance_config_5m.clone();
+    tokio::spawn(async move {
+        let _ = binance::stream_klines(&binance_config_5m_for_task, move |candle_5m, is_closed_5m| {
+            let candles_5m = candles_5m_for_task.clone();
+            async move {
+                let mut c = candles_5m.lock().await;
+                if let Some(last) = c.last_mut() {
+                    if last.time == candle_5m.time {
+                        *last = candle_5m.clone();
+                    } else {
+                        c.push(candle_5m.clone());
+                    }
+                } else {
+                    c.push(candle_5m.clone());
+                }
+                // 调试日志:5m K close 时记录(便于复盘 5m 推送时序)
+                if is_closed_5m {
+                    info!(
+                        "[MTF 5m] 5m K close → t={} close_time={} o={} h={} l={} c={} v={}",
+                        candle_5m.time,
+                        candle_5m.time + 5 * 60,
+                        candle_5m.open,
+                        candle_5m.high,
+                        candle_5m.low,
+                        candle_5m.close,
+                        candle_5m.volume
+                    );
+                }
+            }
+        })
+        .await;
+    });
+
+    // 15m 闭包 capture candles_5m(克隆 Arc 引用)
+    let candles_5m_for_15m = candles_5m.clone();
     binance::stream_klines(&binance_config, move |candle, is_closed| {
         let candles = candles_clone.clone();
         let reported = reported_clone.clone();
@@ -536,6 +591,7 @@ async fn main() -> anyhow::Result<()> {
         let opts = detect_options_clone.clone();
         let symbol = symbol.clone();
         let binance_config = binance_config_for_closure.clone();
+        let candles_5m = candles_5m_for_15m.clone();
         async move {
             // 更新最后一根 K(收盘就 append,进行中就 update 最后一根)
             {
@@ -956,6 +1012,10 @@ let hq_line = if s.high_quality {
                     && s.side == "bearish"
                     && oc_distance > 0.0
                     && oc_distance < oc_distance_threshold;
+                // ===== MTF 5m 一致性检查(close time 对齐)=====
+                // 主动按 close time 找对应的 5m K,跑 detector 判定同向
+                // 抛弃了之前的 last_5m_signals 缓存(有竞争窗口,导致误判)
+                let mtf_result = check_mtf_5m_match(candle.time, &s.side, &candles_5m, &opts).await;
 let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                     // wick 长度 ≥ 阈值 → SR 太远,易回测,不下单(用户原话:'让我们出局')
                     format!(
@@ -1063,6 +1123,21 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                 } else {
                     String::new()
                 };
+                // MTF 5m 一致性显示(close time 对齐):15m will_trade=true 时,5m 最后一根 K 是否有同向 wick
+                let mtf_5m_line = match &mtf_result {
+                    MtfResult::Match(detail) => format!(
+                        "\n- **🔍 MTF 5m 一致性**: ✅ 重合(5m K close_time={} 有同向 wick:{})→ 下单\n",
+                        candle.time + 15*60, detail
+                    ),
+                    MtfResult::Mismatch(detail) => format!(
+                        "\n- **🔍 MTF 5m 一致性**: ❌ 5m K close_time={} 无同向 wick({})→ 15m 单信号不下单\n",
+                        candle.time + 15*60, detail
+                    ),
+                    MtfResult::Unavailable(detail) => format!(
+                        "\n- **🔍 MTF 5m 一致性**: ⚠️ {} → 保守不下单\n",
+                        detail
+                    ),
+                };
                 let body = format!(
                     "### 📐 wick SR 触发{}{}{}\n\n\
 - **交易对**: {}\n\
@@ -1072,7 +1147,7 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
 - **zone**: [${:.2}, ${:.2}]\n\
 - **wick 比例**: {:.0}%\n\
 - **层级**: {}\n\
-- **FVG 方向**: {} → {}{}{}{}{}{}{}",
+- **FVG 方向**: {} → {}{}{}{}{}{}{}{}",
                     reversal_tag, hq_tag, "".to_string(),
                     symbol,
                     side_label,
@@ -1094,7 +1169,8 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                     action_line,
                     anchor_dist_line,
                     double_wick_line,
-                    volume_ratio_line
+                    volume_ratio_line,
+                    mtf_5m_line
                 );
                 warn!("new wick SR: {}/{} @ {}", s.side, s.level, s.time);
                 if let Err(e) = broadcast(&notify, &title, &body).await {
@@ -1288,6 +1364,14 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                     || hq_same_direction
                     || (is_double_wick && direction_match)
                     || (s.high_quality && volume_pass && direction_match && !s.reversal)
+                };
+                // ===== MTF 5m 一致性覆盖(用前面算的 mtf_result)=====
+                // - Match:5m 有同向 wick → 保留 will_trade
+                // - Mismatch/Unavailable:5m 反向或数据缺失 → 保守不下单
+                // 早 return 分支(wick 太长/周末/8:15)的 will_trade 已是 false,MTF 即便 Match 也保持 false(避免误报"5m 否决 15m")
+                let will_trade = match &mtf_result {
+                    MtfResult::Match(_) => will_trade,
+                    MtfResult::Mismatch(_) | MtfResult::Unavailable(_) => false,
                 };
                 if will_trade && std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {
                     let api_key = std::env::var("BINANCE_API_KEY").unwrap_or_default();
@@ -1522,6 +1606,79 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
             }
         }
     }).await?;
+
+// ===== MTF 5m 一致性检查(close time 对齐)=====
+// 修复之前 last_5m_signals 缓存导致的时序 bug:
+// 15m close 触发时,主动按 close time 从 candles_5m 数组找对应的 5m K,跑 detector 判定同向
+enum MtfResult {
+    Match(String),         // 5m 有同向 wick
+    Mismatch(String),      // 5m 有 wick 但反向 / 无 wick
+    Unavailable(String),   // 5m 数据缺失(找不到 close time 对齐的 K)
+}
+
+async fn check_mtf_5m_match(
+    candle_15m_time: i64,
+    fifteen_side: &str,
+    candles_5m: &Arc<Mutex<Vec<types::Candle>>>,
+    opts: &DetectOptions,
+) -> MtfResult {
+    // 15m K 的 time 是 open 时刻;15m K close time = time + 15min
+    let fifteen_close_time = candle_15m_time + 15 * 60;
+    // 对应的 5m K 是 15m K 区间最后 5min:open_time = candle.time + 10min,close_time = +15min
+    let target_5m_open_time = candle_15m_time + 10 * 60;
+    let target_5m_close_time = target_5m_open_time + 5 * 60; // = fifteen_close_time
+    let snapshot = candles_5m.lock().await.clone();
+    // 找 close time 对齐的 5m K(等价于 c.time == target_5m_open_time)
+    let target_idx = match snapshot.iter().position(|c| c.time == target_5m_open_time) {
+        Some(i) => i,
+        None => {
+            warn!(
+                "[MTF 5m] 15m close_time={} (open={}) → 5m open_time={} (close={}) 未找到(5m 数据滞后或缺失)",
+                fifteen_close_time, candle_15m_time, target_5m_open_time, target_5m_close_time
+            );
+            return MtfResult::Unavailable(format!(
+                "5m K 缺失(对应 15m close_time={})",
+                fifteen_close_time
+            ));
+        }
+    };
+    // 显式验证 5m K close_time 等于 fifteen_close_time(防止数据错乱)
+    let actual_5m_close = snapshot[target_idx].time + 5 * 60;
+    if actual_5m_close != fifteen_close_time {
+        warn!(
+            "[MTF 5m] 5m K time={} close_time={} 与 15m close_time={} 不一致",
+            snapshot[target_idx].time, actual_5m_close, fifteen_close_time
+        );
+        return MtfResult::Unavailable(format!(
+            "5m close_time={} ≠ 15m close_time={}",
+            actual_5m_close, fifteen_close_time
+        ));
+    }
+    // 构造 lookback 切片供 detector 跑反转判定
+    let lookback_n = (opts.reversal_lookback as usize).max(3);
+    let start_idx = target_idx.saturating_sub(lookback_n);
+    let slice: Vec<types::Candle> = snapshot[start_idx..=target_idx].to_vec();
+    let sigs_5m = detector::detect_wick_sr_for_last(&slice, opts);
+    let detail = format!(
+        "5m close_time={} sigs=[{}]",
+        target_5m_close_time,
+        sigs_5m
+            .iter()
+            .map(|s| format!(
+                "{}{:.0}%{}",
+                if s.side == "bullish" { "S" } else { "R" },
+                s.ratio * 100.0,
+                if s.high_quality { "★" } else { "" }
+            ))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    if sigs_5m.iter().any(|s| s.side == fifteen_side) {
+        MtfResult::Match(detail)
+    } else {
+        MtfResult::Mismatch(detail)
+    }
+}
 
     Ok(())
 }
