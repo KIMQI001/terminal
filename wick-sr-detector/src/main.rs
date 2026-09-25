@@ -1123,14 +1123,15 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                 } else {
                     String::new()
                 };
-                // MTF 5m 一致性显示(close time 对齐):15m will_trade=true 时,5m 最后一根 K 是否有同向 wick
+                // MTF 5m 一致性显示(close time 对齐 + 完整 5m 详情)
+                // detail 已包含 5m K 的 OHLCV + 每个 wick signal 全部字段
                 let mtf_5m_line = match &mtf_result {
                     MtfResult::Match(detail) => format!(
-                        "\n- **🔍 MTF 5m 一致性**: ✅ 重合(5m K close_time={} 有同向 wick:{})→ 下单\n",
+                        "\n- **🔍 MTF 5m 一致性**: ✅ 重合(15m close_time={} 与 5m 同向)→ 下单\n  - {}\n",
                         candle.time + 15*60, detail
                     ),
                     MtfResult::Mismatch(detail) => format!(
-                        "\n- **🔍 MTF 5m 一致性**: ❌ 5m K close_time={} 无同向 wick({})→ 15m 单信号不下单\n",
+                        "\n- **🔍 MTF 5m 一致性**: ❌ 5m K 无同向 wick(15m close_time={})→ 15m 单信号不下单\n  - {}\n",
                         candle.time + 15*60, detail
                     ),
                     MtfResult::Unavailable(detail) => format!(
@@ -1659,19 +1660,44 @@ async fn check_mtf_5m_match(
     let start_idx = target_idx.saturating_sub(lookback_n);
     let slice: Vec<types::Candle> = snapshot[start_idx..=target_idx].to_vec();
     let sigs_5m = detector::detect_wick_sr_for_last(&slice, opts);
+    // 详细 detail:5m K 完整 OHLCV + 每个 wick signal 的全部字段
+    let target_5m = &snapshot[target_idx];
+    let wick_details: Vec<String> = sigs_5m
+        .iter()
+        .map(|s| {
+            let side_name = if s.side == "bullish" { "支撑 S" } else { "阻力 R" };
+            let tier_name = if s.side == "bullish" {
+                format!("S{}", s.tier)
+            } else {
+                format!("R{}", s.tier)
+            };
+            let rev_tag = if s.reversal { " 🔄反转" } else { "" };
+            let hq_tag = if s.high_quality {
+                format!(" ⭐HQ({})", s.high_quality_reason)
+            } else {
+                String::new()
+            };
+            format!(
+                "{}[{}]: ratio={:.0}% level=${:.2} zone=[${:.2}, ${:.2}]{}{}",
+                side_name, tier_name, s.ratio * 100.0, s.level, s.zone_low, s.zone_high, rev_tag, hq_tag
+            )
+        })
+        .collect();
+    let wicks_str = if wick_details.is_empty() {
+        "无".to_string()
+    } else {
+        wick_details.join(" | ")
+    };
     let detail = format!(
-        "5m close_time={} sigs=[{}]",
+        "5m K close_time={} 北京 {} | K线 O=${:.2} H=${:.2} L=${:.2} C=${:.2} V={:.2} | wicks: {}",
         target_5m_close_time,
-        sigs_5m
-            .iter()
-            .map(|s| format!(
-                "{}{:.0}%{}",
-                if s.side == "bullish" { "S" } else { "R" },
-                s.ratio * 100.0,
-                if s.high_quality { "★" } else { "" }
-            ))
-            .collect::<Vec<_>>()
-            .join(", ")
+        format_beijing_time(target_5m_close_time),
+        target_5m.open,
+        target_5m.high,
+        target_5m.low,
+        target_5m.close,
+        target_5m.volume,
+        wicks_str
     );
     if sigs_5m.iter().any(|s| s.side == fifteen_side) {
         MtfResult::Match(detail)
