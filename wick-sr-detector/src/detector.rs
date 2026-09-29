@@ -107,7 +107,7 @@ pub fn detect_wick_sr(
         // wick_ratio(默认 0.4)仍是 effective 下限:< 40% 不触发
         let upper_wick_strong = upper_ratio >= 0.60;
         let upper_wick_conditional =
-            upper_ratio >= 0.40 && upper_ratio < 0.60 && lower_ratio > 0.10;
+            upper_ratio >= 0.40 && upper_ratio < 0.60 && lower_ratio > 0.15;
         if upper_wick_strong || upper_wick_conditional {
             let level = (body_top + c.high) / 2.0;
             let zone_low = body_top;
@@ -151,7 +151,7 @@ pub fn detect_wick_sr(
         // 长影 40-60% range → 另一头影 > 10% range 才触发
         let lower_wick_strong = lower_ratio >= 0.60;
         let lower_wick_conditional =
-            lower_ratio >= 0.40 && lower_ratio < 0.60 && upper_ratio > 0.10;
+            lower_ratio >= 0.40 && lower_ratio < 0.60 && upper_ratio > 0.15;
         if lower_wick_strong || lower_wick_conditional {
             let level = (c.low + body_bottom) / 2.0;
             let zone_low = c.low;
