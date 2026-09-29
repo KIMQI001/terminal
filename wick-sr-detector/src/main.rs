@@ -1352,7 +1352,7 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                     let rev_start: u32 = std::env::var("REVERSAL_HOURS_START")
                         .ok().and_then(|s| s.parse().ok()).unwrap_or(20);
                     let rev_end: u32 = std::env::var("REVERSAL_HOURS_END_MIN")
-                        .ok().and_then(|s| s.parse().ok()).unwrap_or(21 * 60 + 30);
+                        .ok().and_then(|s| s.parse().ok()).unwrap_or(21 * 60 + 35);
                     let in_reversal_window = current_min_q >= rev_start * 60
                         && current_min_q < rev_end;
                     // 20:00-21:30 反转窗口:反转即可(不限 HQ)
