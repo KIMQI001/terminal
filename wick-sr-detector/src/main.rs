@@ -69,7 +69,7 @@ fn protective_tp_usd_dynamic(user_override: Option<f64>) -> f64 {
         return 400.0;
     }
     // quiet hours:22:45-7:30 跨午夜,18:00-20:00,10:45-16:00(避开伦敦盘)
-    let quiet1_start: u32 = 22 * 60 + 45;
+    let quiet1_start: u32 = 22 * 60 + 50;
     let quiet1_end: u32 = 7 * 60 + 30;
     let quiet2_start: u32 = 10 * 60 + 45;
     let quiet2_end: u32 = 16 * 60;  // 改:quiet2 改成 10:45-16:00(避开 16-18 伦敦盘)
@@ -398,7 +398,7 @@ async fn main() -> anyhow::Result<()> {
             .ok().and_then(|s| s.parse().ok());
         // quiet hours 配置(跟主路径一致)
         let quiet1_start: u32 = std::env::var("QUIET_HOURS_1_START_MIN")
-            .ok().and_then(|s| s.parse().ok()).unwrap_or(22 * 60 + 45);
+            .ok().and_then(|s| s.parse().ok()).unwrap_or(22 * 60 + 50);
         let quiet1_end: u32 = std::env::var("QUIET_HOURS_1_END_MIN")
             .ok().and_then(|s| s.parse().ok()).unwrap_or(7 * 60 + 30);
         let quiet2_start: u32 = std::env::var("QUIET_HOURS_2_START_MIN")
@@ -986,7 +986,7 @@ let hq_line = if s.high_quality {
                 // 安静时段判定(默认 22:45-隔日 07:30 北京,跨午夜)
 // 这里提前算:给 action_line / will_trade / 报警 body 共用
                 let quiet_start: u32 = std::env::var("QUIET_HOURS_START_MIN")
-                    .ok().and_then(|s| s.parse().ok()).unwrap_or(22 * 60 + 45);  // 22:45
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(22 * 60 + 50);  // 22:50
                 let quiet_end: u32 = std::env::var("QUIET_HOURS_END_MIN")
                     .ok().and_then(|s| s.parse().ok()).unwrap_or(8 * 60);   // 08:00
                 // current_min 在后面 will_trade 块算,这里复用先算的 now_beijing
