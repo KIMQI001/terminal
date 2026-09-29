@@ -1076,8 +1076,8 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                     "\n- **动作**: 🔁 反转 wick(active hours 08:00-10:45) → **触发下单**\n".to_string()
                 } else if in_active_hours {
                     "\n- **动作**: ⏰ 激活时段(08:00-10:45)仅接受反转 wick → **仅报警,不下单**\n".to_string()
-                } else if current_min_q >= 16 * 60 && current_min_q < 18 * 60 && s.reversal {
-                    // 16:00-18:00 伦敦盘反转也下(用户原话:'16-18 所有单子都下',跟 will_trade 对齐)
+                } else if current_min_q >= 16 * 60 && current_min_q < 20 * 60 && s.reversal {
+                    // 16:00-20:00 伦敦盘反转也下(用户原话:'16-18 所有单子都下',跟 will_trade 对齐)
                     // 跟非反转 wick 的 s.ratio ≥ 0.4 路径统一:伦敦盘不限 HQ 都下
                     // in_london_window 在 will_trade 块内 1085 行才定义,这里用 current_min_q inline 判断等价
                     "\n- **动作**: 🇬🇧 反转 wick(伦敦盘 16:00-18:00) → **触发下单**\n".to_string()
@@ -1108,10 +1108,10 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                 } else if in_quiet_hours {
                     // 16:00-18:00 伦敦盘窗口强制:wick_ratio ≥ 0.4 就下(用户原话'b')
                     // 跟 8:00 强制一样逻辑,不要求 HQ + 方向匹配
-                    if current_min_q >= 16 * 60 && current_min_q < 18 * 60 {
+                    if current_min_q >= 16 * 60 && current_min_q < 20 * 60 {
                         if s.ratio >= 0.4 {
                             format!(
-                                "\n- **动作**: 🇬🇧 伦敦盘(16:00-18:00)wick ≥ 0.4 → **触发下单**"
+                                "\n- **动作**: 🇬🇧 伦敦盘(16:00-20:00)wick ≥ 0.4 → **触发下单**"
                             )
                         } else {
                             "\n- **动作**: 🔇 安静时段(16:00-18:00 伦敦盘)普通 K → **仅报警,不下单**\n".to_string()
@@ -1218,7 +1218,7 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                 let london_hour_start: u32 = std::env::var("LONDON_HOUR_START")
                     .ok().and_then(|s| s.parse().ok()).unwrap_or(16);
                 let london_hour_end_min: u32 = std::env::var("LONDON_HOUR_END_MIN")
-                    .ok().and_then(|s| s.parse().ok()).unwrap_or(18 * 60);
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(20 * 60);
                 let now_beijing = chrono::Utc::now() + chrono::Duration::hours(8);
                 // 当前分钟数 = HH*60 + MM(修复前用 `.fold(|acc, n| acc*100 + n)` 错算成 HHMM,
                 // 如 20:30 → 2030,跟区间 [start*60, end_min) 比较数学不对位,
@@ -1358,7 +1358,7 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                     // 20:00-21:30 反转窗口:反转即可(不限 HQ)
                     // 16:00-18:00 伦敦盘:反转也下(不限 HQ,跟非反转 wick 的 s.ratio >= 0.4 路径一致)
                     // 跟 will_trade 块下面 1085 行 in_london_window 等价(都基于当前北京时间分钟数)
-                    in_reversal_window || (current_min_q >= 16 * 60 && current_min_q < 18 * 60)
+                    in_reversal_window || (current_min_q >= 16 * 60 && current_min_q < 20 * 60)
                 } else if current_min_q >= 20 * 60 && current_min_q < 21 * 60 + 30 {
                     // 20:00-21:30 所有 wick(不论方向,反转 wick 走前面分支)
                     // 用户原话:'a' — 去掉 !direction_match 条件
@@ -1375,7 +1375,7 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                     // 16:00-18:00 伦敦盘窗口强制:s.ratio ≥ 0.4(等价于 check_wick_threshold 通过)
                     // detector::detect_wick_sr 已用分档阈值过滤 wicks
                     // 进入 will_trade 入口的 wicks 都满足 ≥ 0.4,无需重复判定分档
-                    if current_min_q >= 16 * 60 && current_min_q < 18 * 60 {
+                    if current_min_q >= 16 * 60 && current_min_q < 20 * 60 {
                         s.ratio >= 0.4
                     } else {
                         // 其他安静时段:R3 双 wick + R4(HQ + 成交量 ≥ 阈值),均需同向
@@ -1560,9 +1560,9 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                             entry_price - 700.0
                         }
                     } else if in_quiet_hours {
-                        // 16:00-18:00 伦敦盘:TP=400(用户原话'400点')
+                        // 16:00-20:00 伦敦盘:TP=400(用户原话'400点')
                         // 其他安静时段:TP=200
-                        if current_min_q >= 16 * 60 && current_min_q < 18 * 60 {
+                        if current_min_q >= 16 * 60 && current_min_q < 20 * 60 {
                             if s.side == "bullish" {
                                 entry_price + 400.0
                             } else {
