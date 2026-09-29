@@ -104,7 +104,8 @@ pub fn detect_wick_sr(
         // 用户原话:'加条件,如果影线在 40-60%区间内,另一头影线必须大于 10%,如果大于 60%,则不用管另一头'
         // 长影 ≥ 60% range → 任何 wick 都触发(不用管另一头)
         // 长影 40-60% range → 另一头影 > 10% range 才触发
-        let upper_wick_strong = upper_ratio >= options.wick_ratio;
+        // wick_ratio(默认 0.4)仍是 effective 下限:< 40% 不触发
+        let upper_wick_strong = upper_ratio >= 0.60;
         let upper_wick_conditional =
             upper_ratio >= 0.40 && upper_ratio < 0.60 && lower_ratio > 0.10;
         if upper_wick_strong || upper_wick_conditional {
@@ -148,7 +149,7 @@ pub fn detect_wick_sr(
         // 用户原话:'加条件,如果影线在 40-60%区间内,另一头影线必须大于 10%'
         // 长影 ≥ 60% range → 任何 wick 都触发
         // 长影 40-60% range → 另一头影 > 10% range 才触发
-        let lower_wick_strong = lower_ratio >= options.wick_ratio;
+        let lower_wick_strong = lower_ratio >= 0.60;
         let lower_wick_conditional =
             lower_ratio >= 0.40 && lower_ratio < 0.60 && upper_ratio > 0.10;
         if lower_wick_strong || lower_wick_conditional {
