@@ -68,10 +68,10 @@ fn protective_tp_usd_dynamic(user_override: Option<f64>) -> f64 {
     if current_min_q >= london_start && current_min_q < london_end {
         return 400.0;
     }
-    // quiet hours:22:45-7:30 跨午夜,18:00-20:00,10:45-16:00(避开伦敦盘)
+    // quiet hours:22:45-7:30 跨午夜,18:00-20:00,13:00-15:00(避开 15-20 伦敦盘,10:45-13:00 走正常时段)
     let quiet1_start: u32 = 22 * 60 + 50;
     let quiet1_end: u32 = 7 * 60 + 30;
-    let quiet2_start: u32 = 10 * 60 + 45;
+    let quiet2_start: u32 = 13 * 60;
     let quiet2_end: u32 = 15 * 60;  // 改:quiet2 改成 10:45-15:00(避开 15-20 伦敦盘)
     let quiet3_start: u32 = 18 * 60;
     let quiet3_end: u32 = 20 * 60;
@@ -402,7 +402,7 @@ async fn main() -> anyhow::Result<()> {
         let quiet1_end: u32 = std::env::var("QUIET_HOURS_1_END_MIN")
             .ok().and_then(|s| s.parse().ok()).unwrap_or(7 * 60 + 30);
         let quiet2_start: u32 = std::env::var("QUIET_HOURS_2_START_MIN")
-            .ok().and_then(|s| s.parse().ok()).unwrap_or(10 * 60 + 45);
+            .ok().and_then(|s| s.parse().ok()).unwrap_or(13 * 60);
         let quiet2_end: u32 = std::env::var("QUIET_HOURS_2_END_MIN")
             .ok().and_then(|s| s.parse().ok()).unwrap_or(20 * 60);
         let api_key_protect = api_key_global.clone();
@@ -1002,7 +1002,7 @@ let hq_line = if s.high_quality {
                 };
                 // 安静时段 2(默认 10:00-15:00 北京)— 不跨午夜,简单区间
                 let quiet2_start: u32 = std::env::var("QUIET_HOURS_2_START_MIN")
-                    .ok().and_then(|s| s.parse().ok()).unwrap_or(10 * 60 + 45);   // 10:45
+                    .ok().and_then(|s| s.parse().ok()).unwrap_or(13 * 60);   // 13:00
                 let quiet2_end: u32 = std::env::var("QUIET_HOURS_2_END_MIN")
                     .ok().and_then(|s| s.parse().ok()).unwrap_or(20 * 60);   // 20:00
                 let in_quiet_v2 = current_min_q >= quiet2_start && current_min_q < quiet2_end;
