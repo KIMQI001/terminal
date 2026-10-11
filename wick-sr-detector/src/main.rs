@@ -1560,13 +1560,14 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                             entry_price - 700.0
                         }
                     } else if in_quiet_hours {
-                        // 15:00-20:00 伦敦盘:TP=400(用户原话'400点')
+                        // 15:00-20:00 伦敦盘:TP = BTC 5% 用户要求:'止盈变成btc的5%'
                         // 其他安静时段:TP=200
+                        let tp_pct_amount = entry_price * 0.05;  // BTC 5%
                         if current_min_q >= 15 * 60 && current_min_q < 20 * 60 {
                             if s.side == "bullish" {
-                                entry_price + 400.0
+                                entry_price + tp_pct_amount
                             } else {
-                                entry_price - 400.0
+                                entry_price - tp_pct_amount
                             }
                         } else {
                             if s.side == "bullish" {
@@ -1575,10 +1576,14 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                                 entry_price - 200.0
                             }
                         }
-                    } else if s.side == "bullish" {
-                        entry_price + 400.0
                     } else {
-                        entry_price - 400.0
+                        // 正常时段:TP = BTC 5%
+                        let tp_pct_amount = entry_price * 0.05;
+                        if s.side == "bullish" {
+                            entry_price + tp_pct_amount
+                        } else {
+                            entry_price - tp_pct_amount
+                        }
                     };
 
                     // 计算数量(基于账户余额 * 仓位百分比 * 固定 leverage)
