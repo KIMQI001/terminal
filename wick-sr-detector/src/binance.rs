@@ -25,7 +25,7 @@ impl BinanceConfig {
         let _ = dotenvy::dotenv();
         Ok(Self {
             symbol: env::var("SYMBOL").unwrap_or_else(|_| "BTCUSDC".to_string()),
-            timeframe: env::var("TIMEFRAME").unwrap_or_else(|_| "15m".to_string()),
+            timeframe: env::var("TIMEFRAME").unwrap_or_else(|_| "1h".to_string()),
             api_key: env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()),
             api_secret: env::var("BINANCE_API_SECRET").ok().filter(|s| !s.is_empty()),
         })
