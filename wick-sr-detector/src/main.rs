@@ -1040,7 +1040,16 @@ let hq_line = if s.high_quality {
                 // ===== MTF 5m 一致性检查(close time 对齐)=====
                 // 主动按 close time 找对应的 5m K,跑 detector 判定同向
                 // 抛弃了之前的 last_5m_signals 缓存(有竞争窗口,导致误判)
-                let mtf_result = check_mtf_5m_match(candle.time, &s.side, &candles_5m, &opts).await;
+                // MTF_5M_ENABLED env:false/0 关闭 5m MTF(只看主信号),默认 true
+                let mtf_5m_enabled = std::env::var("MTF_5M_ENABLED")
+                    .map(|s| s != "false" && s != "0")
+                    .unwrap_or(true);
+                let mtf_disabled = !mtf_5m_enabled;
+                let mtf_result = if mtf_5m_enabled {
+                    check_mtf_5m_match(candle.time, &s.side, &candles_5m, &opts).await
+                } else {
+                    MtfResult::Unavailable("5m MTF 已禁用(env MTF_5M_ENABLED=false),只考虑主信号".to_string())
+                };
 let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                     // wick 长度 ≥ 阈值 → SR 太远,易回测,不下单(用户原话:'让我们出局')
                     format!(
@@ -1150,19 +1159,24 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                 };
                 // MTF 5m 一致性显示(close time 对齐 + 完整 5m 详情)
                 // detail 已包含 5m K 的 OHLCV + 每个 wick signal 全部字段
-                let mtf_5m_line = match &mtf_result {
-                    MtfResult::Match(detail) => format!(
-                        "\n- **🔍 MTF 5m 一致性**: ✅ 重合(15m close_time={} 与 5m 同向)→ 下单\n  - {}\n",
-                        candle.time + 15*60, detail
-                    ),
-                    MtfResult::Mismatch(detail) => format!(
-                        "\n- **🔍 MTF 5m 一致性**: ❌ 5m K 无同向 wick(15m close_time={})→ 15m 单信号不下单\n  - {}\n",
-                        candle.time + 15*60, detail
-                    ),
-                    MtfResult::Unavailable(detail) => format!(
-                        "\n- **🔍 MTF 5m 一致性**: ⚠️ {} → 保守不下单\n",
-                        detail
-                    ),
+                let mtf_5m_line = if mtf_disabled {
+                    // MTF 5m 已禁用:不覆盖 will_trade,只显示禁用提示
+                    "\n- **🔍 MTF 5m 一致性**: ⏸ 已禁用(env MTF_5M_ENABLED=false),只看主信号 1h → 不做 5m 二次确认\n".to_string()
+                } else {
+                    match &mtf_result {
+                        MtfResult::Match(detail) => format!(
+                            "\n- **🔍 MTF 5m 一致性**: ✅ 重合(15m close_time={} 与 5m 同向)→ 下单\n  - {}\n",
+                            candle.time + 15*60, detail
+                        ),
+                        MtfResult::Mismatch(detail) => format!(
+                            "\n- **🔍 MTF 5m 一致性**: ❌ 5m K 无同向 wick(15m close_time={})→ 15m 单信号不下单\n  - {}\n",
+                            candle.time + 15*60, detail
+                        ),
+                        MtfResult::Unavailable(detail) => format!(
+                            "\n- **🔍 MTF 5m 一致性**: ⚠️ {} → 保守不下单\n",
+                            detail
+                        ),
+                    }
                 };
                 let body = format!(
                     "### 📐 wick SR 触发{}{}{}\n\n\
@@ -1392,12 +1406,17 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                     || (s.high_quality && volume_pass && direction_match && !s.reversal)
                 };
                 // ===== MTF 5m 一致性覆盖(用前面算的 mtf_result)=====
+                // - MTF 禁用(mtf_disabled):不覆盖,只考虑主信号
                 // - Match:5m 有同向 wick → 保留 will_trade
                 // - Mismatch/Unavailable:5m 反向或数据缺失 → 保守不下单
                 // 早 return 分支(wick 太长/周末/8:15)的 will_trade 已是 false,MTF 即便 Match 也保持 false(避免误报"5m 否决 15m")
-                let will_trade = match &mtf_result {
-                    MtfResult::Match(_) => will_trade,
-                    MtfResult::Mismatch(_) | MtfResult::Unavailable(_) => false,
+                let will_trade = if mtf_disabled {
+                    will_trade
+                } else {
+                    match &mtf_result {
+                        MtfResult::Match(_) => will_trade,
+                        MtfResult::Mismatch(_) | MtfResult::Unavailable(_) => false,
+                    }
                 };
                 if will_trade && std::env::var("BINANCE_API_KEY").ok().filter(|s| !s.is_empty()).is_some() {
                     let api_key = std::env::var("BINANCE_API_KEY").unwrap_or_default();
