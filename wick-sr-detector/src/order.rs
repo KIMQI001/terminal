@@ -788,7 +788,7 @@ pub async fn ensure_protective_orders(
     api_secret: &str,
     base_url: &str,
     default_stop_usd: f64,
-    default_tp_usd: f64,
+    default_tp_pct: f64, // 0.05 = BTC 5%
 ) -> Result<u32> {
     if api_key.is_empty() || api_secret.is_empty() {
         return Ok(0);
@@ -890,9 +890,14 @@ pub async fn ensure_protective_orders(
         info!("[Protect] 读到 {} 个 Algo 单(用于判定已有保护)", algo_count);
     }
 
-    // 价格容忍度:跟 entry 距离 ≤ max(default_stop_usd, default_tp_usd) * 1.5
-    // 默认 200 → tolerance = 300 USD。即:同一 symbol 附近 300 USD 内已有同 type Algo → 算"有"
-    let tolerance = (default_stop_usd.max(default_tp_usd)) * 1.5;
+    // 价格容忍度:跟 entry 距离 ≤ max(default_stop_usd, tp USD 当量) * 1.5
+    // tp USD 当量 = entry × default_tp_pct(BTC 价 × 5% ≈ 4000 USD)
+    // 用最近一个仓位的 entry × pct 估算(容忍度是粗判,小幅偏差不影响)
+    let tp_usd_equiv = positions
+        .first()
+        .map(|(_, _, e, _)| e * default_tp_pct)
+        .unwrap_or(default_stop_usd);
+    let tolerance = (default_stop_usd.max(tp_usd_equiv)) * 1.5;
 
     // 3) 对每个持仓补 SL/TP
     let mut placed: u32 = 0;
@@ -968,12 +973,13 @@ pub async fn ensure_protective_orders(
             }
         }
 
-        // TP
+        // TP — 用 entry × default_tp_pct(BTC 5%)算 trigger price
         if !has_tp {
+            let tp_usd = entry * default_tp_pct;
             let tp_price = if position_side == "LONG" {
-                entry + default_tp_usd
+                entry + tp_usd
             } else {
-                entry - default_tp_usd
+                entry - tp_usd
             };
             let now_secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
             let side_short = if position_side == "LONG" { "L" } else { "S" };

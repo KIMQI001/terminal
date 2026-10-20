@@ -85,55 +85,15 @@ fn parse_timeframe_secs(s: &str) -> i64 {
 /// 辅助周期 5m 的秒数(固定)
 const AUX_5M_SECS: i64 = 5 * 60;
 
-/// [Protect] 任务计算 TP 距离(USDT):
-/// - 用户显式设 PROTECTIVE_TP_USD → 用用户值(覆盖时段逻辑)
-/// - 没设 → 按时段动态:
-///   - 20:00-21:30 大行情时段(反转 wick 或反向 wick 触发):700 USD(对齐 will_trade 下单 TP)
-///   - 16:00-18:00 伦敦盘(HQ 信号):400 USD(对齐 will_trade 下单 TP)
-///   - quiet hours(22:45-7:30 跨午夜 或 10:45-16:00 或 18:00-20:00):200 USD(信号弱保守)
-///   - 正常时段(激活 08:00-10:45 + 纽约 20:00-22:30 北京):400 USD(1:4)
-fn protective_tp_usd_dynamic(user_override: Option<f64>) -> f64 {
+/// [Protect] 任务计算 TP 倍率(0.05 = BTC 5%):
+/// - 用户显式设 PROTECTIVE_TP_USD → 用用户值(覆盖时段逻辑,绝对 USD 数字)
+/// - 没设 → 全部时段统一 5%,ensure_protective_orders 内部用 entry_price × 倍率算 trigger price
+fn protective_tp_pct_dynamic(user_override: Option<f64>) -> f64 {
     if let Some(v) = user_override {
         return v;
     }
-    let now_beijing = chrono::Utc::now() + chrono::Duration::hours(8);
-    let current_min_q: u32 = now_beijing.format("%H").to_string().parse::<u32>().unwrap_or(0) * 60
-        + now_beijing.format("%M").to_string().parse::<u32>().unwrap_or(0);
-    let weekday_num: u32 = now_beijing.format("%w").to_string().parse().unwrap_or(0);
-    // 周六(6)+ 周日(0 20:00 前)全天不交易
-    // 用户原话:'周六周日的 16-18 点是不交易的'
-    // is_weekend_block 已在 will_trade 头判断,这里同步保护补单 TP:
-    //   周末任何时段返回默认 400,不走 london/quiet/reversal 等特殊路径
-    let is_weekend_block = weekday_num == 6
-        || (weekday_num == 0 && current_min_q < 20 * 60);
-    if is_weekend_block {
-        return 400.0;
-    }
-    // 20:00-21:30 大行情时段:700 USD(对齐 will_trade TP)
-    let rev_start: u32 = 20 * 60;
-    let rev_end: u32 = 21 * 60 + 30;
-    if current_min_q >= rev_start && current_min_q < rev_end {
-        return 700.0;
-    }
-    // 16:00-18:00 伦敦盘:400 USD(对齐 will_trade 下单 TP)
-    // 用户原话'16-18 点,补单 protect 是 400 吧'
-    let london_start: u32 = 15 * 60;
-    let london_end: u32 = 18 * 60;
-    if current_min_q >= london_start && current_min_q < london_end {
-        return 400.0;
-    }
-    // quiet hours:22:45-7:30 跨午夜,18:00-20:00,13:00-15:00(避开 15-20 伦敦盘,10:45-13:00 走正常时段)
-    let quiet1_start: u32 = 22 * 60 + 50;
-    let quiet1_end: u32 = 7 * 60 + 30;
-    let quiet2_start: u32 = 13 * 60;
-    let quiet2_end: u32 = 15 * 60;  // 改:quiet2 改成 10:45-15:00(避开 15-20 伦敦盘)
-    let quiet3_start: u32 = 18 * 60;
-    let quiet3_end: u32 = 20 * 60;
-    // quiet1 跨午夜
-    let in_q1 = current_min_q >= quiet1_start || current_min_q < quiet1_end;
-    let in_q2 = current_min_q >= quiet2_start && current_min_q < quiet2_end;
-    let in_q3 = current_min_q >= quiet3_start && current_min_q < quiet3_end;
-    if in_q1 || in_q2 || in_q3 { 200.0 } else { 400.0 }
+    // 用户要求'全部改为5%',包括反转/安静/正常/伦敦/周末
+    0.05
 }
 
 #[tokio::main]
@@ -451,12 +411,13 @@ async fn main() -> anyhow::Result<()> {
     if !api_key_global.is_empty() && !api_secret_global.is_empty() {
         let protective_stop_usd: f64 = std::env::var("PROTECTIVE_STOP_USD")
             .ok().and_then(|s| s.parse().ok()).unwrap_or(100.0);
-        // protective_tp_usd:用户没设 PROTECTIVE_TP_USD 时,按 quiet hours 动态决定
-        //   - quiet hours:200 USD(跟主下单路径一致)
-        //   - 正常时段:400 USD(1:4)
-        // 用户显式设 PROTECTIVE_TP_USD → 用固定值(覆盖时段逻辑)
-        let protective_tp_usd_user_override: Option<f64> = std::env::var("PROTECTIVE_TP_USD")
-            .ok().and_then(|s| s.parse().ok());
+        // protective_tp_pct:用户没设 PROTECTIVE_TP_PCT 时,统一 5%(BTC 5%)
+        // 用户显式设 PROTECTIVE_TP_PCT → 用固定值(覆盖默认 5%)
+        // 兼容旧 env:PROTECTIVE_TP_USD(绝对 USD) → 保留,但语义变成"TP 倍率",迁移到新 env
+        let protective_tp_pct: f64 = std::env::var("PROTECTIVE_TP_PCT")
+            .ok().and_then(|s| s.parse().ok())
+            .or_else(|| std::env::var("PROTECTIVE_TP_USD").ok().and_then(|s| s.parse().ok()))
+            .unwrap_or_else(|| protective_tp_pct_dynamic(None));
         // quiet hours 配置(跟主路径一致)
         let quiet1_start: u32 = std::env::var("QUIET_HOURS_1_START_MIN")
             .ok().and_then(|s| s.parse().ok()).unwrap_or(22 * 60 + 50);
@@ -491,9 +452,8 @@ async fn main() -> anyhow::Result<()> {
                     &api_secret_protect,
                     &base_url_protect,
                     protective_stop_usd,
-                    // 每次循环重算 quiet hours,决定 TP 距离
-                    // 用户显式设 PROTECTIVE_TP_USD → 用用户值;否则按时段动态
-                    protective_tp_usd_dynamic(protective_tp_usd_user_override),
+                    // TP 倍率(0.05 = BTC 5%)。函数内部用 entry_price × 倍率算 trigger price。
+                    protective_tp_pct,
                 ).await {
                     Ok(0) => {
                         if rounds % 30 == 0 {
@@ -514,12 +474,12 @@ async fn main() -> anyhow::Result<()> {
                         );
                         recently_attempted.insert(key_sl, std::time::Instant::now());
                         recently_attempted.insert(key_tp, std::time::Instant::now());
-                        let tp_actual = protective_tp_usd_dynamic(protective_tp_usd_user_override);
-                        warn!("[Protect] 给 {} 个仓位补了 SL/TP(SL={} USD, TP={} USD;TP 按 quiet hours={})",
-                            n, protective_stop_usd, tp_actual, tp_actual == 200.0);
+                        let tp_pct = protective_tp_pct;
+                        warn!("[Protect] 给 {} 个仓位补了 SL/TP(SL={} USD, TP={}% 倍率,默认 BTC 5%)",
+                            n, protective_stop_usd, tp_pct * 100.0);
                         let body = format!(
-                            "\n\n### 🛡️ 仓位保护\n\n- **补单数量**: {}\n- **止损距离**: ${}\n- **止盈距离**: ${}\n\n> 检测到仓位但缺 SL/TP,自动补上(防止裸奔)。60s 内同 (symbol, side, type) 不重试。quiet hours TP 自动 200,正常时段 400",
-                            n, protective_stop_usd, tp_actual
+                            "\n\n### 🛡️ 仓位保护\n\n- **补单数量**: {}\n- **止损距离**: ${}\n- **止盈倍率**: {}%(默认 BTC 5%)\n\n> 检测到仓位但缺 SL/TP,自动补上(防止裸奔)。60s 内同 (symbol, side, type) 不重试。",
+                            n, protective_stop_usd, tp_pct * 100.0
                         );
                         let _ = broadcast(&notify_protect, "🛡️ 仓位 SL/TP 已补", &body).await;
                     }
@@ -1602,85 +1562,19 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                         entry_price + stop_loss_usd
                     };
 
-                    // 止盈:
-                    // - 20:00-21:30 反转 wick:TP = 700 USD(用户原话'如果在这个时间段反转,一般是大行情')
-                    // - 静默时段(双 wick):TP = 200 USD(信号弱)
-                    // - 其他时段:TP = 400 USD(1:4)
-                    let is_in_2030_reversal_window = current_min_q >= 20 * 60
-                        && current_min_q < 21 * 60 + 30;
-                    // 莲花局判定(跟 will_trade 内的 lotus_setup 相同逻辑)
-                    // 莲花局 TP 用 700 USD(跟反转 wick 对齐)— 强反转信号
-                    let upper_ratio_lotus: f64 = std::env::var("LOTUS_UPPER_WICK_RATIO")
-                        .ok().and_then(|s| s.parse().ok()).unwrap_or(0.4);
-                    let lower_ratio_lotus: f64 = std::env::var("LOTUS_LOWER_WICK_RATIO")
-                        .ok().and_then(|s| s.parse().ok()).unwrap_or(0.2);
-                    let oc_mid_near_lotus: f64 = std::env::var("LOTUS_OC_MID_NEAR_USD")
-                        .ok().and_then(|s| s.parse().ok()).unwrap_or(50.0);
-                    let is_lotus_setup_for_tp = anchor_data.as_ref().map(|a| {
-                        let upper_wick_l = a.high - a.open.max(a.close);
-                        let lower_wick_l = a.open.min(a.close) - a.low;
-                        let total_range_l = a.high - a.low;
-                        if total_range_l <= 0.0 { return false; }
-                        let is_bullish_1d_l = a.close > a.open;
-                        let is_bearish_1d_l = a.close < a.open;
-                        let long_upper_l = upper_wick_l / total_range_l >= upper_ratio_lotus;
-                        let short_upper_l = upper_wick_l / total_range_l <= lower_ratio_lotus;
-                        let long_lower_l = lower_wick_l / total_range_l >= upper_ratio_lotus;
-                        let short_lower_l = lower_wick_l / total_range_l <= lower_ratio_lotus;
-                        let lotus_bull_l = is_bullish_1d_l && long_upper_l && short_lower_l;
-                        let lotus_bear_l = is_bearish_1d_l && short_upper_l && long_lower_l;
-                        let near_oc_l = (a.oc_mid - s.level).abs() < oc_mid_near_lotus;
-                        (lotus_bull_l || lotus_bear_l) && s.high_quality && near_oc_l
-                    }).unwrap_or(false);
-                    // 20:00-21:30 反向 wick 也按 TP=700 处理
-                    // 16:00-18:00 伦敦盘的反转 wick 用户原话'16-18 反转也可以,tp 都为 400'
-                    // → 伦敦盘反转 wick 用 TP=400(正常时段 1:4),不走大行情 TP=700
-                    let is_2030_aggressive = is_in_2030_reversal_window
-                        || (!direction_match && current_min_q >= 20 * 60
-                            && current_min_q < 21 * 60 + 30);
-                    // 16-18 伦敦盘反转 wick(走 fallback TP=400,不走 700)
-                    let london_reversal = in_london_window && s.reversal;
-                    let take_profit = if (s.reversal && is_in_2030_reversal_window) || is_lotus_setup_for_tp {
-                        // 20:00-21:30 反转 wick 或莲花局 → TP = 700 USD
-                        // 强信号,1:7 风险回报
-                        if s.side == "bullish" {
-                            entry_price + 700.0
-                        } else {
-                            entry_price - 700.0
-                        }
-                    } else if is_2030_aggressive && !s.reversal && !direction_match {
-                        // 20:00-21:30 普通反向 wick(s.reversal=false)
-                        // 用户原话:'20:00-21:30 的反转 wick 就是所有反向 wick,这时候都 tp 700'
-                        if s.side == "bullish" {
-                            entry_price + 700.0
-                        } else {
-                            entry_price - 700.0
-                        }
-                    } else if in_quiet_hours {
-                        // 15:00-20:00 伦敦盘:TP = BTC 5% 用户要求:'止盈变成btc的5%'
-                        // 其他安静时段:TP=200
-                        let tp_pct_amount = entry_price * 0.05;  // BTC 5%
-                        if current_min_q >= 15 * 60 && current_min_q < 20 * 60 {
-                            if s.side == "bullish" {
-                                entry_price + tp_pct_amount
-                            } else {
-                                entry_price - tp_pct_amount
-                            }
-                        } else {
-                            if s.side == "bullish" {
-                                entry_price + 200.0
-                            } else {
-                                entry_price - 200.0
-                            }
-                        }
+                    // 止盈 — 全部统一 BTC 5%(用户要求'全部改为5%')
+                    // 反转 / 安静 / 正常 / 伦敦 / 周末统一 entry_price × 0.05
+                    let take_profit = if s.side == "bullish" {
+                        entry_price + entry_price * 0.05
                     } else {
-                        // 正常时段:TP = BTC 5%
-                        let tp_pct_amount = entry_price * 0.05;
-                        if s.side == "bullish" {
-                            entry_price + tp_pct_amount
-                        } else {
-                            entry_price - tp_pct_amount
-                        }
+                        entry_price - entry_price * 0.05
+                    };
+                    // TP 计算 — 全部统一 BTC 5%(用户要求'全部改为5%')
+                    // 反转 / 安静 / 正常 / 伦敦 / 周末 统一 entry_price × 0.05
+                    let take_profit = if s.side == "bullish" {
+                        entry_price + entry_price * 0.05
+                    } else {
+                        entry_price - entry_price * 0.05
                     };
 
                     // 计算数量(基于账户余额 * 仓位百分比 * 固定 leverage)
