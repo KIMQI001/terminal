@@ -31,6 +31,60 @@ fn format_beijing_time(secs: i64) -> String {
         .unwrap_or_else(|| "?".to_string())
 }
 
+/// Binance interval 字符串 → 秒。支持 1m/3m/5m/15m/30m/1h/2h/4h/6h/8h/12h/1d/3d/1w/1M。
+/// '1M' = 月,必须先判。失败返回 -1(让 main() fail-fast 拒绝启动)。
+fn parse_timeframe_secs(s: &str) -> i64 {
+    if s.is_empty() {
+        return -1;
+    }
+    if let Some(rest) = s.strip_suffix('M') {
+        // 月(大写 M,排在小写 m 之前)
+        if let Ok(n) = rest.parse::<i64>() {
+            if n > 0 {
+                return n * 30 * 24 * 3600;
+            }
+        }
+        return -1;
+    }
+    if let Some(rest) = s.strip_suffix('w') {
+        if let Ok(n) = rest.parse::<i64>() {
+            if n > 0 {
+                return n * 7 * 24 * 3600;
+            }
+        }
+        return -1;
+    }
+    if let Some(rest) = s.strip_suffix('d') {
+        if let Ok(n) = rest.parse::<i64>() {
+            if n > 0 {
+                return n * 24 * 3600;
+            }
+        }
+        return -1;
+    }
+    if let Some(rest) = s.strip_suffix('h') {
+        if let Ok(n) = rest.parse::<i64>() {
+            if n > 0 {
+                return n * 3600;
+            }
+        }
+        return -1;
+    }
+    if let Some(rest) = s.strip_suffix('m') {
+        // 分钟(小写 m)
+        if let Ok(n) = rest.parse::<i64>() {
+            if n > 0 {
+                return n * 60;
+            }
+        }
+        return -1;
+    }
+    -1
+}
+
+/// 辅助周期 5m 的秒数(固定)
+const AUX_5M_SECS: i64 = 5 * 60;
+
 /// [Protect] 任务计算 TP 距离(USDT):
 /// - 用户显式设 PROTECTIVE_TP_USD → 用用户值(覆盖时段逻辑)
 /// - 没设 → 按时段动态:
@@ -90,6 +144,13 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let binance_config = BinanceConfig::from_env()?;
+    let main_tf_secs = parse_timeframe_secs(&binance_config.timeframe);
+    if main_tf_secs <= 0 {
+        anyhow::bail!(
+            "TIMEFRAME=\"{}\" 不是合法的 Binance 周期(支持 1m/3m/5m/15m/30m/1h/2h/4h/6h/8h/12h/1d/3d/1w/1M),拒绝启动",
+            binance_config.timeframe
+        );
+    }
     let notify_config = NotifyConfig::from_env();
     let lookback = std::env::var("LOOKBACK_CANDLES")
         .ok()
@@ -1041,14 +1102,27 @@ let hq_line = if s.high_quality {
                 // 主动按 close time 找对应的 5m K,跑 detector 判定同向
                 // 抛弃了之前的 last_5m_signals 缓存(有竞争窗口,导致误判)
                 // MTF_5M_ENABLED env:false/0 关闭 5m MTF(只看主信号),默认 true
+                // 主周期必须 ≥ 5m 且是 5m 整数倍才能按 close_time 对齐;否则降级为"只看主信号"
+                // (降级而非否决:避免配置笔误让全天不下单)
                 let mtf_5m_enabled = std::env::var("MTF_5M_ENABLED")
                     .map(|s| s != "false" && s != "0")
                     .unwrap_or(true);
-                let mtf_disabled = !mtf_5m_enabled;
-                let mtf_result = if mtf_5m_enabled {
-                    check_mtf_5m_match(candle.time, &s.side, &candles_5m, &opts).await
+                let mtf_active = mtf_5m_enabled
+                    && main_tf_secs >= AUX_5M_SECS
+                    && main_tf_secs % AUX_5M_SECS == 0;
+                let mtf_disabled = !mtf_active;
+                let mtf_result = if mtf_active {
+                    check_mtf_5m_match(candle.time, &s.side, &candles_5m, &opts, main_tf_secs)
+                        .await
+                } else if !mtf_5m_enabled {
+                    MtfResult::Unavailable(
+                        "5m MTF 已禁用(env MTF_5M_ENABLED=false),只考虑主信号".to_string(),
+                    )
                 } else {
-                    MtfResult::Unavailable("5m MTF 已禁用(env MTF_5M_ENABLED=false),只考虑主信号".to_string())
+                    MtfResult::Unavailable(format!(
+                        "主周期 {}s 非 5m({}s)整数倍,无法对齐 5m close_time",
+                        main_tf_secs, AUX_5M_SECS
+                    ))
                 };
 let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                     // wick 长度 ≥ 阈值 → SR 太远,易回测,不下单(用户原话:'让我们出局')
@@ -1160,17 +1234,21 @@ let action_line = if s.zone_high - s.zone_low >= wick_max_usd {
                 // MTF 5m 一致性显示(close time 对齐 + 完整 5m 详情)
                 // detail 已包含 5m K 的 OHLCV + 每个 wick signal 全部字段
                 let mtf_5m_line = if mtf_disabled {
-                    // MTF 5m 已禁用:不覆盖 will_trade,只显示禁用提示
-                    "\n- **🔍 MTF 5m 一致性**: ⏸ 已禁用(env MTF_5M_ENABLED=false),只看主信号 1h → 不做 5m 二次确认\n".to_string()
+                    // MTF 5m 已禁用或主周期不可对齐:不覆盖 will_trade,只显示禁用提示
+                    format!(
+                        "\n- **🔍 MTF 5m 一致性**: ⏸ 已禁用(主周期 {}s 不做 5m 二次确认)\n",
+                        main_tf_secs
+                    )
                 } else {
+                    let main_close = candle.time + main_tf_secs;
                     match &mtf_result {
                         MtfResult::Match(detail) => format!(
-                            "\n- **🔍 MTF 5m 一致性**: ✅ 重合(15m close_time={} 与 5m 同向)→ 下单\n  - {}\n",
-                            candle.time + 15*60, detail
+                            "\n- **🔍 MTF 5m 一致性**: ✅ 重合(主周期 close_time={} 北京 {} 与 5m 同向)→ 下单\n  - {}\n",
+                            main_close, format_beijing_time(main_close), detail
                         ),
                         MtfResult::Mismatch(detail) => format!(
-                            "\n- **🔍 MTF 5m 一致性**: ❌ 5m K 无同向 wick(15m close_time={})→ 15m 单信号不下单\n  - {}\n",
-                            candle.time + 15*60, detail
+                            "\n- **🔍 MTF 5m 一致性**: ❌ 5m K 无同向 wick(主周期 close_time={} 北京 {})→ 主信号不下单\n  - {}\n",
+                            main_close, format_beijing_time(main_close), detail
                         ),
                         MtfResult::Unavailable(detail) => format!(
                             "\n- **🔍 MTF 5m 一致性**: ⚠️ {} → 保守不下单\n",
@@ -1667,41 +1745,52 @@ enum MtfResult {
 }
 
 async fn check_mtf_5m_match(
-    candle_15m_time: i64,
-    fifteen_side: &str,
+    candle_time: i64,
+    main_side: &str,
     candles_5m: &Arc<Mutex<Vec<types::Candle>>>,
     opts: &DetectOptions,
+    main_tf_secs: i64,
 ) -> MtfResult {
-    // 15m K 的 time 是 open 时刻;15m K close time = time + 15min
-    let fifteen_close_time = candle_15m_time + 15 * 60;
-    // 对应的 5m K 是 15m K 区间最后 5min:open_time = candle.time + 10min,close_time = +15min
-    let target_5m_open_time = candle_15m_time + 10 * 60;
-    let target_5m_close_time = target_5m_open_time + 5 * 60; // = fifteen_close_time
+    // 守卫:主周期必须是 5m 的整数倍(调用方应已过滤;这里再 assert 一次)
+    if main_tf_secs < AUX_5M_SECS || main_tf_secs % AUX_5M_SECS != 0 {
+        return MtfResult::Unavailable(format!(
+            "主周期 {}s 不是 5m({}s)的整数倍,无法对齐",
+            main_tf_secs, AUX_5M_SECS
+        ));
+    }
+    // 主 K 的 time 是 open 时刻;close_time = time + main_tf_secs
+    let main_close_time = candle_time + main_tf_secs;
+    // 对齐的 5m K = 主 K 区间最后 5min:open = candle.time + (main_tf_secs - 5m)
+    let target_5m_open_time = candle_time + (main_tf_secs - AUX_5M_SECS);
+    let target_5m_close_time = target_5m_open_time + AUX_5M_SECS; // == main_close_time
     let snapshot = candles_5m.lock().await.clone();
     // 找 close time 对齐的 5m K(等价于 c.time == target_5m_open_time)
     let target_idx = match snapshot.iter().position(|c| c.time == target_5m_open_time) {
         Some(i) => i,
         None => {
             warn!(
-                "[MTF 5m] 15m close_time={} (open={}) → 5m open_time={} (close={}) 未找到(5m 数据滞后或缺失)",
-                fifteen_close_time, candle_15m_time, target_5m_open_time, target_5m_close_time
+                "[MTF 5m] 主周期 close_time={} 北京 {} (open={} 北京 {}) → 5m open_time={} 北京 {} (close={} 北京 {}) 未找到(5m 数据滞后或缺失)",
+                main_close_time, format_beijing_time(main_close_time),
+                candle_time, format_beijing_time(candle_time),
+                target_5m_open_time, format_beijing_time(target_5m_open_time),
+                target_5m_close_time, format_beijing_time(target_5m_close_time),
             );
             return MtfResult::Unavailable(format!(
-                "5m K 缺失(对应 15m close_time={})",
-                fifteen_close_time
+                "5m K 缺失(对应主周期 close_time={} 北京 {})",
+                main_close_time, format_beijing_time(main_close_time)
             ));
         }
     };
-    // 显式验证 5m K close_time 等于 fifteen_close_time(防止数据错乱)
-    let actual_5m_close = snapshot[target_idx].time + 5 * 60;
-    if actual_5m_close != fifteen_close_time {
+    // 显式验证 5m K close_time 等于 main_close_time(防止数据错乱)
+    let actual_5m_close = snapshot[target_idx].time + AUX_5M_SECS;
+    if actual_5m_close != main_close_time {
         warn!(
-            "[MTF 5m] 5m K time={} close_time={} 与 15m close_time={} 不一致",
-            snapshot[target_idx].time, actual_5m_close, fifteen_close_time
+            "[MTF 5m] 5m K time={} close_time={} 与主周期 close_time={} 不一致",
+            snapshot[target_idx].time, actual_5m_close, main_close_time
         );
         return MtfResult::Unavailable(format!(
-            "5m close_time={} ≠ 15m close_time={}",
-            actual_5m_close, fifteen_close_time
+            "5m close_time={} ≠ 主周期 close_time={}",
+            actual_5m_close, main_close_time
         ));
     }
     // 构造 lookback 切片供 detector 跑反转判定
@@ -1748,7 +1837,7 @@ async fn check_mtf_5m_match(
         target_5m.volume,
         wicks_str
     );
-    if sigs_5m.iter().any(|s| s.side == fifteen_side) {
+    if sigs_5m.iter().any(|s| s.side == main_side) {
         MtfResult::Match(detail)
     } else {
         MtfResult::Mismatch(detail)
