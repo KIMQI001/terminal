@@ -11,7 +11,15 @@ const loadEnabled = (): IndicatorState => {
   if (typeof window === 'undefined') return {} as IndicatorState;
   try {
     const raw = localStorage.getItem(INDICATOR_ENABLED_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed: Partial<IndicatorState> = JSON.parse(raw);
+      // proximitySignals 不持久化 — 每次刷新回到默认关闭。
+      // 原因:该指标会把命中的 K 线整根染成浅紫/深蓝,实测 1h 下 86%、15m 下 96%
+      // 的 K 线被命中(关键位池来自全部历史 wick level,无 tier/时效/擦除过滤),
+      // 图表会被糊成一片蓝紫,失去可读性。需要时在 Header 里临时打开即可。
+      delete parsed.proximitySignals;
+      return parsed as IndicatorState;
+    }
   } catch {
     // 忽略解析错误
   }
@@ -313,7 +321,10 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
 if (typeof window !== 'undefined') {
   useIndicatorStore.subscribe((state) => {
     try {
-      localStorage.setItem(INDICATOR_ENABLED_KEY, JSON.stringify(state.enabled));
+      // proximitySignals 不落盘(见 loadEnabled 注释)——临时开关,刷新后自动复位
+      const persisted: Partial<IndicatorState> = { ...state.enabled };
+      delete persisted.proximitySignals;
+      localStorage.setItem(INDICATOR_ENABLED_KEY, JSON.stringify(persisted));
     } catch {
       // 忽略 localStorage 写入失败（隐私模式 / 容量超限）
     }
