@@ -6,9 +6,11 @@ import { cn } from "@/lib/utils";
 /**
  * 顶部价格 + K 线显示模式按钮(S / L)
  *
- *  - S(做空):只显示「现价以上」的阳线
- *  - L(做多):只显示「现价以下」的阴线
- *  - 再点一次当前模式 → 恢复显示全部 K 线
+ * 三态:
+ *  - 白色(闲置):显示全部 K 线
+ *  - 红色 S(做空):只显示「现价以上」的阳线
+ *  - 绿色 L(做多):只显示「现价以下」的阴线
+ *  再点一次当前模式 → 回到白色(恢复全部 K 线)
  */
 export function PriceModeToggle() {
   const candles = useChartStore((s) => s.candles);
@@ -33,7 +35,9 @@ export function PriceModeToggle() {
       : "现价";
 
   const btn =
-    "h-6 w-6 rounded text-[11px] font-bold leading-none transition-colors";
+    "h-6 w-6 rounded border text-[11px] font-bold leading-none transition-colors";
+  // 闲置态:白色;S 激活:红色;L 激活:绿色
+  const idleBtn = "border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]";
 
   return (
     <div className="flex items-center gap-2 pl-1">
@@ -65,8 +69,8 @@ export function PriceModeToggle() {
           className={cn(
             btn,
             displayMode === "short"
-              ? "bg-[var(--negative)] text-white"
-              : "text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+              ? "border-[var(--negative)] bg-[var(--negative)] text-white"
+              : idleBtn
           )}
         >
           S
@@ -82,8 +86,8 @@ export function PriceModeToggle() {
           className={cn(
             btn,
             displayMode === "long"
-              ? "bg-[var(--positive)] text-white"
-              : "text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+              ? "border-[var(--positive)] bg-[var(--positive)] text-white"
+              : idleBtn
           )}
         >
           L

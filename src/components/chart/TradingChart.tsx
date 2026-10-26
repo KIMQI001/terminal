@@ -11,6 +11,7 @@ import {
   Time,
   SeriesMarker,
   IPriceLine,
+  AutoscaleInfo,
 } from "lightweight-charts";
 import { useChartStore } from "@/stores/chartStore";
 import { useIndicatorStore } from "@/stores/indicatorStore";
@@ -58,7 +59,8 @@ import { computeAsiaBias } from "@/lib/chart/indicators/asiaBias";
 import { computeEuropeBias } from "@/lib/chart/indicators/europeBias";
 import {
   isCandleVisible,
-  filterByDisplayMode,
+  filterVisibleItems,
+  maskHiddenVolume,
   type KlineDisplayMode,
 } from "@/lib/chart/klineDisplay";
 import type { ProximitySignal } from "@/types/proximitySignal";
@@ -205,6 +207,10 @@ export function TradingChart() {
   // Trading price lines
   const priceLinesRef = useRef<IPriceLine[]>([]);
 
+  // 「S/L 显示模式」:锚点现价参考线 + 实时 K 是否在蜡烛序列中
+  const anchorPriceLineRef = useRef<IPriceLine | null>(null);
+  const liveCandleVisibleRef = useRef<boolean>(false);
+
   // Shift 键状态
   const [isShiftPressed, setIsShiftPressed] = useState(false);
 
@@ -283,12 +289,82 @@ export function TradingChart() {
   const proximitySignalsRef = useRef(proximitySignals);
   proximitySignalsRef.current = proximitySignals;
 
-  // 实时 K 线在当前显示模式下是否可见(可见→不可见时需要整段重建,v4 没有 remove API)
-  const liveCandleVisibleRef = useRef(true);
+  /**
+   * 价格轴策略:过滤模式下把 y 轴固定在全量数据范围。
+   * 这样切换 S/L 时价格轴不跳变,而且可见 K 线一定落在可视范围内(不会出现空白图)。
+   */
+  const applyDisplayModePriceAxis = useCallback(
+    (mode: KlineDisplayMode, anchor: number | null, candlesNow: Candle[]) => {
+      const series = candleSeriesRef.current;
+      if (!series) return;
+
+      if (mode === "normal" || anchor === null || candlesNow.length === 0) {
+        // 恢复正常自适应(base 是库自带的自适应实现)
+        series.applyOptions({
+          autoscaleInfoProvider: (base: () => AutoscaleInfo | null) => base(),
+          lastValueVisible: true,
+        });
+        return;
+      }
+
+      let minValue = Infinity;
+      let maxValue = -Infinity;
+      candlesNow.forEach((c) => {
+        if (c.low < minValue) minValue = c.low;
+        if (c.high > maxValue) maxValue = c.high;
+      });
+      if (!isFinite(minValue) || !isFinite(maxValue)) return;
+
+      series.applyOptions({
+        autoscaleInfoProvider: (base: () => AutoscaleInfo | null) => {
+          const b = base();
+          return { priceRange: { minValue, maxValue }, margins: b?.margins };
+        },
+        // 序列里最后一条已是「最后一根可见 K」,不是现价,标签会误导 → 关闭
+        lastValueVisible: false,
+      });
+    },
+    []
+  );
+
+  /** 锚点现价参考线:进入 S/L 模式时画一条水平虚线,标出过滤所依据的现价 */
+  const syncAnchorPriceLine = useCallback(
+    (mode: KlineDisplayMode, anchor: number | null) => {
+      const series = candleSeriesRef.current;
+      if (!series) return;
+
+      if (anchorPriceLineRef.current) {
+        try {
+          series.removePriceLine(anchorPriceLineRef.current);
+        } catch {
+          // 价格线已被移除,忽略
+        }
+        anchorPriceLineRef.current = null;
+      }
+      if (mode === "normal" || anchor === null) return;
+
+      anchorPriceLineRef.current = series.createPriceLine({
+        price: anchor,
+        color: "#94a3b8",
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: `现价 ${anchor}`,
+      });
+    },
+    []
+  );
 
   /**
    * 按当前显示模式重建蜡烛 / 成交量 / 高低价线序列。
-   * mode = normal → 全部显示;short → 只留现价上方阳线;long → 只留现价下方阴线。
+   * mode = normal → 全部显示;short(S) → 只留现价上方阳线;long(L) → 只留现价下方阴线。
+   *
+   * 关键点:
+   * 1) 蜡烛 / 折线序列只放「可见」的 K 线 —— 被隐藏的 K 线直接不进序列,自然不绘制。
+   * 2) 成交量序列保留**全部时间点**(隐藏 K 的成交量置 0)。成交量与蜡烛共用一条时间轴,
+   *    只要时间点还在,时间轴就不会塌陷 / 重新锚定,用户的缩放与平移得以保留。
+   *    (lightweight-charts v4 的 setData 会丢弃 whitespace 占位,不能靠它兜底)
+   * 3) 过滤期间价格轴固定为全量数据范围,避免切换模式时 y 轴跳变或图表空白。
    */
   const buildFilteredSeries = useCallback(() => {
     if (!candleSeriesRef.current) return;
@@ -300,8 +376,9 @@ export function TradingChart() {
     const mode: KlineDisplayMode = state.displayMode;
     const anchor = state.displayAnchorPrice;
 
+    // 蜡烛序列:只放可见 K 线
     candleSeriesRef.current.setData(
-      filterByDisplayMode(
+      filterVisibleItems(
         buildChartData(candlesNow, proximitySignalsRef.current),
         candlesNow,
         mode,
@@ -309,15 +386,17 @@ export function TradingChart() {
       )
     );
 
+    // 成交量序列:全部时间点都保留,隐藏 K 的成交量置 0(时间轴靠它兜底)
     if (volumeSeriesRef.current) {
       volumeSeriesRef.current.setData(
-        filterByDisplayMode(buildVolumeData(candlesNow), candlesNow, mode, anchor)
+        maskHiddenVolume(buildVolumeData(candlesNow), candlesNow, mode, anchor)
       );
     }
 
+    // 高低价线(折线图模式):只保留可见 K 线
     if (highLineSeriesRef.current && lowLineSeriesRef.current) {
       highLineSeriesRef.current.setData(
-        filterByDisplayMode(
+        filterVisibleItems(
           candlesNow.map((c) => ({ time: c.time as Time, value: c.high })),
           candlesNow,
           mode,
@@ -325,7 +404,7 @@ export function TradingChart() {
         )
       );
       lowLineSeriesRef.current.setData(
-        filterByDisplayMode(
+        filterVisibleItems(
           candlesNow.map((c) => ({ time: c.time as Time, value: c.low })),
           candlesNow,
           mode,
@@ -334,15 +413,18 @@ export function TradingChart() {
       );
     }
 
-    // 记录实时 K 的可见状态,供 WS 更新时判断要不要重建
-    const last = candlesNow[candlesNow.length - 1];
-    liveCandleVisibleRef.current = isCandleVisible(last, mode, anchor);
+    // 价格轴:过滤模式下固定为全量范围 + 隐藏「最后值」标签(那已是最后一根可见 K,不是现价)
+    applyDisplayModePriceAxis(mode, anchor, candlesNow);
 
-    // 过滤后 K 线变得稀疏,时间轴的逻辑索引会重算 → 需要重新 fit,否则可能看到空白图
-    if (chartRef.current) {
-      chartRef.current.timeScale().fitContent();
-    }
-  }, []);
+    // 锚点现价参考线
+    syncAnchorPriceLine(mode, anchor);
+
+    // 记录:最后一根 K 当前是否在蜡烛序列里(实时 K 可见性翻转时需要重建序列)
+    const lastCandle = candlesNow[candlesNow.length - 1];
+    liveCandleVisibleRef.current = lastCandle
+      ? isCandleVisible(lastCandle, mode, anchor)
+      : false;
+  }, [applyDisplayModePriceAxis, syncAnchorPriceLine]);
 
   // 双击图表下单:拖动价格线状态
   const [dragState, setDragState] = useState<{
@@ -773,41 +855,54 @@ export function TradingChart() {
         calculateIndicators(data);
 
         if (candleSeriesRef.current && chartRef.current) {
-          // 构建带颜色的蜡烛数据(Engulfing/Pinbar + Proximity Signal 染色)
-          const fullChartData = buildChartData(data, proximitySignalsRef.current);
-
           // 应用 K 线显示模式(S/L 过滤)—— 用最新状态,避免把模式写进 useEffect 依赖
           const storeState = useChartStore.getState();
           const mode: KlineDisplayMode = storeState.displayMode;
-          const anchor = storeState.displayAnchorPrice;
+          let anchor = storeState.displayAnchorPrice;
 
-          const chartData = filterByDisplayMode(fullChartData, data, mode, anchor);
-          candleSeriesRef.current.setData(chartData);
+          // 切换 symbol / 周期后,旧锚点属于上一个标的 → 用新数据的最新价重新锚定
+          if (mode !== "normal") {
+            const newAnchor = data.length > 0 ? data[data.length - 1].close : null;
+            if (newAnchor !== null) {
+              anchor = newAnchor;
+              useChartStore.getState().setDisplayMode(mode);
+            }
+          }
 
-          // 设置成交量数据
-          if (volumeSeriesRef.current) {
-            const volumeData = filterByDisplayMode(
-              buildVolumeData(data),
+          // 蜡烛序列:只放可见 K 线(隐藏的 K 线不绘制)
+          candleSeriesRef.current.setData(
+            filterVisibleItems(
+              buildChartData(data, proximitySignalsRef.current),
               data,
               mode,
               anchor
+            )
+          );
+
+          // 成交量序列:保留全部时间点(隐藏 K 的成交量置 0),时间轴靠它兜底
+          if (volumeSeriesRef.current) {
+            volumeSeriesRef.current.setData(
+              maskHiddenVolume(buildVolumeData(data), data, mode, anchor)
             );
-            volumeSeriesRef.current.setData(volumeData);
           }
 
-          // 设置折线图数据
+          // 设置折线图数据(折线图模式下显示,同样只保留可见 K 线)
           if (highLineSeriesRef.current && lowLineSeriesRef.current) {
             const highData: LineData<Time>[] = data.map(c => ({ time: c.time as Time, value: c.high }));
             const lowData: LineData<Time>[] = data.map(c => ({ time: c.time as Time, value: c.low }));
-            highLineSeriesRef.current.setData(filterByDisplayMode(highData, data, mode, anchor));
-            lowLineSeriesRef.current.setData(filterByDisplayMode(lowData, data, mode, anchor));
+            highLineSeriesRef.current.setData(filterVisibleItems(highData, data, mode, anchor));
+            lowLineSeriesRef.current.setData(filterVisibleItems(lowData, data, mode, anchor));
           }
 
-          // 记录实时 K 的可见状态
+          // 价格轴 + 锚点参考线
+          applyDisplayModePriceAxis(mode, anchor, data);
+          syncAnchorPriceLine(mode, anchor);
+
+          // 记录最后一根 K 是否在序列中
           const lastCandle = data[data.length - 1];
-          if (lastCandle) {
-            liveCandleVisibleRef.current = isCandleVisible(lastCandle, mode, anchor);
-          }
+          liveCandleVisibleRef.current = lastCandle
+            ? isCandleVisible(lastCandle, mode, anchor)
+            : false;
 
           // 切换 symbol 后让图表自适应价格轴范围
           chartRef.current.timeScale().fitContent();
@@ -869,23 +964,35 @@ export function TradingChart() {
 
         if (candleSeriesRef.current) {
           if (candleVisible) {
-            candleSeriesRef.current.update({
-              time: candle.time as Time,
-              open: candle.open,
-              high: candle.high,
-              low: candle.low,
-              close: candle.close,
-            });
-            liveCandleVisibleRef.current = true;
+            if (liveCandleVisibleRef.current) {
+              // 快路径:这根 K 本来就在序列里,直接更新
+              candleSeriesRef.current.update({
+                time: candle.time as Time,
+                open: candle.open,
+                high: candle.high,
+                low: candle.low,
+                close: candle.close,
+              });
+            } else {
+              // 之前被隐藏(lightweight-charts v4 没有删除单根 K 的 API)→ 重建序列加回来
+              liveCandleVisibleRef.current = true;
+              buildFilteredSeries();
+            }
           } else if (liveCandleVisibleRef.current) {
-            // 刚从可见变为隐藏 —— lightweight-charts v4 没有 remove API,只能整段重建
+            // 这根 K 刚变成隐藏 → 重建序列把它剔除
             liveCandleVisibleRef.current = false;
             buildFilteredSeries();
           }
         }
 
-        // 更新成交量(隐藏的 K 同样不更新)
-        if (volumeSeriesRef.current && candleVisible) {
+        // 更新成交量:隐藏的 K 线成交量置 0(时间点保留,时间轴不塌陷)
+        if (volumeSeriesRef.current && !candleVisible) {
+          volumeSeriesRef.current.update({
+            time: candle.time as Time,
+            value: 0,
+            color: "rgba(0,0,0,0)",
+          });
+        } else if (volumeSeriesRef.current) {
           const prevVolume = lastKlineTimeRef.current > 0
             ? useChartStore.getState().candles.find(c => c.time === lastKlineTimeRef.current)?.volume ?? 0
             : 0;
@@ -935,7 +1042,7 @@ export function TradingChart() {
       }
       setConnected(false);
     };
-  }, [symbol, timeframe, setCandles, updateCandle, setLoading, setConnected, calculateIndicators, buildFilteredSeries]);
+  }, [symbol, timeframe, setCandles, updateCandle, setLoading, setConnected, calculateIndicators, buildFilteredSeries, applyDisplayModePriceAxis, syncAnchorPriceLine]);
 
   // K 线显示模式变化(S / L 切换)→ 重新过滤 / 恢复全部 K 线
   useEffect(() => {
