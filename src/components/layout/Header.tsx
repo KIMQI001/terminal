@@ -3,6 +3,7 @@
 import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User, Maximize2, Minimize2, Building2, Layers, Bot, BarChart3, LineChart } from "lucide-react";
 import { MTFPanel } from "@/components/chart/MTFPanel";
 import { DailyHLPanel } from "@/components/chart/DailyHLPanel";
+import { PriceModeToggle } from "@/components/chart/PriceModeToggle";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -150,6 +151,9 @@ export function Header() {
             </Button>
           ))}
         </div>
+
+        {/* 当前价 + K线显示模式(S/L) */}
+        <PriceModeToggle />
 
         {/* MTF Panel */}
         <MTFPanel />

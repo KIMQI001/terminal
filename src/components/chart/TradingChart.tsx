@@ -6,6 +6,7 @@ import {
   IChartApi,
   ISeriesApi,
   CandlestickData,
+  HistogramData,
   LineData,
   Time,
   SeriesMarker,
@@ -55,6 +56,128 @@ import { detectEquilibriumZones } from "@/lib/chart/indicators/equilibrium";
 import { computeInitialBalance } from "@/lib/chart/indicators/initialBalance";
 import { computeAsiaBias } from "@/lib/chart/indicators/asiaBias";
 import { computeEuropeBias } from "@/lib/chart/indicators/europeBias";
+import {
+  isCandleVisible,
+  filterByDisplayMode,
+  type KlineDisplayMode,
+} from "@/lib/chart/klineDisplay";
+import type { ProximitySignal } from "@/types/proximitySignal";
+
+/**
+ * 构建带颜色的蜡烛数据(Engulfing/Pinbar 染色 + Proximity Signal 染色)
+ * —— 抽出成模块级函数,方便「K线显示模式」过滤后整段重建。
+ */
+function buildChartData(
+  data: Candle[],
+  proximitySignals: ProximitySignal[]
+): CandlestickData<Time>[] {
+  // 先计算 Swing Points
+  const pivotResult = detectPivotsFull(data, 50);
+  const pinbars = detectEngulfingPinbar(data, pivotResult.pivots, 5);
+  const pinbarMap = new Map(pinbars.map((p) => [p.time, p]));
+  const proxMap = new Map(proximitySignals.map((s) => [s.time, s]));
+
+  return data.map((c) => {
+    const pinbar = pinbarMap.get(c.time);
+    if (pinbar) {
+      // Engulfing Pinbar 蜡烛染色
+      const color = pinbar.type === "bullish" ? "#3b82f6" : "#f97316"; // 蓝=涨, 橙=跌
+      return {
+        time: c.time as Time,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        color: color,
+        borderColor: color,
+        wickColor: color,
+      };
+    }
+
+    // Proximity Signal:触发的 K 整根染色(浅紫/深蓝)
+    const proxSig = proxMap.get(c.time);
+    if (proxSig) {
+      const color =
+        proxSig.side === "bullish"
+          ? PROXIMITY_KLINE_COLOR.bullish
+          : PROXIMITY_KLINE_COLOR.bearish;
+      return {
+        time: c.time as Time,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        color: color,
+        borderColor: color,
+        wickColor: color,
+      };
+    }
+
+    return {
+      time: c.time as Time,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+    };
+  });
+}
+
+/** 构建成交量数据(倍量 + 小实体 + 同色前两根 + 反转确认 → 绿/红) */
+function buildVolumeData(data: Candle[]): HistogramData<Time>[] {
+  return data.map((c, i) => {
+    const prevVolume = i > 0 ? data[i - 1].volume ?? 0 : 0;
+    const isHighVolume = prevVolume > 0 && (c.volume ?? 0) >= prevVolume * 1.9;
+
+    // 检查后两根K线实体是否有一根小于100点（用于判断是否变色）
+    const next1Body =
+      i + 1 < data.length
+        ? Math.abs((data[i + 1].close ?? 0) - (data[i + 1].open ?? 0))
+        : 0;
+    const next2Body =
+      i + 2 < data.length
+        ? Math.abs((data[i + 2].close ?? 0) - (data[i + 2].open ?? 0))
+        : 0;
+    const hasSmallBody = next1Body < 100 || next2Body < 100;
+
+    // 检查前两根K线是否和当前K线颜色相同
+    const isCurrentBullish = c.close >= c.open;
+    const prev1SameColor =
+      i >= 1 ? (data[i - 1].close >= data[i - 1].open) === isCurrentBullish : false;
+    const prev2SameColor =
+      i >= 2 ? (data[i - 2].close >= data[i - 2].open) === isCurrentBullish : false;
+    const hasSameColorBefore = prev1SameColor && prev2SameColor;
+
+    // 反转确认：第二根（i+2）的高/低不能突破倍量+第一根的范围
+    // 绿柱：i+2.high ≤ max(i.high, i+1.high) —— 没突破前高，涨到头了
+    // 红柱：i+2.low  ≥ min(i.low,  i+1.low)  —— 没跌破前低，跌到头了
+    // 如果 i+2 不存在（最后一根附近），跳过反转确认 → 不染色
+    let hasReversalConfirm = false;
+    if (i + 2 < data.length) {
+      const i2 = data[i + 2];
+      if (isCurrentBullish) {
+        hasReversalConfirm = i2.high <= Math.max(c.high, data[i + 1].high);
+      } else {
+        hasReversalConfirm = i2.low >= Math.min(c.low, data[i + 1].low);
+      }
+    }
+
+    // 普通：阳k白色透明，阴k黑色透明
+    // 倍量 + 小实体 + 同色前两根 + 反转确认：阳k绿色，阴k红色
+    let color: string;
+    if (isHighVolume && hasSmallBody && hasSameColorBefore && hasReversalConfirm) {
+      color = c.close >= c.open ? "rgba(34, 197, 94, 0.7)" : "rgba(239, 68, 68, 0.7)";
+    } else {
+      color = c.close >= c.open ? "rgba(0, 0, 0, 0.2)" : "rgba(0, 0, 0, 0.4)";
+    }
+
+    return {
+      time: c.time as Time,
+      value: c.volume ?? 0,
+      color,
+    };
+  });
+}
 
 export function TradingChart() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -96,6 +219,8 @@ export function TradingChart() {
     liquidationData,
     dailyKAnchors,
     dailyKLineEnabled,
+    displayMode,
+    displayAnchorPrice,
     setCandles,
     setChartType,
     updateCandle,
@@ -152,6 +277,72 @@ export function TradingChart() {
   const { tradingLines, realOrders, fetchOpenOrders, setPrefillData, openModal } = useOrderStore();
   const { positions, fetchPositions } = usePositionStore();
   const { user } = useUserStore();
+
+  // 最新的 proximitySignals(ref)—— 供 buildChartData 使用。
+  // 用 ref 而不是直接依赖,避免把它放进 useEffect 依赖里导致每次都重新拉 K 线。
+  const proximitySignalsRef = useRef(proximitySignals);
+  proximitySignalsRef.current = proximitySignals;
+
+  // 实时 K 线在当前显示模式下是否可见(可见→不可见时需要整段重建,v4 没有 remove API)
+  const liveCandleVisibleRef = useRef(true);
+
+  /**
+   * 按当前显示模式重建蜡烛 / 成交量 / 高低价线序列。
+   * mode = normal → 全部显示;short → 只留现价上方阳线;long → 只留现价下方阴线。
+   */
+  const buildFilteredSeries = useCallback(() => {
+    if (!candleSeriesRef.current) return;
+
+    const state = useChartStore.getState();
+    const candlesNow = state.candles;
+    if (candlesNow.length === 0) return;
+
+    const mode: KlineDisplayMode = state.displayMode;
+    const anchor = state.displayAnchorPrice;
+
+    candleSeriesRef.current.setData(
+      filterByDisplayMode(
+        buildChartData(candlesNow, proximitySignalsRef.current),
+        candlesNow,
+        mode,
+        anchor
+      )
+    );
+
+    if (volumeSeriesRef.current) {
+      volumeSeriesRef.current.setData(
+        filterByDisplayMode(buildVolumeData(candlesNow), candlesNow, mode, anchor)
+      );
+    }
+
+    if (highLineSeriesRef.current && lowLineSeriesRef.current) {
+      highLineSeriesRef.current.setData(
+        filterByDisplayMode(
+          candlesNow.map((c) => ({ time: c.time as Time, value: c.high })),
+          candlesNow,
+          mode,
+          anchor
+        )
+      );
+      lowLineSeriesRef.current.setData(
+        filterByDisplayMode(
+          candlesNow.map((c) => ({ time: c.time as Time, value: c.low })),
+          candlesNow,
+          mode,
+          anchor
+        )
+      );
+    }
+
+    // 记录实时 K 的可见状态,供 WS 更新时判断要不要重建
+    const last = candlesNow[candlesNow.length - 1];
+    liveCandleVisibleRef.current = isCandleVisible(last, mode, anchor);
+
+    // 过滤后 K 线变得稀疏,时间轴的逻辑索引会重算 → 需要重新 fit,否则可能看到空白图
+    if (chartRef.current) {
+      chartRef.current.timeScale().fitContent();
+    }
+  }, []);
 
   // 双击图表下单:拖动价格线状态
   const [dragState, setDragState] = useState<{
@@ -582,106 +773,25 @@ export function TradingChart() {
         calculateIndicators(data);
 
         if (candleSeriesRef.current && chartRef.current) {
-          // 先计算 Swing Points
-          const pivotResult = detectPivotsFull(data, 50);
-          const pinbars = detectEngulfingPinbar(data, pivotResult.pivots, 5);
-          const pinbarTimes = new Set(pinbars.map(p => p.time));
+          // 构建带颜色的蜡烛数据(Engulfing/Pinbar + Proximity Signal 染色)
+          const fullChartData = buildChartData(data, proximitySignalsRef.current);
 
-          // 构建带颜色的蜡烛数据
-          const proxTimes = new Set(proximitySignals.map(s => s.time));
-          const chartData: CandlestickData<Time>[] = data.map((c) => {
-            const isPinbar = pinbarTimes.has(c.time);
-            const pinbar = pinbars.find(p => p.time === c.time);
+          // 应用 K 线显示模式(S/L 过滤)—— 用最新状态,避免把模式写进 useEffect 依赖
+          const storeState = useChartStore.getState();
+          const mode: KlineDisplayMode = storeState.displayMode;
+          const anchor = storeState.displayAnchorPrice;
 
-            if (isPinbar && pinbar) {
-              // Engulfing Pinbar 蜡烛染色
-              const color = pinbar.type === "bullish" ? "#3b82f6" : "#f97316"; // 蓝=涨, 橙=跌
-              return {
-                time: c.time as Time,
-                open: c.open,
-                high: c.high,
-                low: c.low,
-                close: c.close,
-                color: color,
-                borderColor: color,
-                wickColor: color,
-              };
-            }
-
-            // Proximity Signal:触发的 K 整根染色(浅紫/深蓝)
-            const proxSig = proximitySignals.find(s => s.time === c.time);
-            if (proxSig) {
-              const color = proxSig.side === "bullish"
-                ? PROXIMITY_KLINE_COLOR.bullish
-                : PROXIMITY_KLINE_COLOR.bearish;
-              return {
-                time: c.time as Time,
-                open: c.open,
-                high: c.high,
-                low: c.low,
-                close: c.close,
-                color: color,
-                borderColor: color,
-                wickColor: color,
-              };
-            }
-
-            return {
-              time: c.time as Time,
-              open: c.open,
-              high: c.high,
-              low: c.low,
-              close: c.close,
-            };
-          });
+          const chartData = filterByDisplayMode(fullChartData, data, mode, anchor);
           candleSeriesRef.current.setData(chartData);
 
           // 设置成交量数据
           if (volumeSeriesRef.current) {
-            const volumeData = data.map((c, i) => {
-              const prevVolume = i > 0 ? (data[i - 1].volume ?? 0) : 0;
-              const isHighVolume = prevVolume > 0 && (c.volume ?? 0) >= prevVolume * 1.9;
-
-              // 检查后两根K线实体是否有一根小于100点（用于判断是否变色）
-              const next1Body = i + 1 < data.length ? Math.abs((data[i + 1].close ?? 0) - (data[i + 1].open ?? 0)) : 0;
-              const next2Body = i + 2 < data.length ? Math.abs((data[i + 2].close ?? 0) - (data[i + 2].open ?? 0)) : 0;
-              const hasSmallBody = next1Body < 100 || next2Body < 100;
-
-              // 检查前两根K线是否和当前K线颜色相同
-              const isCurrentBullish = c.close >= c.open;
-              const prev1SameColor = i >= 1 ? (data[i - 1].close >= data[i - 1].open) === isCurrentBullish : false;
-              const prev2SameColor = i >= 2 ? (data[i - 2].close >= data[i - 2].open) === isCurrentBullish : false;
-              const hasSameColorBefore = prev1SameColor && prev2SameColor;
-
-              // 反转确认：第二根（i+2）的高/低不能突破倍量+第一根的范围
-              // 绿柱：i+2.high ≤ max(i.high, i+1.high) —— 没突破前高，涨到头了
-              // 红柱：i+2.low  ≥ min(i.low,  i+1.low)  —— 没跌破前低，跌到头了
-              // 如果 i+2 不存在（最后一根附近），跳过反转确认 → 不染色
-              let hasReversalConfirm = false;
-              if (i + 2 < data.length) {
-                const i2 = data[i + 2];
-                if (isCurrentBullish) {
-                  hasReversalConfirm = i2.high <= Math.max(c.high, data[i + 1].high);
-                } else {
-                  hasReversalConfirm = i2.low  >= Math.min(c.low,  data[i + 1].low);
-                }
-              }
-
-              // 普通：阳k白色透明，阴k黑色透明
-              // 倍量 + 小实体 + 同色前两根 + 反转确认：阳k绿色，阴k红色
-              let color: string;
-              if (isHighVolume && hasSmallBody && hasSameColorBefore && hasReversalConfirm) {
-                color = c.close >= c.open ? 'rgba(34, 197, 94, 0.7)' : 'rgba(239, 68, 68, 0.7)';
-              } else {
-                color = c.close >= c.open ? 'rgba(0, 0, 0, 0.2)' : 'rgba(0, 0, 0, 0.4)';
-              }
-
-              return {
-                time: c.time as Time,
-                value: c.volume ?? 0,
-                color,
-              };
-            });
+            const volumeData = filterByDisplayMode(
+              buildVolumeData(data),
+              data,
+              mode,
+              anchor
+            );
             volumeSeriesRef.current.setData(volumeData);
           }
 
@@ -689,8 +799,14 @@ export function TradingChart() {
           if (highLineSeriesRef.current && lowLineSeriesRef.current) {
             const highData: LineData<Time>[] = data.map(c => ({ time: c.time as Time, value: c.high }));
             const lowData: LineData<Time>[] = data.map(c => ({ time: c.time as Time, value: c.low }));
-            highLineSeriesRef.current.setData(highData);
-            lowLineSeriesRef.current.setData(lowData);
+            highLineSeriesRef.current.setData(filterByDisplayMode(highData, data, mode, anchor));
+            lowLineSeriesRef.current.setData(filterByDisplayMode(lowData, data, mode, anchor));
+          }
+
+          // 记录实时 K 的可见状态
+          const lastCandle = data[data.length - 1];
+          if (lastCandle) {
+            liveCandleVisibleRef.current = isCandleVisible(lastCandle, mode, anchor);
           }
 
           // 切换 symbol 后让图表自适应价格轴范围
@@ -735,18 +851,41 @@ export function TradingChart() {
           volume: candle.volume,
         });
 
+        // 当前显示模式下,这根实时 K 是否可见(被隐藏的 K 不进系列)
+        const wsState = useChartStore.getState();
+        const liveCandle: Candle = {
+          time: candle.time,
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          volume: candle.volume,
+        };
+        const candleVisible = isCandleVisible(
+          liveCandle,
+          wsState.displayMode,
+          wsState.displayAnchorPrice
+        );
+
         if (candleSeriesRef.current) {
-          candleSeriesRef.current.update({
-            time: candle.time as Time,
-            open: candle.open,
-            high: candle.high,
-            low: candle.low,
-            close: candle.close,
-          });
+          if (candleVisible) {
+            candleSeriesRef.current.update({
+              time: candle.time as Time,
+              open: candle.open,
+              high: candle.high,
+              low: candle.low,
+              close: candle.close,
+            });
+            liveCandleVisibleRef.current = true;
+          } else if (liveCandleVisibleRef.current) {
+            // 刚从可见变为隐藏 —— lightweight-charts v4 没有 remove API,只能整段重建
+            liveCandleVisibleRef.current = false;
+            buildFilteredSeries();
+          }
         }
 
-        // 更新成交量
-        if (volumeSeriesRef.current) {
+        // 更新成交量(隐藏的 K 同样不更新)
+        if (volumeSeriesRef.current && candleVisible) {
           const prevVolume = lastKlineTimeRef.current > 0
             ? useChartStore.getState().candles.find(c => c.time === lastKlineTimeRef.current)?.volume ?? 0
             : 0;
@@ -796,7 +935,12 @@ export function TradingChart() {
       }
       setConnected(false);
     };
-  }, [symbol, timeframe, setCandles, updateCandle, setLoading, setConnected, calculateIndicators]);
+  }, [symbol, timeframe, setCandles, updateCandle, setLoading, setConnected, calculateIndicators, buildFilteredSeries]);
+
+  // K 线显示模式变化(S / L 切换)→ 重新过滤 / 恢复全部 K 线
+  useEffect(() => {
+    buildFilteredSeries();
+  }, [displayMode, displayAnchorPrice, buildFilteredSeries]);
 
   // 处理图表类型切换
   useEffect(() => {

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { Candle, Timeframe } from "@/types/chart";
 import type { LiquidationHillData } from "@/lib/chart/primitives";
+import type { KlineDisplayMode } from "@/lib/chart/klineDisplay";
 
 // 日K前高前低
 export interface DailyHL {
@@ -42,6 +43,10 @@ interface ChartState {
   dailyHLLines: DailyHLLines;  // 价格线选中状态
   dailyKAnchors: { '1D': DailyKAnchor | null; '4D': DailyKAnchor | null };  // 日K/4D 锚点 OHLC
   dailyKLineEnabled: boolean;  // 是否在图上画日K锚点 OHLC 线
+  /** K 线显示模式:normal=全部 / short=只显示现价上方阳线 / long=只显示现价下方阴线 */
+  displayMode: KlineDisplayMode;
+  /** 进入显示模式那一刻的现价锚点(快照,保证可见 K 线集合稳定不闪烁) */
+  displayAnchorPrice: number | null;
 
   setSymbol: (symbol: string) => void;
   setTimeframe: (timeframe: Timeframe) => void;
@@ -57,6 +62,7 @@ interface ChartState {
   setDailyKAnchor: (tf: '1D' | '4D', anchor: DailyKAnchor | null) => void;
   toggleDailyKLine: (tf: '1D' | '4D', line: 'O' | 'H' | 'L' | 'C') => void;
   setDailyKLineEnabled: (enabled: boolean) => void;
+  setDisplayMode: (mode: KlineDisplayMode) => void;
 }
 
 export const useChartStore = create<ChartState>((set) => ({
@@ -116,4 +122,19 @@ export const useChartStore = create<ChartState>((set) => ({
   }),
   dailyKLineEnabled: false,
   setDailyKLineEnabled: (enabled) => set({ dailyKLineEnabled: enabled }),
+
+  displayMode: "normal",
+  displayAnchorPrice: null,
+  // 切换显示模式时顺手把「当前价」锚定下来 —— 用最后一根 K 的收盘价(实时更新)
+  setDisplayMode: (mode) =>
+    set((state) => {
+      if (mode === "normal") {
+        return { displayMode: "normal" as KlineDisplayMode, displayAnchorPrice: null };
+      }
+      const last = state.candles[state.candles.length - 1];
+      return {
+        displayMode: mode,
+        displayAnchorPrice: last ? last.close : null,
+      };
+    }),
 }));
