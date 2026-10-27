@@ -3,6 +3,8 @@ import {
   isCandleVisible,
   filterVisibleItems,
   maskHiddenVolume,
+  computeVisibleTimes,
+  isSameTimeList,
 } from "./klineDisplay";
 import type { Candle } from "@/types/chart";
 import type { HistogramData, Time } from "lightweight-charts";
@@ -55,6 +57,13 @@ describe("isCandleVisible", () => {
     expect(isCandleVisible(c(1, 90, 100), "short", anchor)).toBe(false);
     expect(isCandleVisible(c(1, 110, 100), "long", anchor)).toBe(false);
   });
+
+  it("实时 K(isLive)永远显示:正在形成的那根不代表过滤条件", () => {
+    // 就算实时 K 方向不符合,也要保留显示
+    expect(isCandleVisible(c(1, 100, 110), "short", anchor, true)).toBe(true);
+    expect(isCandleVisible(c(1, 110, 100), "long", anchor, true)).toBe(true);
+    expect(isCandleVisible(c(1, 90, 95), "short", anchor, true)).toBe(true);
+  });
 });
 
 describe("filterVisibleItems", () => {
@@ -70,16 +79,28 @@ describe("filterVisibleItems", () => {
     expect(filterVisibleItems(items, candles, "normal", 100)).toBe(items);
   });
 
-  it("short:只保留第 1 项", () => {
+  it("short:保留现价上方的阳线 + 正在形成的实时 K", () => {
     const out = filterVisibleItems(items, candles, "short", 100);
-    expect(out).toHaveLength(1);
+    expect(out).toHaveLength(2);
     expect(out[0]).toEqual({ time: 1, value: 110 });
+    // 最后一根 = 正在形成的实时 K → 始终保留
+    expect(out[1]).toEqual({ time: 4, value: 105 });
   });
 
-  it("long:只保留第 2 项", () => {
+  it("long:保留现价下方的阴线 + 正在形成的实时 K", () => {
     const out = filterVisibleItems(items, candles, "long", 100);
-    expect(out).toHaveLength(1);
+    expect(out).toHaveLength(2);
     expect(out[0]).toEqual({ time: 2, value: 90 });
+    expect(out[1]).toEqual({ time: 4, value: 105 });
+  });
+
+  it("最后一根(正在形成的实时 K)始终显示", () => {
+    // 实时 K 是阳线且在锚点上方 → short 模式下也保留
+    const cs: Candle[] = [c(1, 100, 90), c(2, 100, 110)];
+    const its = cs.map((k) => ({ time: k.time as Time, value: k.close }));
+    const out = filterVisibleItems(its, cs, "short", 100);
+    expect(out).toHaveLength(1);
+    expect(out[0].time).toBe(2);
   });
 });
 
@@ -107,11 +128,41 @@ describe("maskHiddenVolume", () => {
     expect(out[0].value).toBe(10);
     expect(out[1].value).toBe(0);
     expect(out[2].value).toBe(0);
-    expect(out[3].value).toBe(0);
+    // 最后一根 = 正在形成的实时 K → 成交量照常显示
+    expect(out[3].value).toBe(10);
   });
 
-  it("long:只第 2 项保留成交量", () => {
+  it("long:只第 2 项 + 实时 K 保留成交量", () => {
     const out = maskHiddenVolume(items, candles, "long", 100);
-    expect(out.map((o) => o.value)).toEqual([0, 10, 0, 0]);
+    expect(out.map((o) => o.value)).toEqual([0, 10, 0, 10]);
+  });
+});
+
+describe("computeVisibleTimes / isSameTimeList", () => {
+  const candles: Candle[] = [
+    c(1, 100, 110), // 阳,上方
+    c(2, 100, 90), // 阴,下方
+    c(3, 90, 95), // 阳,下方
+    c(4, 110, 105), // 阴,上方(实时 K)
+  ];
+
+  it("normal:全部时间点", () => {
+    expect(computeVisibleTimes(candles, "normal", 100)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("short:现价上方的阳线 + 正在形成的实时 K", () => {
+    expect(computeVisibleTimes(candles, "short", 100)).toEqual([1, 4]);
+  });
+
+  it("long:现价下方的阴线 + 正在形成的实时 K", () => {
+    expect(computeVisibleTimes(candles, "long", 100)).toEqual([2, 4]);
+  });
+
+  it("isSameTimeList:比较两个时间点列表", () => {
+    expect(isSameTimeList([1, 2], [1, 2])).toBe(true);
+    expect(isSameTimeList([1, 2], [2, 1])).toBe(false);
+    expect(isSameTimeList([1, 2], [1])).toBe(false);
+    expect(isSameTimeList(null, [1])).toBe(false);
+    expect(isSameTimeList([1], null)).toBe(false);
   });
 });

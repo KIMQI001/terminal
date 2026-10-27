@@ -63,8 +63,8 @@ export function PriceModeToggle() {
           onClick={() => handle("short")}
           title={
             displayMode === "short"
-              ? `做空模式:只显示${anchorText}以上的阳线(再点一次恢复全部)`
-              : `做空模式:只显示${anchorText}以上的阳线`
+              ? `做空模式:只显示${anchorText}以上的阳线(正在形成的那根K线保留 · 再点一次恢复全部)`
+              : `做空模式:只显示${anchorText}以上的阳线(正在形成的那根K线保留)`
           }
           className={cn(
             btn,
@@ -80,8 +80,8 @@ export function PriceModeToggle() {
           onClick={() => handle("long")}
           title={
             displayMode === "long"
-              ? `做多模式:只显示${anchorText}以下的阴线(再点一次恢复全部)`
-              : `做多模式:只显示${anchorText}以下的阴线`
+              ? `做多模式:只显示${anchorText}以下的阴线(正在形成的那根K线保留 · 再点一次恢复全部)`
+              : `做多模式:只显示${anchorText}以下的阴线(正在形成的那根K线保留)`
           }
           className={cn(
             btn,

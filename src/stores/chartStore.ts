@@ -80,20 +80,38 @@ export const useChartStore = create<ChartState>((set) => ({
   setSymbol: (symbol) => set({ symbol, dailyHL: null, dailyHLLines: { H: false, P: false, D: false, L: false } }),  // 切换symbol时清空
   setTimeframe: (timeframe) => set({ timeframe }),
   setChartType: (chartType) => set({ chartType }),
-  setCandles: (candles) => set({ candles }),
+  setCandles: (candles) =>
+    set((state) => ({
+      candles,
+      // 过滤模式下锚点现价 = 最新一根 K 的收盘价(换标的 / 换周期后自动重新锚定)
+      displayAnchorPrice:
+        state.displayMode !== "normal" && candles.length > 0
+          ? candles[candles.length - 1].close
+          : state.displayAnchorPrice,
+    })),
   updateCandle: (candle) =>
     set((state) => {
       const existingIndex = state.candles.findIndex(
         (c) => c.time === candle.time
       );
 
+      let newCandles: Candle[];
       if (existingIndex >= 0) {
-        const newCandles = [...state.candles];
+        newCandles = [...state.candles];
         newCandles[existingIndex] = candle;
-        return { candles: newCandles };
       } else {
-        return { candles: [...state.candles, candle] };
+        newCandles = [...state.candles, candle];
       }
+
+      // 过滤模式下锚点现价跟随实时 K 的最新收盘价:
+      // 锚点恒等于实时 K 的收盘价 → 实时 K 永远不属于「现价以上 / 以下」→ 永远不显示
+      if (state.displayMode !== "normal" && newCandles.length > 0) {
+        return {
+          candles: newCandles,
+          displayAnchorPrice: newCandles[newCandles.length - 1].close,
+        };
+      }
+      return { candles: newCandles };
     }),
   setLoading: (isLoading) => set({ isLoading }),
   setError: (error) => set({ error }),
