@@ -61,17 +61,24 @@ import {
   maskHiddenVolume,
   computeVisibleTimes,
   isSameTimeList,
+  getStandaloneColor,
   type KlineDisplayMode,
 } from "@/lib/chart/klineDisplay";
 import type { ProximitySignal } from "@/types/proximitySignal";
 
 /**
- * 构建带颜色的蜡烛数据(Engulfing/Pinbar 染色 + Proximity Signal 染色)
+ * 构建带颜色的蜡烛数据(Engulfing/Pinbar 染色 + Proximity Signal 染色 + 独立 K 线高亮)
  * —— 抽出成模块级函数,方便「K线显示模式」过滤后整段重建。
+ *
+ * 染色优先级(后者覆盖前者):
+ *  1) 独立 K 线高亮 —— S 模式:独立阳k 橙色;L 模式:独立阴k 蓝色
+ *  2) Engulfing Pinbar 染色
+ *  3) Proximity Signal 染色
  */
 function buildChartData(
   data: Candle[],
-  proximitySignals: ProximitySignal[]
+  proximitySignals: ProximitySignal[],
+  mode: KlineDisplayMode = "normal"
 ): CandlestickData<Time>[] {
   // 先计算 Swing Points
   const pivotResult = detectPivotsFull(data, 50);
@@ -79,7 +86,22 @@ function buildChartData(
   const pinbarMap = new Map(pinbars.map((p) => [p.time, p]));
   const proxMap = new Map(proximitySignals.map((s) => [s.time, s]));
 
-  return data.map((c) => {
+  return data.map((c, i) => {
+    // 独立 K 线高亮(S/L 过滤模式)
+    const standaloneColor = getStandaloneColor(data, i, mode);
+    if (standaloneColor) {
+      return {
+        time: c.time as Time,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        color: standaloneColor,
+        borderColor: standaloneColor,
+        wickColor: standaloneColor,
+      };
+    }
+
     const pinbar = pinbarMap.get(c.time);
     if (pinbar) {
       // Engulfing Pinbar 蜡烛染色
@@ -320,7 +342,8 @@ export function TradingChart() {
           const b = base();
           return { priceRange: { minValue, maxValue }, margins: b?.margins };
         },
-        // 序列里最后一条已是「最后一根可见 K」,不是现价,标签会误导 → 关闭
+        // 序列最后一条就是正在形成的实时 K(收盘价=现价),
+        // 但价格轴上已经有「现价 X」锚点标签了 → 关掉重复的最后值标签
         lastValueVisible: false,
       });
     },
@@ -379,7 +402,7 @@ export function TradingChart() {
     // 蜡烛序列:只放可见 K 线
     candleSeriesRef.current.setData(
       filterVisibleItems(
-        buildChartData(candlesNow, proximitySignalsRef.current),
+        buildChartData(candlesNow, proximitySignalsRef.current, mode),
         candlesNow,
         mode,
         anchor
@@ -907,14 +930,24 @@ export function TradingChart() {
 
         if (candleSeriesRef.current) {
           // 快路径:这根 K 本来就在序列里(实时 K 永远保留),直接更新
+          // 注意:v4 的 update 会用新数据整根替换旧数据,不带 color 字段就会退回默认涨跌色,
+          // 所以这里要把实时 K 的「独立 K 线」高亮色一起带上,否则会在橙色/默认色之间闪。
+          const liveIdx = wsState.candles.length - 1;
+          const standaloneColor = getStandaloneColor(wsState.candles, liveIdx, mode);
+          const liveBar: CandlestickData<Time> = {
+            time: candle.time as Time,
+            open: candle.open,
+            high: candle.high,
+            low: candle.low,
+            close: candle.close,
+          };
+          if (standaloneColor) {
+            liveBar.color = standaloneColor;
+            liveBar.borderColor = standaloneColor;
+            liveBar.wickColor = standaloneColor;
+          }
           try {
-            candleSeriesRef.current.update({
-              time: candle.time as Time,
-              open: candle.open,
-              high: candle.high,
-              low: candle.low,
-              close: candle.close,
-            });
+            candleSeriesRef.current.update(liveBar);
           } catch {
             // v4 不允许更新比最后一条更早的数据 → 整段重建
             buildFilteredSeries();

@@ -104,7 +104,7 @@ export const useChartStore = create<ChartState>((set) => ({
       }
 
       // 过滤模式下锚点现价跟随实时 K 的最新收盘价:
-      // 锚点恒等于实时 K 的收盘价 → 实时 K 永远不属于「现价以上 / 以下」→ 永远不显示
+      // 过滤基准始终是「当前价」,实时 K 本身(正在形成的那根)始终保留显示
       if (state.displayMode !== "normal" && newCandles.length > 0) {
         return {
           candles: newCandles,

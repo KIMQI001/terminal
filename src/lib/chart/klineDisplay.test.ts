@@ -5,6 +5,11 @@ import {
   maskHiddenVolume,
   computeVisibleTimes,
   isSameTimeList,
+  isStandaloneBullish,
+  isStandaloneBearish,
+  getStandaloneColor,
+  STANDALONE_BULLISH_COLOR,
+  STANDALONE_BEARISH_COLOR,
 } from "./klineDisplay";
 import type { Candle } from "@/types/chart";
 import type { HistogramData, Time } from "lightweight-charts";
@@ -164,5 +169,54 @@ describe("computeVisibleTimes / isSameTimeList", () => {
     expect(isSameTimeList([1, 2], [1])).toBe(false);
     expect(isSameTimeList(null, [1])).toBe(false);
     expect(isSameTimeList([1], null)).toBe(false);
+  });
+});
+
+describe("独立 K 线(standalone)", () => {
+  //  0 阳  1 阴  2 阳  3 阳  4 阴  5 阴  6 阳(实时)
+  //  0 前无 / 后是阴 → 独立阳k ✓
+  //  1 前后都是阳 → 独立阴k ✓
+  //  2 后是阳 → 不是独立阳k
+  //  3 前是阳 → 不是独立阳k
+  //  4 后是阴 → 不是独立阴k
+  //  5 前是阴 → 不是独立阴k
+  //  6 前是阴 / 后无 → 独立阳k ✓
+  const candles: Candle[] = [
+    c(0, 100, 110), // 阳
+    c(1, 110, 105), // 阴
+    c(2, 105, 115), // 阳
+    c(3, 115, 125), // 阳
+    c(4, 125, 118), // 阴
+    c(5, 118, 112), // 阴
+    c(6, 112, 120), // 阳
+  ];
+
+  it("独立阳k:自身是阳线且前后都不是阳线", () => {
+    expect(isStandaloneBullish(candles, 6)).toBe(true);
+    expect(isStandaloneBullish(candles, 0)).toBe(true); // 后面是阴线
+    expect(isStandaloneBullish(candles, 2)).toBe(false); // 后面紧跟阳线
+    expect(isStandaloneBullish(candles, 3)).toBe(false); // 前面紧跟阳线
+    expect(isStandaloneBullish(candles, 1)).toBe(false); // 自身是阴线
+  });
+
+  it("独立阴k:自身是阴线且前后都不是阴线", () => {
+    expect(isStandaloneBearish(candles, 1)).toBe(true); // 前后都是阳线
+    expect(isStandaloneBearish(candles, 4)).toBe(false); // 后面紧跟阴线
+    expect(isStandaloneBearish(candles, 5)).toBe(false); // 前面紧跟阴线
+    expect(isStandaloneBearish(candles, 6)).toBe(false); // 自身是阳线
+  });
+
+  it("边界:第一根 / 最后一根只看存在的邻边", () => {
+    const two: Candle[] = [c(0, 100, 110), c(1, 110, 105)];
+    expect(isStandaloneBullish(two, 0)).toBe(true); // 后无 / 后面是阴线
+    expect(isStandaloneBearish(two, 1)).toBe(true); // 前面是阳线
+  });
+
+  it("getStandaloneColor:S 模式独立阳k 橙色,L 模式独立阴k 蓝色", () => {
+    expect(getStandaloneColor(candles, 6, "short")).toBe(STANDALONE_BULLISH_COLOR);
+    expect(getStandaloneColor(candles, 6, "long")).toBeNull();
+    expect(getStandaloneColor(candles, 1, "long")).toBe(STANDALONE_BEARISH_COLOR);
+    expect(getStandaloneColor(candles, 1, "short")).toBeNull();
+    expect(getStandaloneColor(candles, 6, "normal")).toBeNull();
   });
 });

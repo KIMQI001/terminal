@@ -104,3 +104,54 @@ export function isSameTimeList(a: number[] | null, b: number[] | null): boolean 
   }
   return true;
 }
+
+/** 独立阳k 的颜色(橙色) */
+export const STANDALONE_BULLISH_COLOR = "#f97316";
+/** 独立阴k 的颜色(蓝色) */
+export const STANDALONE_BEARISH_COLOR = "#3b82f6";
+
+const isBullish = (c: Candle | undefined): boolean => !!c && c.close > c.open;
+const isBearish = (c: Candle | undefined): boolean => !!c && c.close < c.open;
+
+/**
+ * 「独立阳k」:自身是阳线,且**前后紧邻的 K 线都不是阳线**(阴线 / 十字星 / 边界)。
+ *
+ * 注意:邻接关系按**完整数据**判断,而不是按过滤后可见的 K 线判断 ——
+ * 过滤集合会随现价实时变化,按可见集合判断会导致颜色不停闪烁。
+ */
+export function isStandaloneBullish(candles: Candle[], index: number): boolean {
+  const c = candles[index];
+  if (!c || !isBullish(c)) return false;
+  const prev = index > 0 ? candles[index - 1] : undefined;
+  const next = index + 1 < candles.length ? candles[index + 1] : undefined;
+  return !isBullish(prev) && !isBullish(next);
+}
+
+/** 「独立阴k」:自身是阴线,且前后紧邻的 K 线都不是阴线 */
+export function isStandaloneBearish(candles: Candle[], index: number): boolean {
+  const c = candles[index];
+  if (!c || !isBearish(c)) return false;
+  const prev = index > 0 ? candles[index - 1] : undefined;
+  const next = index + 1 < candles.length ? candles[index + 1] : undefined;
+  return !isBearish(prev) && !isBearish(next);
+}
+
+/**
+ * S/L 过滤模式下的「独立 K 线」高亮色:
+ *  - S(做空):独立阳k → 橙色
+ *  - L(做多):独立阴k → 蓝色
+ * 其它情况返回 null(不染色)。
+ */
+export function getStandaloneColor(
+  candles: Candle[],
+  index: number,
+  mode: KlineDisplayMode
+): string | null {
+  if (mode === "short") {
+    return isStandaloneBullish(candles, index) ? STANDALONE_BULLISH_COLOR : null;
+  }
+  if (mode === "long") {
+    return isStandaloneBearish(candles, index) ? STANDALONE_BEARISH_COLOR : null;
+  }
+  return null;
+}
