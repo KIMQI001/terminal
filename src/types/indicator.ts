@@ -103,4 +103,6 @@ export interface IndicatorState {
   equilibrium: boolean;
   rejections: boolean;
   proximitySignals: boolean;
+  /** 价格带(Price Band)—— 月K 推导的 5 阻力 + 5 支撑带 */
+  priceBand: boolean;
 }

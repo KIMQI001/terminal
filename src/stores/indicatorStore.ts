@@ -170,6 +170,8 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
     equilibrium: true,
     rejections: false,
     proximitySignals: false,
+    // 价格带默认关闭 —— 10 条 400 点宽的带会盖住较多图表区域,按需在 ICT Indicators 里打开
+    priceBand: false,
   };
   return {
     enabled: { ...defaultEnabled, ...persistedEnabled },

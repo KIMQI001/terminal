@@ -44,6 +44,7 @@ const indicators: { key: keyof IndicatorState; label: string }[] = [
   { key: "inducement", label: "Inducement" },
   { key: "rejections", label: "Rejections" },
   { key: "proximitySignals", label: "Proximity Signal" },
+  { key: "priceBand", label: "Price Band" },
 ];
 
 export function Header() {

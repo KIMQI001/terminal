@@ -1386,10 +1386,13 @@ export function TradingChart() {
 
   // ===== 价格带(Price Band)=====
   // 加载月K —— 价格带的价位源头(月K 的 open/close + 阴K low + 阳K high)
+  // 仅在开关打开时才拉月K(默认关闭),避免每次切 symbol 都多打一次后端请求
   useEffect(() => {
     let isCancelled = false;
     setMonthlyCandles([]);
     priceBandKeyRef.current = "";
+
+    if (!enabled.priceBand) return;
 
     loadMonthlyCandles(symbol).then((monthly) => {
       if (!isCancelled) setMonthlyCandles(monthly);
@@ -1398,14 +1401,14 @@ export function TradingChart() {
     return () => {
       isCancelled = true;
     };
-  }, [symbol]);
+  }, [symbol, enabled.priceBand]);
 
   // 计算价格带并绘制 —— 5 个阻力带(现价上方) + 5 个支撑带(现价下方),每档 ±200 点
   useEffect(() => {
     const primitive = priceBandPrimitiveRef.current;
     if (!primitive) return;
 
-    if (monthlyCandles.length === 0) {
+    if (!enabled.priceBand || monthlyCandles.length === 0) {
       primitive.setData([], []);
       priceBandKeyRef.current = "";
       return;
@@ -1425,7 +1428,7 @@ export function TradingChart() {
     priceBandKeyRef.current = key;
 
     primitive.setData(band.resistances, band.supports);
-  }, [monthlyCandles, candles]);
+  }, [monthlyCandles, candles, enabled.priceBand]);
 
   // Update Swing Points Markers (蜡烛图模式)
   useEffect(() => {
