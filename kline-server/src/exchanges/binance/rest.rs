@@ -159,8 +159,9 @@ impl ExchangeRest for BinanceRest {
     }
 
     fn normalize_timeframe(&self, timeframe: &str) -> String {
-        // Binance 时间周期格式：1m, 5m, 15m, 1h, 4h, 1d, 1w
-        timeframe.to_lowercase()
+        // Binance 时间周期格式：1m, 5m, 15m, 1h, 4h, 1d, 1w, 1M(月线)
+        // 月线的 "M" 必须大写 —— 整体 lowercase 会把月线降级成 1 分钟线
+        crate::types::normalize_timeframe_str(timeframe)
     }
 }
 

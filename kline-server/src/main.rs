@@ -33,11 +33,15 @@ const DEFAULT_SUBSCRIPTIONS: &[(&str, &str)] = &[
     ("BTCUSDC", "1h"),
     ("BTCUSDC", "4h"),
     ("BTCUSDC", "1d"),
+    // 月线：价格带(Price Band)计算依赖月K 的 OHLC
+    // 注意 "1M" 的大小写必须保留（Binance 月线 vs 1 分钟线）
+    ("BTCUSDC", "1M"),
     ("ETHUSDC", "5m"),
     ("ETHUSDC", "15m"),
     ("ETHUSDC", "1h"),
     ("ETHUSDC", "4h"),
     ("ETHUSDC", "1d"),
+    ("ETHUSDC", "1M"),
 ];
 
 #[tokio::main]

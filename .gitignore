@@ -42,6 +42,9 @@ Thumbs.db
 kline-server/target/
 kline-server/*.db
 kline-server/*.db-journal
+# 从仓库根目录启动 kline-server 时生成的 SQLite
+/klines.db
+/klines.db-journal
 
 # Rust rolling-service
 rolling-service/target/

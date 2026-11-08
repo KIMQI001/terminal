@@ -48,7 +48,10 @@ import {
   BreakerBlockPrimitive,
   LiquidationHillPrimitive,
   EquilibriumPrimitive,
+  PriceBandPrimitive,
 } from "@/lib/chart/primitives";
+import { computePriceBand } from "@/lib/chart/priceBand";
+import { loadMonthlyCandles } from "@/lib/chart/priceBandLoader";
 import { detectOTEZones } from "@/lib/chart/indicators/ote";
 import { detectBreakerBlocks } from "@/lib/chart/indicators/breakerBlocks";
 import { detectInducements } from "@/lib/chart/indicators/inducement";
@@ -225,6 +228,8 @@ export function TradingChart() {
   const breakerBlockPrimitiveRef = useRef<BreakerBlockPrimitive | null>(null);
   const liquidationHillPrimitiveRef = useRef<LiquidationHillPrimitive | null>(null);
   const equilibriumPrimitiveRef = useRef<EquilibriumPrimitive | null>(null);
+  // 价格带(Price Band):基于月K 的 5 阻力 + 5 支撑,每档 ±200 点
+  const priceBandPrimitiveRef = useRef<PriceBandPrimitive | null>(null);
 
   // Trading price lines
   const priceLinesRef = useRef<IPriceLine[]>([]);
@@ -239,6 +244,11 @@ export function TradingChart() {
 
   // OHLCV 显示数据
   const [ohlcvData, setOhlcvData] = useState<{ time: number; open: number; high: number; low: number; close: number; volume: number } | null>(null);
+
+  // 月K 数据(价格带 Price Band 的计算源)
+  const [monthlyCandles, setMonthlyCandles] = useState<Candle[]>([]);
+  // 已绘制到 primitive 的价格带指纹(价位没变就不重复重绘)
+  const priceBandKeyRef = useRef<string>("");
 
   const {
     symbol,
@@ -788,10 +798,12 @@ export function TradingChart() {
     const breakerBlockPrimitive = new BreakerBlockPrimitive();
     const liquidationHillPrimitive = new LiquidationHillPrimitive();
     const equilibriumPrimitive = new EquilibriumPrimitive();
+    const priceBandPrimitive = new PriceBandPrimitive();
 
     // Attach primitives in order (bottom layer first)
     candleSeries.attachPrimitive(killzonePrimitive);
     candleSeries.attachPrimitive(equilibriumPrimitive);  // EQ 背景：在 killzone 之后、OTE 之前
+    candleSeries.attachPrimitive(priceBandPrimitive);    // 价格带：最底层,不遮挡 K 线
     candleSeries.attachPrimitive(otePrimitive);
     candleSeries.attachPrimitive(breakerBlockPrimitive);
     candleSeries.attachPrimitive(obPrimitive);
@@ -811,6 +823,7 @@ export function TradingChart() {
     breakerBlockPrimitiveRef.current = breakerBlockPrimitive;
     liquidationHillPrimitiveRef.current = liquidationHillPrimitive;
     equilibriumPrimitiveRef.current = equilibriumPrimitive;
+    priceBandPrimitiveRef.current = priceBandPrimitive;
 
     // Handle resize
     const handleResize = () => {
@@ -1370,6 +1383,49 @@ export function TradingChart() {
       );
     }
   }, [orderBlocks, fvgs, proximitySignals, liquidityZones, oteZones, breakerBlocks, equilibriumLevels, liquidationData, enabled.orderBlocks, enabled.fvg, enabled.proximitySignals, enabled.liquidityZones, enabled.killzones, enabled.ote, enabled.breakerBlocks, enabled.equilibrium, timeframe]);
+
+  // ===== 价格带(Price Band)=====
+  // 加载月K —— 价格带的价位源头(月K 的 open/close + 阴K low + 阳K high)
+  useEffect(() => {
+    let isCancelled = false;
+    setMonthlyCandles([]);
+    priceBandKeyRef.current = "";
+
+    loadMonthlyCandles(symbol).then((monthly) => {
+      if (!isCancelled) setMonthlyCandles(monthly);
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [symbol]);
+
+  // 计算价格带并绘制 —— 5 个阻力带(现价上方) + 5 个支撑带(现价下方),每档 ±200 点
+  useEffect(() => {
+    const primitive = priceBandPrimitiveRef.current;
+    if (!primitive) return;
+
+    if (monthlyCandles.length === 0) {
+      primitive.setData([], []);
+      priceBandKeyRef.current = "";
+      return;
+    }
+
+    // 当前价格 = 实时 K 的最新收盘价
+    const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : null;
+    if (currentPrice === null || currentPrice <= 0) return;
+
+    const band = computePriceBand(monthlyCandles, currentPrice);
+
+    // 价位集合没变(实时 tick 只动了小数位)就不重绘
+    const key = [...band.resistances, ...band.supports]
+      .map((l) => l.price.toFixed(2))
+      .join("|");
+    if (key === priceBandKeyRef.current) return;
+    priceBandKeyRef.current = key;
+
+    primitive.setData(band.resistances, band.supports);
+  }, [monthlyCandles, candles]);
 
   // Update Swing Points Markers (蜡烛图模式)
   useEffect(() => {

@@ -96,6 +96,19 @@ impl From<&Kline> for KlineSimple {
     }
 }
 
+/// 规范化时间周期字符串。
+///
+/// **注意**:Binance 的月线是 `"1M"`(大写 M),与 1 分钟线 `"1m"` 只差大小写。
+/// 因此这里不能整体 `to_lowercase()` —— 那样会把月线静默降级成 1 分钟线。
+/// 规则:精确的 `"1M"` 保留大写,其余一律转小写。
+pub fn normalize_timeframe_str(s: &str) -> String {
+    let t = s.trim();
+    if t == "1M" {
+        return "1M".to_string();
+    }
+    t.to_lowercase()
+}
+
 /// 支持的时间周期
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Timeframe {
@@ -115,6 +128,9 @@ pub enum Timeframe {
     D4,
     #[serde(rename = "1w")]
     W1,
+    /// 月线 —— Binance 原生支持,周期字符串必须保留大写 "1M"
+    #[serde(rename = "1M")]
+    Month,
 }
 
 impl Timeframe {
@@ -129,6 +145,7 @@ impl Timeframe {
             Timeframe::D1 => "1d",
             Timeframe::D4 => "4d",
             Timeframe::W1 => "1w",
+            Timeframe::Month => "1M",
         }
     }
 
@@ -143,6 +160,7 @@ impl Timeframe {
             Timeframe::D1 => 24 * 60 * 60,
             Timeframe::D4 => 4 * 24 * 60 * 60,
             Timeframe::W1 => 7 * 24 * 60 * 60,
+            Timeframe::Month => 30 * 24 * 60 * 60,
         }
     }
 
@@ -157,6 +175,8 @@ impl Timeframe {
             "1d" => Some(Timeframe::D1),
             "4d" => Some(Timeframe::D4),
             "1w" => Some(Timeframe::W1),
+            // 月线:大小写敏感,必须与 1 分钟线区分开
+            "1M" => Some(Timeframe::Month),
             _ => None,
         }
     }
@@ -226,7 +246,8 @@ impl SubscriptionKey {
     pub fn new(symbol: impl Into<String>, timeframe: impl Into<String>) -> Self {
         Self {
             symbol: symbol.into().to_uppercase(),
-            timeframe: timeframe.into().to_lowercase(),
+            // 月线 "1M" 必须保留大写,不能整体 lowercase
+            timeframe: normalize_timeframe_str(&timeframe.into()),
         }
     }
 }
