@@ -166,12 +166,85 @@ cd kline-server
 cargo build --release
 ```
 
+### 用 pm2 托管前端（远程部署推荐）
+
+仓库根目录已带 `ecosystem.config.js`，远程 `git pull` 后直接用：
+
+```bash
+# 1) 装依赖 + 构建（首次或更新代码后）
+npm ci
+npm run build
+
+# 2) 启动
+pm2 start ecosystem.config.js
+pm2 save          # 开机自启（配合 pm2 startup 生成的命令）
+pm2 startup       # 首次执行，输出一条命令复制到 root 的 rc 脚本
+
+# 日常运维
+pm2 status
+pm2 logs terminal-web
+pm2 reload ecosystem.config.js   # 滚动重启
+pm2 delete terminal-web
+```
+
+> ⚠️ **`NEXT_PUBLIC_*` 只在构建期生效**
+> `NEXT_PUBLIC_KLINE_API` / `NEXT_PUBLIC_KLINE_WS` 会被内联进浏览器 bundle，
+> 放进 pm2 的 `env` 里运行时再设**无效**。生产环境请写进 `.env.production`
+> （构建时读取），或构建时一次性传入：
+> ```bash
+> NEXT_PUBLIC_KLINE_API=https://yourdomain.com \
+> NEXT_PUBLIC_KLINE_WS=wss://yourdomain.com/ws \
+> npm run build
+> ```
+> `JWT_SECRET` / `API_ENCRYPTION_KEY` 这类**服务端**变量运行时才读取，
+> 放 `.env.production` 或 pm2 `env` 均可。
+
+### Nginx 反向代理示例
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name yourdomain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;      # WebSocket 必需
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 300s;
+    }
+
+    # K 线服务器(含 WebSocket /ws)
+    location /api/klines/ { proxy_pass http://127.0.0.1:3001; }
+    location /ws {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 600s;
+    }
+}
+```
+
 ### 环境变量（生产环境）
 
 确保设置以下环境变量：
 - `JWT_SECRET` - JWT 签名密钥
 - `API_ENCRYPTION_KEY` - API 密钥加密密钥
 - `NODE_ENV=production`
+
+### 提示：更新代码后要重启 K 线服务器
+
+`kline-server` 的默认订阅里新增了月线 `1M`（价格带 Price Band 依赖月K），
+**必须重启 kline-server 才会预热**：
+
+```bash
+cd kline-server && cargo build --release
+pm2 restart kline-server        # 或用 systemd / nohup
+```
+
+不重启也能用：前端有 WebSocket 兜底，会自动触发后端拉取月K。
 
 ## License
 

@@ -56,3 +56,6 @@ analysis-service/data/
 
 # Misc
 *.log
+
+# pm2 日志目录(ecosystem.config.js 会自动创建)
+logs/
