@@ -37,6 +37,7 @@ import { detectProximitySignals, getProximityBandUsd, PROXIMITY_KLINE_COLOR } fr
 import { detectStructure } from "@/lib/chart/indicators/structure";
 import { detectLiquidityZones } from "@/lib/chart/indicators/liquidity";
 import { Candle } from "@/types/chart";
+import type { SwingPoint } from "@/types/chart";
 import {
   OrderBlockPrimitive,
   RejectionPrimitive,
@@ -49,7 +50,9 @@ import {
   LiquidationHillPrimitive,
   EquilibriumPrimitive,
   PriceBandPrimitive,
+  SwingRayPrimitive,
 } from "@/lib/chart/primitives";
+import type { SwingRay } from "@/lib/chart/primitives";
 import { computePriceBand } from "@/lib/chart/priceBand";
 import { loadMonthlyCandles } from "@/lib/chart/priceBandLoader";
 import { detectOTEZones } from "@/lib/chart/indicators/ote";
@@ -230,6 +233,8 @@ export function TradingChart() {
   const equilibriumPrimitiveRef = useRef<EquilibriumPrimitive | null>(null);
   // 价格带(Price Band):基于月K 的 5 阻力 + 5 支撑,每档 ±200 点
   const priceBandPrimitiveRef = useRef<PriceBandPrimitive | null>(null);
+  // 最新 HH / LL 向左延伸的虚射线
+  const swingRayPrimitiveRef = useRef<SwingRayPrimitive | null>(null);
 
   // Trading price lines
   const priceLinesRef = useRef<IPriceLine[]>([]);
@@ -799,11 +804,13 @@ export function TradingChart() {
     const liquidationHillPrimitive = new LiquidationHillPrimitive();
     const equilibriumPrimitive = new EquilibriumPrimitive();
     const priceBandPrimitive = new PriceBandPrimitive();
+    const swingRayPrimitive = new SwingRayPrimitive();
 
     // Attach primitives in order (bottom layer first)
     candleSeries.attachPrimitive(killzonePrimitive);
     candleSeries.attachPrimitive(equilibriumPrimitive);  // EQ 背景：在 killzone 之后、OTE 之前
     candleSeries.attachPrimitive(priceBandPrimitive);    // 价格带：最底层,不遮挡 K 线
+    candleSeries.attachPrimitive(swingRayPrimitive);     // 最新 HH/LL 向左虚射线
     candleSeries.attachPrimitive(otePrimitive);
     candleSeries.attachPrimitive(breakerBlockPrimitive);
     candleSeries.attachPrimitive(obPrimitive);
@@ -824,6 +831,7 @@ export function TradingChart() {
     liquidationHillPrimitiveRef.current = liquidationHillPrimitive;
     equilibriumPrimitiveRef.current = equilibriumPrimitive;
     priceBandPrimitiveRef.current = priceBandPrimitive;
+    swingRayPrimitiveRef.current = swingRayPrimitive;
 
     // Handle resize
     const handleResize = () => {
@@ -1446,6 +1454,34 @@ export function TradingChart() {
     } else {
       candleSeriesRef.current.setMarkers([]);
     }
+  }, [swingPoints, enabled.swingPoints]);
+
+  // 最新 HH / LL 向左延伸的虚射线(亮橙=HH,亮蓝=LL)
+  // 数据源与图上 swing point 标记一致:最后一个 swing high(记 HH)、最后一个 swing low(记 LL)
+  useEffect(() => {
+    const primitive = swingRayPrimitiveRef.current;
+    if (!primitive) return;
+
+    if (!enabled.swingPoints || swingPoints.length === 0) {
+      primitive.setData([]);
+      return;
+    }
+
+    let lastHigh: SwingPoint | null = null;
+    let lastLow: SwingPoint | null = null;
+    for (const sp of swingPoints) {
+      if (sp.type === "high") lastHigh = sp;
+      else lastLow = sp;
+    }
+
+    const rays: SwingRay[] = [];
+    if (lastHigh) {
+      rays.push({ label: "HH", price: lastHigh.price, time: lastHigh.time });
+    }
+    if (lastLow) {
+      rays.push({ label: "LL", price: lastLow.price, time: lastLow.time });
+    }
+    primitive.setData(rays);
   }, [swingPoints, enabled.swingPoints]);
 
   // Update Swing Points Markers (折线图模式) - 使用 detectAllPivots 标记所有波峰波谷
