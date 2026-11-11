@@ -17,6 +17,8 @@
   /* 状态颜色 */
   --positive: #16a34a;
   --negative: #dc2626;
+  /* 指标开关开启色 —— Header 里 ICT Indicators 开关的轨道色 */
+  --bullish: #16a34a;
   --connected: #16a34a;
   --disconnected: #dc2626;
   /* 指标颜色 */

@@ -91,6 +91,8 @@ export interface Killzone {
 
 export interface IndicatorState {
   swingPoints: boolean;
+  /** 最新 HH/LL 向左延伸的水平虚射线(LL 亮蓝 / HH 亮橙) */
+  swingRays: boolean;
   orderBlocks: boolean;
   fvg: boolean;
   bos: boolean;

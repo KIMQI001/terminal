@@ -1462,7 +1462,7 @@ export function TradingChart() {
     const primitive = swingRayPrimitiveRef.current;
     if (!primitive) return;
 
-    if (!enabled.swingPoints || swingPoints.length === 0) {
+    if (!enabled.swingRays || swingPoints.length === 0) {
       primitive.setData([]);
       return;
     }
@@ -1482,7 +1482,7 @@ export function TradingChart() {
       rays.push({ label: "LL", price: lastLow.price, time: lastLow.time });
     }
     primitive.setData(rays);
-  }, [swingPoints, enabled.swingPoints]);
+  }, [swingPoints, enabled.swingRays]);
 
   // Update Swing Points Markers (折线图模式) - 使用 detectAllPivots 标记所有波峰波谷
   useEffect(() => {

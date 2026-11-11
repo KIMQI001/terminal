@@ -33,6 +33,7 @@ const timeframes: { value: Timeframe; label: string }[] = [
 
 const indicators: { key: keyof IndicatorState; label: string }[] = [
   { key: "swingPoints", label: "Swing Points" },
+  { key: "swingRays", label: "Swing Rays" },
   { key: "orderBlocks", label: "Order Blocks" },
   { key: "fvg", label: "FVG" },
   { key: "bos", label: "BOS" },

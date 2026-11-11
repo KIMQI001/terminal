@@ -158,6 +158,8 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
   const persistedEnabled = loadEnabled();
   const defaultEnabled: IndicatorState = {
     swingPoints: true,
+    // 最新 HH/LL 向左延伸的虚射线 —— 只有两条 1px 虚线,默认开启
+    swingRays: true,
     orderBlocks: false,
     fvg: false,
     bos: false,
