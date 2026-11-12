@@ -7,14 +7,16 @@
  *   与 Swing Rays 画在图上的那 10 条射线完全一致。
  * - 波段(leg)= 这 10 个点按时间排序后相邻的一高一低之间的行情。
  * - 主行:幅度最大的波段;副行:持续时间最长的波段(与主行不同才显示)。
- * - 点击起点/终点价位 → 预填下单(高于现价做空,低于现价做多),同「日K锚点」面板。
+ * - 触发价:幅度最大的波段里,HH 下方最近的一根**阳线**的收盘价(做多触发),
+ *   LL 上方最近的一根**阴线**的收盘价(做空触发)—— 一般就在 HH / LL 那根 K 之后 5 根内。
+ * - 点击起点/终点/触发价位 → 预填下单,同「日K锚点」面板。
  */
 
 import { useMemo, useState } from "react";
 import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useChartStore } from "@/stores/chartStore";
 import { useOrderStore } from "@/stores/orderStore";
-import { SwingPoint } from "@/types/chart";
+import { Candle, SwingPoint } from "@/types/chart";
 import { SWING_RAY_COUNT } from "@/lib/chart/primitives";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +40,14 @@ interface SwingLeg {
   toRank: number;
 }
 
+/** 触发 K 线:射线扫到的那根 K 线 */
+interface TriggerCandle {
+  candle: Candle;
+  /** 该 K 线在 pivot 左边多少根(0 = 就是 HH/LL 那根本身) */
+  distance: number;
+}
+
+
 /** 时间戳(秒) → "MM-DD HH:mm" */
 function formatTime(ts: number): string {
   const d = new Date(ts * 1000);
@@ -57,6 +67,48 @@ function formatDuration(sec: number): string {
   if (h > 0) return m > 0 ? `${h}小时${m}分` : `${h}小时`;
   return `${m}分`;
 }
+
+/**
+ * 找到 pivot 对应的 K 线下标(按时间戳匹配,匹配不到再用 pivot.index 兜底)。
+ * swing point 的 index 与 chartStore.candles 的下标是同一套(同一份数据源)。
+ */
+function findCandleIndex(candles: Candle[], pivot: SwingPoint): number {
+  const byTime = candles.findIndex((c) => c.time === pivot.time);
+  if (byTime >= 0) return byTime;
+  if (pivot.index >= 0 && pivot.index < candles.length) return pivot.index;
+  return -1;
+}
+
+/**
+ * 沿**向左的虚射线**找触发 K 线。
+ *
+ * HH / LL 的射线是那条价位向左延伸的水平线,它会"扫过"价格区间覆盖该价位的 K 线。
+ * 从 pivot 本身开始向左扫,取第一根符合颜色要求的:
+ * - bullishBelow: HH 射线扫到的第一根**阳线**(close > open)
+ * - bearishAbove: LL 射线扫到的第一根**阴线**(close < open)
+ *
+ * distance = 该 K 线在 pivot 左边多少根(0 = 就是 HH/LL 那根本身)。
+ */
+function findRayTrigger(
+  candles: Candle[],
+  pivot: SwingPoint,
+  pivotIdx: number,
+  kind: "bullishBelow" | "bearishAbove"
+): TriggerCandle | null {
+  const level = pivot.price;
+  for (let j = pivotIdx; j >= 0; j--) {
+    const c = candles[j];
+    if (!c) continue;
+    // 射线没扫到这根 K(价格区间不覆盖该价位)
+    if (c.low > level || c.high < level) continue;
+    const bull = c.close > c.open;
+    const bear = c.close < c.open;
+    const match = kind === "bullishBelow" ? bull : bear;
+    if (match) return { candle: c, distance: pivotIdx - j };
+  }
+  return null;
+}
+
 
 /** 端点(起点/终点)按钮:色块标签 + 价位,点击预填下单 */
 function EndpointButton({
@@ -97,17 +149,82 @@ function EndpointButton({
   );
 }
 
+/** 触发价一行:HH 下方最近阳线 C(做多) / LL 上方最近阴线 C(做空) */
+function TriggerRow({
+  trigger,
+  side,
+  pivotLabel,
+  pivotPrice,
+  onClick,
+}: {
+  trigger: TriggerCandle | null;
+  side: "buy" | "sell";
+  pivotLabel: string;
+  pivotPrice: number;
+  onClick: (price: number) => void;
+}) {
+  const isBuy = side === "buy";
+  if (!trigger) {
+    return (
+      <div className="flex items-center gap-1.5 text-[9px] text-gray-400 font-mono">
+        <span
+          className={cn(
+            "px-1 rounded leading-4 font-semibold",
+            isBuy ? "bg-green-500/15 text-green-600" : "bg-red-500/15 text-red-600"
+          )}
+        >
+          {isBuy ? "多" : "空"}
+        </span>
+        <span>无触发价(射线向左没扫到{pivotLabel}对应的 K 线)</span>
+      </div>
+    );
+  }
+  const { candle, distance } = trigger;
+  const diffPct = pivotPrice !== 0 ? ((candle.close - pivotPrice) / pivotPrice) * 100 : 0;
+  const whereText = distance === 0 ? "本根K" : `左${distance}根K`;
+  return (
+    <div className="flex items-center gap-1.5 text-[9px] font-mono">
+      <span
+        className={cn(
+          "px-1 rounded leading-4 font-semibold",
+          isBuy ? "bg-green-500/15 text-green-600" : "bg-red-500/15 text-red-600"
+        )}
+      >
+        {isBuy ? "多" : "空"}
+      </span>
+      <button
+        onClick={() => onClick(candle.close)}
+        className="font-semibold hover:underline cursor-pointer"
+        title={`${pivotLabel}射线向左扫到的第一根${isBuy ? "阳线" : "阴线"}的收盘价 —— 点击预填${isBuy ? "做多" : "做空"}`}
+      >
+        {isBuy ? "阳C" : "阴C"} {candle.close.toFixed(1)}
+      </button>
+      <span className="text-gray-400">
+        {pivotLabel}射线 {whereText} {diffPct > 0 ? "+" : ""}
+        {diffPct.toFixed(2)}% · {formatTime(candle.time)}
+      </span>
+    </div>
+  );
+}
+
 /** 一条波段的展示行 */
 function LegRow({
   leg,
   title,
   highlight,
+  triggers,
   onPriceClick,
 }: {
   leg: SwingLeg;
   title: string;
   highlight?: boolean;
-  onPriceClick: (price: number) => void;
+  triggers?: {
+    belowHH: TriggerCandle | null;
+    aboveLL: TriggerCandle | null;
+    hhPrice: number;
+    llPrice: number;
+  } | null;
+  onPriceClick: (price: number, side?: "buy" | "sell") => void;
 }) {
   const up = leg.up;
   const dirClass = up ? "text-green-600" : "text-red-600";
@@ -126,9 +243,9 @@ function LegRow({
       </div>
 
       <div className="flex items-center gap-1.5 text-[11px] font-mono">
-        <EndpointButton point={leg.from} rank={leg.fromRank} onClick={onPriceClick} />
+        <EndpointButton point={leg.from} rank={leg.fromRank} onClick={(p) => onPriceClick(p)} />
         <span className={cn("text-[10px]", dirClass)}>{up ? "▲" : "▼"}</span>
-        <EndpointButton point={leg.to} rank={leg.toRank} onClick={onPriceClick} />
+        <EndpointButton point={leg.to} rank={leg.toRank} onClick={(p) => onPriceClick(p)} />
         <span className={cn("ml-auto font-semibold", dirClass)}>
           {leg.change > 0 ? "+" : ""}
           {leg.change.toFixed(1)}
@@ -143,6 +260,25 @@ function LegRow({
         <span>{formatTime(leg.from.time)}</span>
         <span>{formatTime(leg.to.time)}</span>
       </div>
+
+      {triggers && (
+        <div className="mt-1 pt-1 border-t border-dashed border-gray-200 space-y-0.5">
+          <TriggerRow
+            trigger={triggers.belowHH}
+            side="buy"
+            pivotLabel="HH"
+            pivotPrice={triggers.hhPrice}
+            onClick={(p) => onPriceClick(p, "buy")}
+          />
+          <TriggerRow
+            trigger={triggers.aboveLL}
+            side="sell"
+            pivotLabel="LL"
+            pivotPrice={triggers.llPrice}
+            onClick={(p) => onPriceClick(p, "sell")}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -207,20 +343,36 @@ export function LongestSwingPanel() {
     return legs.reduce((best, l) => (l.durationSec > best.durationSec ? l : best), legs[0]);
   }, [legs]);
 
-  // 点击价位 → 预填下单(高于现价做空,低于现价做多)
-  const handlePriceClick = (price: number) => {
+  // 点击价位 → 预填下单(高于现价做空,低于现价做多;触发价按多/空方向指定)
+  const handlePriceClick = (price: number, side?: "buy" | "sell") => {
     if (currentPrice <= 0 || price <= 0) return;
-    const side = price >= currentPrice ? "sell" : "buy";
-    const slOffset = side === "buy" ? -200 : 200;
-    const tpOffset = side === "buy" ? 1000 : -1000;
+    const orderSide: "buy" | "sell" = side ?? (price >= currentPrice ? "sell" : "buy");
+    const slOffset = orderSide === "buy" ? -200 : 200;
+    const tpOffset = orderSide === "buy" ? 1000 : -1000;
     setPrefillData({
-      side,
+      side: orderSide,
       entry: price,
       stopLoss: price + slOffset,
       takeProfit: price + tpOffset,
     });
     openModal();
   };
+
+  // 幅度最大波段的两个触发价:
+  //   HH 下方最近的阳线 C(做多触发)/ LL 上方最近的阴线 C(做空触发)
+  const triggers = useMemo(() => {
+    if (!maxAmplitudeLeg) return null;
+    const hh = maxAmplitudeLeg.from.type === "high" ? maxAmplitudeLeg.from : maxAmplitudeLeg.to;
+    const ll = maxAmplitudeLeg.from.type === "low" ? maxAmplitudeLeg.from : maxAmplitudeLeg.to;
+    const hhIdx = findCandleIndex(candles, hh);
+    const llIdx = findCandleIndex(candles, ll);
+    return {
+      hhPrice: hh.price,
+      llPrice: ll.price,
+      belowHH: hhIdx >= 0 ? findRayTrigger(candles, hh, hhIdx, "bullishBelow") : null,
+      aboveLL: llIdx >= 0 ? findRayTrigger(candles, ll, llIdx, "bearishAbove") : null,
+    };
+  }, [candles, maxAmplitudeLeg]);
 
   const showDurationLeg =
     maxDurationLeg && maxAmplitudeLeg && maxDurationLeg !== maxAmplitudeLeg;
@@ -248,6 +400,7 @@ export function LongestSwingPanel() {
                 leg={maxAmplitudeLeg}
                 title="幅度最大"
                 highlight
+                triggers={triggers}
                 onPriceClick={handlePriceClick}
               />
               {showDurationLeg && maxDurationLeg && (
