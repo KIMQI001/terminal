@@ -51,6 +51,7 @@ import {
   EquilibriumPrimitive,
   PriceBandPrimitive,
   SwingRayPrimitive,
+  SWING_RAY_COUNT,
 } from "@/lib/chart/primitives";
 import type { SwingRay } from "@/lib/chart/primitives";
 import { computePriceBand } from "@/lib/chart/priceBand";
@@ -1456,8 +1457,9 @@ export function TradingChart() {
     }
   }, [swingPoints, enabled.swingPoints]);
 
-  // 最新 HH / LL 向左延伸的虚射线(亮橙=HH,亮蓝=LL)
-  // 数据源与图上 swing point 标记一致:最后一个 swing high(记 HH)、最后一个 swing low(记 LL)
+  // 最近 5 个 HH / LL 向左延伸的虚射线(亮橙=HH,亮蓝=LL)
+  // 数据源与图上 swing point 标记一致:最近的 5 个 swing high(记 HH)、5 个 swing low(记 LL)
+  // age 越大(越旧)透明度越低,避免多条同色线糊成一片
   useEffect(() => {
     const primitive = swingRayPrimitiveRef.current;
     if (!primitive) return;
@@ -1467,19 +1469,22 @@ export function TradingChart() {
       return;
     }
 
-    let lastHigh: SwingPoint | null = null;
-    let lastLow: SwingPoint | null = null;
+    const highs: SwingPoint[] = [];
+    const lows: SwingPoint[] = [];
     for (const sp of swingPoints) {
-      if (sp.type === "high") lastHigh = sp;
-      else lastLow = sp;
+      if (sp.type === "high") highs.push(sp);
+      else lows.push(sp);
     }
 
     const rays: SwingRay[] = [];
-    if (lastHigh) {
-      rays.push({ label: "HH", price: lastHigh.price, time: lastHigh.time });
+    // 从最近往前取(倒序遍历,age 从 0 开始递增)
+    for (let i = 0; i < Math.min(highs.length, SWING_RAY_COUNT); i++) {
+      const sp = highs[highs.length - 1 - i];
+      rays.push({ label: "HH", price: sp.price, time: sp.time, age: i });
     }
-    if (lastLow) {
-      rays.push({ label: "LL", price: lastLow.price, time: lastLow.time });
+    for (let i = 0; i < Math.min(lows.length, SWING_RAY_COUNT); i++) {
+      const sp = lows[lows.length - 1 - i];
+      rays.push({ label: "LL", price: sp.price, time: sp.time, age: i });
     }
     primitive.setData(rays);
   }, [swingPoints, enabled.swingRays]);

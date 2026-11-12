@@ -17,4 +17,4 @@ export type { LiquidationBar, LiquidationHillData } from './LiquidationHillPrimi
 export { FibLevelPrimitive, type FibLevel } from './FibLevelPrimitive';
 export { RejectionPrimitive } from './RejectionPrimitive';
 export { PriceBandPrimitive } from './PriceBandPrimitive';
-export { SwingRayPrimitive, type SwingRay } from './SwingRayPrimitive';
+export { SwingRayPrimitive, SWING_RAY_COUNT, type SwingRay } from './SwingRayPrimitive';
