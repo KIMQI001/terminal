@@ -14,6 +14,9 @@
  * - 触发价是否**已触发**:从波段的 HH / LL **之后**开始,给每个价位(阳O/阳H/阳C、阴O/阴L/阴C)
  *   向右发一条水平射线,后续哪根 K 线的价格区间"遮挡"(覆盖)了它,就说明该价位**已经触发过** → 显示浅红框。
  * - 点击起点/终点/触发价位 → 预填下单,同「日K锚点」面板。
+ * - 底部「框架策略」区块:把这 6 个价位交给 Rust 服务 look-left-right 自动挂单
+ *   (任一价位被触发 → 框架成立 → 给其余未触发价位挂单;止损 200 / 止盈 1000;
+ *    有持仓则撤掉其余挂单只留止盈止损;下单量按余额比例)。
  * - 可见性:**仅 admin 账号**渲染(见 DailyKPanel)。
  */
 
@@ -24,6 +27,7 @@ import { useOrderStore } from "@/stores/orderStore";
 import { Candle, SwingPoint } from "@/types/chart";
 import { SWING_RAY_COUNT } from "@/lib/chart/primitives";
 import { cn } from "@/lib/utils";
+import { LongestSwingStrategy } from "./LongestSwingStrategy";
 
 interface SwingLeg {
   from: SwingPoint;
@@ -523,6 +527,7 @@ export function LongestSwingPanel() {
               <div className="text-[9px] text-gray-400 pt-1 border-t border-dashed border-gray-100">
                 浅红框 = 该价位在波段 HH/LL 之后被 K 线遮挡,即已经被触发过
               </div>
+              <LongestSwingStrategy />
             </>
           )}
         </div>

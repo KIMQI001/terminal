@@ -34,6 +34,13 @@ npm run build
 npm start
 ```
 
+### Look Left Right Service (Rust)
+```bash
+cd look-left-right
+cargo build --release
+RUST_LOG=info ./target/release/look-left-right   # 默认 127.0.0.1:3005
+```
+
 ## Architecture Overview
 
 **Professional trading terminal** with ICT (Inner Circle Trader) indicator system.
@@ -47,6 +54,7 @@ npm start
 | K-line Server | Rust + Axum + Tokio + WebSocket + SQLx |
 | Analysis Service | Node.js + TypeScript (AI trading, tower strategies) |
 | Rolling Service | Rust (grid-based rolling position strategy) |
+| Look Left Right | Rust (「最长波段」6 价位框架策略) |
 
 ### Frontend Structure
 
@@ -99,6 +107,15 @@ Rust-based grid rolling strategy for Binance Futures:
 - Floating profit rolling
 - Target price take-profit, percentage stop-loss
 
+### Look Left Right Service (`look-left-right/`)
+
+「最长波段」6 价位框架策略(Rust,端口 3005):
+- `detector.rs` - swing point 检测 + 最长波段框架(与前端 `pivotDetector.ts` / `LongestSwingPanel.tsx` 对齐)
+- `kline.rs` - 从 kline-server(3001)拉 K 线(必须绕过系统代理)
+- `binance.rs` - Binance USDⓈ-M Futures REST 客户端(签名 / 限价单 / Algo 条件单 / 撤单 / 查仓)
+- `strategy.rs` - 状态机:框架成立 → 未触发价位挂单 → 成交后撤单只留止盈止损
+- `api.rs` - `/health` `/frame` `/status` `/config` `/stop`(前端经 `/api/look-left-right/*` 代理,代理里解密用户 API 密钥)
+
 ### API Routes
 
 | Path | Purpose |
@@ -109,6 +126,7 @@ Rust-based grid rolling strategy for Binance Futures:
 | `/api/analysis/` | Tower/liq-grid/AI management and performance stats |
 | `/api/klines/` | K-line data proxy |
 | `/api/rolling/` | Rolling service control |
+| `/api/look-left-right/` | 最长波段框架策略代理(look-left-right 服务) |
 | `/api/coinglass/` | Liquidation map data |
 
 ### Database Schema

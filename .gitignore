@@ -50,6 +50,11 @@ kline-server/*.db-journal
 rolling-service/target/
 rolling-service/config_*.toml
 
+# Rust look-left-right
+look-left-right/target/
+look-left-right/*.db
+look-left-right/*.db-journal
+
 # SQLite database
 /data/
 analysis-service/data/
