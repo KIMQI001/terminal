@@ -11,8 +11,8 @@
  *   会扫过价格区间覆盖该价位的 K 线),从 HH / LL 左边开始取第一根:
  *   HH 射线 → 第一根**阳线**(显示 阳O / 阳H / 阳C,点击**做空**);
  *   LL 射线 → 第一根**阴线**(显示 阴O / 阴L / 阴C,点击**做多**)。
- * - 触发价是否**已触发**:每个价位(阳O/阳H/阳C、阴O/阴L/阴C)向右发一条水平射线,
- *   后续哪根 K 线的价格区间"遮挡"(覆盖)了它,就说明该价位**已经触发过** → 显示浅红框。
+ * - 触发价是否**已触发**:从波段的 HH / LL **之后**开始,给每个价位(阳O/阳H/阳C、阴O/阴L/阴C)
+ *   向右发一条水平射线,后续哪根 K 线的价格区间"遮挡"(覆盖)了它,就说明该价位**已经触发过** → 显示浅红框。
  * - 点击起点/终点/触发价位 → 预填下单,同「日K锚点」面板。
  * - 可见性:**仅 admin 账号**渲染(见 DailyKPanel)。
  */
@@ -127,19 +127,19 @@ function findRayTrigger(
 }
 
 /**
- * 从触发 K 线的**右边**开始,给每个价位向右发一条水平射线,
+ * 从**波段的 HH / LL 之后**开始,给每个价位向右发一条水平射线,
  * 看后续哪根 K 线的价格区间"遮挡"(覆盖)了它 —— 覆盖了就说明该价位**已经被触发过**。
  *
- * 例:阳线行做空,阳O 是挂单入场位;价格之后跌回 阳O → 该挂单已被成交 → 标红框。
+ * 例:阳线行做空,阳O 是挂单入场位;波段 HH 之后价格跌回 阳O → 该价位已被触发 → 标红框。
  */
 function findLevelCoverage(
   candles: Candle[],
-  triggerIdx: number,
+  fromIdx: number,
   levels: [string, number][]
 ): CoverageMap {
   const res: CoverageMap = {};
   for (const [label] of levels) res[label] = { covered: false, hitTime: null };
-  for (let j = triggerIdx + 1; j < candles.length; j++) {
+  for (let j = fromIdx + 1; j < candles.length; j++) {
     const c = candles[j];
     if (!c) continue;
     let all = true;
@@ -261,8 +261,8 @@ function TriggerRow({
           const covered = !!cov?.covered;
           const tip = `${pivotLabel}射线向左扫到的第一根${kindName}的${label} —— 点击预填${sideAction}` +
             (covered
-              ? `\n⚠ 该价位已被后续 K 线遮挡(最早 ${cov?.hitTime ? formatTime(cov.hitTime) : "?"}),即已触发过`
-              : `\n尚未被后续 K 线遮挡,该价位还没被触发`);
+              ? `\n⚠ ${pivotLabel} 之后的 K 线已遮挡该价位(最早 ${cov?.hitTime ? formatTime(cov.hitTime) : "?"}),即已触发过`
+              : `\n${pivotLabel} 之后的 K 线还没遮挡该价位,该价位还没被触发`);
           return (
             <button
               key={label}
@@ -459,16 +459,16 @@ export function LongestSwingPanel() {
     const llIdx = findCandleIndex(candles, ll);
     const belowHH = hhIdx >= 0 ? findRayTrigger(candles, hh, hhIdx, "bullishBelow") : null;
     const aboveLL = llIdx >= 0 ? findRayTrigger(candles, ll, llIdx, "bearishAbove") : null;
-    // 向右射线:这些价位有没有被后续 K 线遮挡(=已经被触发过)
-    const bullCoverage = belowHH
-      ? findLevelCoverage(candles, belowHH.index, [
+    // 向右射线:从波段的 HH / LL **之后**开始算,这些价位有没有被后续 K 线遮挡(=已经被触发过)
+    const bullCoverage = belowHH && hhIdx >= 0
+      ? findLevelCoverage(candles, hhIdx, [
           ["阳O", belowHH.candle.open],
           ["阳H", belowHH.candle.high],
           ["阳C", belowHH.candle.close],
         ])
       : {};
-    const bearCoverage = aboveLL
-      ? findLevelCoverage(candles, aboveLL.index, [
+    const bearCoverage = aboveLL && llIdx >= 0
+      ? findLevelCoverage(candles, llIdx, [
           ["阴O", aboveLL.candle.open],
           ["阴L", aboveLL.candle.low],
           ["阴C", aboveLL.candle.close],
@@ -521,7 +521,7 @@ export function LongestSwingPanel() {
                 />
               )}
               <div className="text-[9px] text-gray-400 pt-1 border-t border-dashed border-gray-100">
-                浅红框 = 该价位向右的射线被后续 K 线遮挡,即已经被触发过
+                浅红框 = 该价位在波段 HH/LL 之后被 K 线遮挡,即已经被触发过
               </div>
             </>
           )}
