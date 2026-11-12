@@ -7,8 +7,9 @@
  *   与 Swing Rays 画在图上的那 10 条射线完全一致。
  * - 波段(leg)= 这 10 个点按时间排序后相邻的一高一低之间的行情。
  * - 主行:幅度最大的波段;副行:持续时间最长的波段(与主行不同才显示)。
- * - 触发价:幅度最大的波段里,HH 下方最近的一根**阳线**的收盘价(做多触发),
- *   LL 上方最近的一根**阴线**的收盘价(做空触发)—— 一般就在 HH / LL 那根 K 之后 5 根内。
+ * - 触发价:幅度最大的波段里,沿 HH / LL **向左的虚射线**扫 K 线(射线 = 该价位的水平线,
+ *   会扫过价格区间覆盖该价位的 K 线),从 HH / LL 左边开始取第一根:
+ *   HH 射线 → 第一根**阳线**的收盘价(做多触发);LL 射线 → 第一根**阴线**的收盘价(做空触发)。
  * - 点击起点/终点/触发价位 → 预填下单,同「日K锚点」面板。
  */
 
@@ -43,7 +44,7 @@ interface SwingLeg {
 /** 触发 K 线:射线扫到的那根 K 线 */
 interface TriggerCandle {
   candle: Candle;
-  /** 该 K 线在 pivot 左边多少根(0 = 就是 HH/LL 那根本身) */
+  /** 该 K 线在 pivot 左边多少根 */
   distance: number;
 }
 
@@ -83,11 +84,11 @@ function findCandleIndex(candles: Candle[], pivot: SwingPoint): number {
  * 沿**向左的虚射线**找触发 K 线。
  *
  * HH / LL 的射线是那条价位向左延伸的水平线,它会"扫过"价格区间覆盖该价位的 K 线。
- * 从 pivot 本身开始向左扫,取第一根符合颜色要求的:
+ * 从 pivot 的**左边**开始扫(不含 HH/LL 本根),取第一根符合颜色要求的:
  * - bullishBelow: HH 射线扫到的第一根**阳线**(close > open)
  * - bearishAbove: LL 射线扫到的第一根**阴线**(close < open)
  *
- * distance = 该 K 线在 pivot 左边多少根(0 = 就是 HH/LL 那根本身)。
+ * distance = 该 K 线在 pivot 左边多少根。
  */
 function findRayTrigger(
   candles: Candle[],
@@ -96,7 +97,7 @@ function findRayTrigger(
   kind: "bullishBelow" | "bearishAbove"
 ): TriggerCandle | null {
   const level = pivot.price;
-  for (let j = pivotIdx; j >= 0; j--) {
+  for (let j = pivotIdx - 1; j >= 0; j--) {
     const c = candles[j];
     if (!c) continue;
     // 射线没扫到这根 K(价格区间不覆盖该价位)
@@ -181,7 +182,7 @@ function TriggerRow({
   }
   const { candle, distance } = trigger;
   const diffPct = pivotPrice !== 0 ? ((candle.close - pivotPrice) / pivotPrice) * 100 : 0;
-  const whereText = distance === 0 ? "本根K" : `左${distance}根K`;
+  const whereText = `左${distance}根K`;
   return (
     <div className="flex items-center gap-1.5 text-[9px] font-mono">
       <span
