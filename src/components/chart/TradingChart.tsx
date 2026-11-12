@@ -72,6 +72,44 @@ import {
   type KlineDisplayMode,
 } from "@/lib/chart/klineDisplay";
 import type { ProximitySignal } from "@/types/proximitySignal";
+import type { FVG, OrderBlock } from "@/types/indicator";
+import type { FibLevel } from "@/lib/chart/primitives";
+
+/**
+ * 收集 FVG/OB 的 3 档 fib 水平位(画在图上的水平虚线)。
+ *
+ * FVG 的档位虚线跟随 FVG 开关,OB 的档位虚线跟随 Order Blocks 开关 ——
+ * 关掉哪个指标,对应的档位虚线就一起消失。
+ */
+function buildFibLevels(
+  fvgs: FVG[],
+  orderBlocks: OrderBlock[],
+  withFvg: boolean,
+  withOb: boolean
+): FibLevel[] {
+  const levels: FibLevel[] = [];
+
+  if (withFvg) {
+    for (const f of fvgs) {
+      levels.push({
+        time: f.time, high: f.high, low: f.low,
+        type: "fvg", side: f.type, fib22: f.fib22, fib50: f.fib50, fib90: f.fib90,
+      });
+    }
+  }
+
+  if (withOb) {
+    for (const o of orderBlocks) {
+      levels.push({
+        time: o.startTime, high: o.high, low: o.low,
+        type: "ob", side: o.type,
+        fib22: o.fib22, fib50: o.fib50 ?? o.fib22, fib90: o.fib90 ?? o.fib22,
+      });
+    }
+  }
+
+  return levels;
+}
 
 /**
  * 构建带颜色的蜡烛数据(Engulfing/Pinbar 染色 + Proximity Signal 染色 + 独立 K 线高亮)
@@ -626,21 +664,9 @@ export function TradingChart() {
         setProximitySignals([]);
       }
 
-      // 收集 FVG/OB 的 fib 水平位(画在图上,默认开启)
-      const fibLevels: import("@/lib/chart/primitives").FibLevel[] = [];
-      for (const f of newFvgs) {
-        fibLevels.push({
-          time: f.time, high: f.high, low: f.low,
-          type: "fvg", side: f.type, fib22: f.fib22, fib50: f.fib50, fib90: f.fib90,
-        });
-      }
-      for (const o of obs) {
-        fibLevels.push({
-          time: o.startTime, high: o.high, low: o.low,
-          type: "ob", side: o.type,
-          fib22: o.fib22, fib50: (o as any).fib50 ?? o.fib22, fib90: (o as any).fib90 ?? o.fib22,
-        });
-      }
+      // 收集 FVG/OB 的 fib 水平位(画在图上的水平虚线)
+      // FVG 档位跟随 FVG 开关,OB 档位跟随 Order Blocks 开关
+      const fibLevels = buildFibLevels(newFvgs, obs, enabled.fvg, enabled.orderBlocks);
       setFibLevels(fibLevels);
       if (fibLevelPrimitiveRef.current) {
         fibLevelPrimitiveRef.current.setData(fibLevels, activeObFibRatio);
@@ -1337,6 +1363,15 @@ export function TradingChart() {
       }
     }
 
+    // Update Fib Level Primitive(FVG/OB 的 3 档 fib 水平虚线)
+    // FVG 档位跟随 FVG 开关,OB 档位跟随 Order Blocks 开关 —— 关掉哪个,对应虚线就消失
+    if (fibLevelPrimitiveRef.current) {
+      fibLevelPrimitiveRef.current.setData(
+        buildFibLevels(fvgs, orderBlocks, enabled.fvg, enabled.orderBlocks),
+        activeObFibRatio
+      );
+    }
+
     // Update Liquidity Primitive
     if (liquidityPrimitiveRef.current) {
       if (enabled.liquidityZones) {
@@ -1391,7 +1426,7 @@ export function TradingChart() {
         enabled.equilibrium ? equilibriumLevels : []
       );
     }
-  }, [orderBlocks, fvgs, proximitySignals, liquidityZones, oteZones, breakerBlocks, equilibriumLevels, liquidationData, enabled.orderBlocks, enabled.fvg, enabled.proximitySignals, enabled.liquidityZones, enabled.killzones, enabled.ote, enabled.breakerBlocks, enabled.equilibrium, timeframe]);
+  }, [orderBlocks, fvgs, proximitySignals, liquidityZones, oteZones, breakerBlocks, equilibriumLevels, liquidationData, activeObFibRatio, enabled.orderBlocks, enabled.fvg, enabled.proximitySignals, enabled.liquidityZones, enabled.killzones, enabled.ote, enabled.breakerBlocks, enabled.equilibrium, timeframe]);
 
   // ===== 价格带(Price Band)=====
   // 加载月K —— 价格带的价位源头(月K 的 open/close + 阴K low + 阳K high)
