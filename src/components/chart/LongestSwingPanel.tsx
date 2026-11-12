@@ -9,9 +9,10 @@
  * - 主行:幅度最大的波段;副行:持续时间最长的波段(与主行不同才显示)。
  * - 触发价:幅度最大的波段里,沿 HH / LL **向左的虚射线**扫 K 线(射线 = 该价位的水平线,
  *   会扫过价格区间覆盖该价位的 K 线),从 HH / LL 左边开始取第一根:
- *   HH 射线 → 第一根**阳线**的收盘价(阳C,点击**做空**);
- *   LL 射线 → 第一根**阴线**的收盘价(阴C,点击**做多**)。
+ *   HH 射线 → 第一根**阳线**(显示 阳O / 阳H / 阳C,点击**做空**);
+ *   LL 射线 → 第一根**阴线**(显示 阴O / 阴L / 阴C,点击**做多**)。
  * - 点击起点/终点/触发价位 → 预填下单,同「日K锚点」面板。
+ * - 可见性:**仅 admin 账号**渲染(见 DailyKPanel)。
  */
 
 import { useMemo, useState } from "react";
@@ -152,9 +153,9 @@ function EndpointButton({
 }
 
 /**
- * 触发价一行:
- * - kind = bullish(阳线)→ 阳C,点击后**做空**
- * - kind = bearish(阴线)→ 阴C,点击后**做多**
+ * 触发价一块:
+ * - kind = bullish(阳线)→ 阳O / 阳H / 阳C,点击后**做空**
+ * - kind = bearish(阴线)→ 阴O / 阴L / 阴C,点击后**做多**
  * side 只决定标签(多/空)、颜色和预填方向,与 kind 解耦。
  */
 function TriggerRow({
@@ -173,7 +174,6 @@ function TriggerRow({
   onClick: (price: number, side: "buy" | "sell") => void;
 }) {
   const isBuy = side === "buy";
-  const kindLabel = kind === "bullish" ? "阳C" : "阴C";
   const kindName = kind === "bullish" ? "阳线" : "阴线";
   const sideLabel = isBuy ? "多" : "空";
   const sideAction = isBuy ? "做多" : "做空";
@@ -194,28 +194,39 @@ function TriggerRow({
   }
   const { candle, distance } = trigger;
   const diffPct = pivotPrice !== 0 ? ((candle.close - pivotPrice) / pivotPrice) * 100 : 0;
-  const whereText = `左${distance}根K`;
+  // 做空看阳线的高点(阳H),做多看阴线的低点(阴L)
+  const chips: [string, number][] =
+    kind === "bullish"
+      ? [["阳O", candle.open], ["阳H", candle.high], ["阳C", candle.close]]
+      : [["阴O", candle.open], ["阴L", candle.low], ["阴C", candle.close]];
   return (
-    <div className="flex items-center gap-1.5 text-[9px] font-mono">
-      <span
-        className={cn(
-          "px-1 rounded leading-4 font-semibold",
-          isBuy ? "bg-green-500/15 text-green-600" : "bg-red-500/15 text-red-600"
-        )}
-      >
-        {sideLabel}
-      </span>
-      <button
-        onClick={() => onClick(candle.close, side)}
-        className="font-semibold hover:underline cursor-pointer"
-        title={`${pivotLabel}射线向左扫到的第一根${kindName}的收盘价 —— 点击预填${sideAction}`}
-      >
-        {kindLabel} {candle.close.toFixed(1)}
-      </button>
-      <span className="text-gray-400">
-        {pivotLabel}射线 {whereText} {diffPct > 0 ? "+" : ""}
-        {diffPct.toFixed(2)}% · {formatTime(candle.time)}
-      </span>
+    <div className="text-[9px] font-mono">
+      <div className="flex items-center gap-1.5">
+        <span
+          className={cn(
+            "px-1 rounded leading-4 font-semibold",
+            isBuy ? "bg-green-500/15 text-green-600" : "bg-red-500/15 text-red-600"
+          )}
+        >
+          {sideLabel}
+        </span>
+        {chips.map(([label, price]) => (
+          <button
+            key={label}
+            onClick={() => onClick(price, side)}
+            className="font-semibold hover:underline cursor-pointer"
+            title={`${pivotLabel}射线向左扫到的第一根${kindName}的${label} —— 点击预填${sideAction}`}
+          >
+            {label} {price.toFixed(1)}
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center gap-1.5 pl-0.5 mt-px text-gray-400">
+        <span>
+          {pivotLabel}射线 左{distance}根K {diffPct > 0 ? "+" : ""}
+          {diffPct.toFixed(2)}% · {formatTime(candle.time)}
+        </span>
+      </div>
     </div>
   );
 }
@@ -374,7 +385,7 @@ export function LongestSwingPanel() {
   };
 
   // 幅度最大波段的两个触发价:
-  //   HH 下方最近的阳线 C(做多触发)/ LL 上方最近的阴线 C(做空触发)
+  //   HH 射线向左第一根阳线(阳O/阳H/阳C,做空)/ LL 射线向左第一根阴线(阴O/阴L/阴C,做多)
   const triggers = useMemo(() => {
     if (!maxAmplitudeLeg) return null;
     const hh = maxAmplitudeLeg.from.type === "high" ? maxAmplitudeLeg.from : maxAmplitudeLeg.to;

@@ -12,6 +12,7 @@ import { useState, useEffect } from "react";
 import { useChartStore } from "@/stores/chartStore";
 import { LongestSwingPanel } from "./LongestSwingPanel";
 import { useOrderStore } from "@/stores/orderStore";
+import { useUserStore } from "@/stores/userStore";
 import { fetchKlines } from "@/lib/binance/api";
 
 interface AnchorCandle {
@@ -83,6 +84,7 @@ function aggregateNDaily(dailyKlines: AnchorCandle[], n: number): AnchorCandle[]
 export function DailyKPanel() {
   const { symbol, candles, dailyKAnchors, dailyKLineEnabled, setDailyKAnchor, setDailyKLineEnabled } = useChartStore();
   const { setPrefillData, openModal } = useOrderStore();
+  const user = useUserStore((s) => s.user);
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
@@ -272,10 +274,12 @@ export function DailyKPanel() {
               {renderAnchorColumn("4D", fourDayAnchor, "text-purple-600")}
             </div>
           </div>
-          {/* 下方：最长波段（最近 5 个 HH + 5 个 LL 中幅度最大的波段） */}
-          <div className="border-t border-gray-200">
-            <LongestSwingPanel />
-          </div>
+          {/* 下方：最长波段（最近 5 个 HH + 5 个 LL 中幅度最大的波段）—— 仅 admin 可见 */}
+          {user?.role === "admin" && (
+            <div className="border-t border-gray-200">
+              <LongestSwingPanel />
+            </div>
+          )}
         </div>
       )}
     </div>
