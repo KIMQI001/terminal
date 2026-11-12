@@ -9,7 +9,8 @@
  * - 主行:幅度最大的波段;副行:持续时间最长的波段(与主行不同才显示)。
  * - 触发价:幅度最大的波段里,沿 HH / LL **向左的虚射线**扫 K 线(射线 = 该价位的水平线,
  *   会扫过价格区间覆盖该价位的 K 线),从 HH / LL 左边开始取第一根:
- *   HH 射线 → 第一根**阳线**的收盘价(做多触发);LL 射线 → 第一根**阴线**的收盘价(做空触发)。
+ *   HH 射线 → 第一根**阳线**的收盘价(阳C,点击**做空**);
+ *   LL 射线 → 第一根**阴线**的收盘价(阴C,点击**做多**)。
  * - 点击起点/终点/触发价位 → 预填下单,同「日K锚点」面板。
  */
 
@@ -150,21 +151,32 @@ function EndpointButton({
   );
 }
 
-/** 触发价一行:HH 下方最近阳线 C(做多) / LL 上方最近阴线 C(做空) */
+/**
+ * 触发价一行:
+ * - kind = bullish(阳线)→ 阳C,点击后**做空**
+ * - kind = bearish(阴线)→ 阴C,点击后**做多**
+ * side 只决定标签(多/空)、颜色和预填方向,与 kind 解耦。
+ */
 function TriggerRow({
   trigger,
+  kind,
   side,
   pivotLabel,
   pivotPrice,
   onClick,
 }: {
   trigger: TriggerCandle | null;
+  kind: "bullish" | "bearish";
   side: "buy" | "sell";
   pivotLabel: string;
   pivotPrice: number;
-  onClick: (price: number) => void;
+  onClick: (price: number, side: "buy" | "sell") => void;
 }) {
   const isBuy = side === "buy";
+  const kindLabel = kind === "bullish" ? "阳C" : "阴C";
+  const kindName = kind === "bullish" ? "阳线" : "阴线";
+  const sideLabel = isBuy ? "多" : "空";
+  const sideAction = isBuy ? "做多" : "做空";
   if (!trigger) {
     return (
       <div className="flex items-center gap-1.5 text-[9px] text-gray-400 font-mono">
@@ -174,7 +186,7 @@ function TriggerRow({
             isBuy ? "bg-green-500/15 text-green-600" : "bg-red-500/15 text-red-600"
           )}
         >
-          {isBuy ? "多" : "空"}
+          {sideLabel}
         </span>
         <span>无触发价(射线向左没扫到{pivotLabel}对应的 K 线)</span>
       </div>
@@ -191,14 +203,14 @@ function TriggerRow({
           isBuy ? "bg-green-500/15 text-green-600" : "bg-red-500/15 text-red-600"
         )}
       >
-        {isBuy ? "多" : "空"}
+        {sideLabel}
       </span>
       <button
-        onClick={() => onClick(candle.close)}
+        onClick={() => onClick(candle.close, side)}
         className="font-semibold hover:underline cursor-pointer"
-        title={`${pivotLabel}射线向左扫到的第一根${isBuy ? "阳线" : "阴线"}的收盘价 —— 点击预填${isBuy ? "做多" : "做空"}`}
+        title={`${pivotLabel}射线向左扫到的第一根${kindName}的收盘价 —— 点击预填${sideAction}`}
       >
-        {isBuy ? "阳C" : "阴C"} {candle.close.toFixed(1)}
+        {kindLabel} {candle.close.toFixed(1)}
       </button>
       <span className="text-gray-400">
         {pivotLabel}射线 {whereText} {diffPct > 0 ? "+" : ""}
@@ -266,17 +278,19 @@ function LegRow({
         <div className="mt-1 pt-1 border-t border-dashed border-gray-200 space-y-0.5">
           <TriggerRow
             trigger={triggers.belowHH}
-            side="buy"
+            kind="bullish"
+            side="sell"
             pivotLabel="HH"
             pivotPrice={triggers.hhPrice}
-            onClick={(p) => onPriceClick(p, "buy")}
+            onClick={(p, s) => onPriceClick(p, s)}
           />
           <TriggerRow
             trigger={triggers.aboveLL}
-            side="sell"
+            kind="bearish"
+            side="buy"
             pivotLabel="LL"
             pivotPrice={triggers.llPrice}
-            onClick={(p) => onPriceClick(p, "sell")}
+            onClick={(p, s) => onPriceClick(p, s)}
           />
         </div>
       )}
