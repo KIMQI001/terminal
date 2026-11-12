@@ -891,6 +891,74 @@ impl BinanceApi {
 
     // ============ 撤单 ============
 
+    /// 市价平仓(`POST /fapi/v1/order`,type=MARKET,reduceOnly=true)
+    ///
+    /// 对齐 wick-sr-detector/src/order.rs 的 `place_close_position_market`(线上已验证):
+    /// hedge 模式下 `positionSide` 与 `reduceOnly` **可以同时传**,不会报 -1106。
+    /// 用途:止损/止盈价位已经被价格越过去时,条件单挂不上,直接市价平掉。
+    pub async fn place_market_order(
+        &self,
+        symbol: &str,
+        side: &str,
+        position_side: &str,
+        quantity: f64,
+    ) -> Result<OrderResult> {
+        let (qty_p, _) = self.get_precision(symbol).await;
+        let qty_str = format_decimal(quantity, qty_p);
+        if qty_str.parse::<f64>().unwrap_or(0.0) <= 0.0 {
+            let err = format!("市价平仓数量为 0(qty={}),拒绝下单", quantity);
+            error!("[Binance] {} {}", symbol, err);
+            return Ok(OrderResult {
+                success: false,
+                error: Some(err),
+                ..Default::default()
+            });
+        }
+        let params: Vec<(String, String)> = vec![
+            ("symbol".into(), symbol.to_string()),
+            ("side".into(), side.to_string()),
+            ("positionSide".into(), position_side.to_string()),
+            ("type".into(), "MARKET".into()),
+            ("quantity".into(), qty_str.clone()),
+            ("reduceOnly".into(), "true".into()),
+        ];
+        let (status, value) = self
+            .request(Method::POST, "/fapi/v1/order", &params, true)
+            .await?;
+        let order_id = value.get("orderId").and_then(json_f64).unwrap_or(0.0) as u64;
+        if let Some(err) = extract_error(status, &value) {
+            error!("[Binance] 市价平仓失败 {} {}: {}", symbol, side, err);
+            return Ok(OrderResult {
+                success: false,
+                order_id: if order_id > 0 { Some(order_id) } else { None },
+                algo_id: None,
+                client_order_id: None,
+                error: Some(err),
+            });
+        }
+        if order_id == 0 {
+            let err = "市价平仓响应无 orderId".to_string();
+            error!("[Binance] {} {}", symbol, err);
+            return Ok(OrderResult {
+                success: false,
+                error: Some(err),
+                ..Default::default()
+            });
+        }
+        info!(
+            "[Binance] 市价平仓 OK {} {} qty={} orderId={}",
+            symbol, side, qty_str, order_id
+        );
+        Ok(OrderResult {
+            success: true,
+            order_id: Some(order_id),
+            algo_id: None,
+            client_order_id: None,
+            error: None,
+        })
+    }
+
+
     /// 撤普通单(`DELETE /fapi/v1/order`)
     pub async fn cancel_order(&self, symbol: &str, order_id: u64) -> Result<OrderResult> {
         let params = vec![

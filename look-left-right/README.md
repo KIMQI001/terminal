@@ -28,6 +28,19 @@
 | 做多(BUY)  | 在现价**下方** | LIMIT |
 | 做多(BUY)  | 在现价**上方** | STOP_MARKET |
 
+### 安全兜底(避免真金白银的裸仓)
+
+| 场景 | 处理 |
+|------|------|
+| 价格**已经越过**止损价 / 止盈价(条件单会被 Binance 以 -2021 拒单) | 直接市价平仓(`MARKET` + `reduceOnly`),等价于止损 / 止盈已触发 |
+| 仓位已平但保护单还挂着 | 撤掉残留的 `llr_sl*` / `llr_tp*` 条件单(否则会反向开仓) |
+| 多空反手,残留旧方向保护单 | 撤掉 `positionSide` 与当前持仓不符的保护单 |
+| 价位已经被价格越过去(限价单会立刻成交) | 跳过该档并告警,不下这个"追价"单 |
+| 数量取整后为 0 | 跳过该档(不占用保证金) |
+
+> 止损 / 止盈的方向校验与市价平仓逻辑,和线上在跑的 `wick-sr-detector/src/order.rs`
+> (`validate_stop_price` / `place_close_position_market`)保持一致。
+
 ## 运行
 
 前置:kline-server(`cd ../kline-server && cargo run --release`)已在 3001 端口跑着。
@@ -40,6 +53,18 @@ RUST_LOG=info ./target/release/look-left-right
 ```
 
 默认监听 `127.0.0.1:3005`。
+
+### 服务器部署(和 kline-server 一样用 pm2)
+
+```bash
+cd /var/www/terminal && git pull
+cd look-left-right && cargo build --release
+pm2 start ./target/release/look-left-right --name look-left-right --cwd /var/www/terminal/look-left-right
+pm2 save && pm2 startup
+```
+
+前端不需要额外配置:Next.js 代理默认连 `http://127.0.0.1:3005`
+(可用环境变量 `LOOK_LEFT_RIGHT_API` 覆盖)。
 
 ## HTTP 接口
 

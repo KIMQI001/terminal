@@ -242,8 +242,30 @@ impl Engine {
                     Err(e) => warn!("[Strategy] 撤入场挂单失败: {}", e),
                 }
             }
+            // 撤掉方向不符的保护单(多空反手时残留的旧保护单,留着会误平新仓)
+            for a in live_algo.iter() {
+                let is_protective = a.client_algo_id.starts_with(SL_PREFIX)
+                    || a.client_algo_id.starts_with(TP_PREFIX);
+                if !is_protective || a.position_side == pos.position_side {
+                    continue;
+                }
+                warn!(
+                    "[Strategy] 撤掉方向不符的保护单 algoId={}({} → 当前 {})",
+                    a.algo_id, a.position_side, pos.position_side
+                );
+                if let Ok(r) = api.cancel_algo_order(&cfg.symbol, a.algo_id).await {
+                    if !r.success {
+                        warn!(
+                            "[Strategy] 撤保护单失败 algoId={}: {}",
+                            a.algo_id,
+                            r.error.unwrap_or_else(|| "未知错误".into())
+                        );
+                    }
+                }
+            }
+
             // 确保止盈止损都在
-            self.ensure_protective_orders(&cfg, &api, pos, hedge_mode, &live_algo)
+            self.ensure_protective_orders(&cfg, &api, pos, hedge_mode, &live_algo, price)
                 .await;
             return Ok(());
         }
@@ -252,6 +274,27 @@ impl Engine {
         {
             let mut rt = self.rt.lock().await;
             rt.position = None;
+        }
+
+        // —— 3.5 仓位没了但保护单还挂着 → 撤掉(否则残留的条件单会反向开仓) ——
+        {
+            let live_algo = api.get_open_algo_orders(&cfg.symbol).await.unwrap_or_default();
+            let orphan = live_algo
+                .iter()
+                .filter(|o| {
+                    o.client_algo_id.starts_with(SL_PREFIX) || o.client_algo_id.starts_with(TP_PREFIX)
+                })
+                .count();
+            if orphan > 0 {
+                for p in [SL_PREFIX, TP_PREFIX] {
+                    match api.cancel_orders_by_prefix(&cfg.symbol, p).await {
+                        Ok(n) if n > 0 => {
+                            warn!("[Strategy] 已无持仓,撤掉 {} 个残留保护单({})", n, p)
+                        }
+                        _ => {}
+                    }
+                }
+            }
         }
 
         let Some(frame) = frame else {
@@ -404,6 +447,23 @@ impl Engine {
                 Side::Buy => "BUY",
                 Side::Sell => "SELL",
             };
+
+            // 防御:价位已经被价格越过去 → 限价单会**立刻成交**(等于市价追单),跳过并告警。
+            // 正常情况下「已触发」判定会先把这些价位排除掉,走到这里说明数据与现价不一致。
+            if cur_price > 0.0 {
+                let crossed = match level.side {
+                    Side::Sell => level.price < cur_price,
+                    Side::Buy => level.price > cur_price,
+                };
+                if crossed {
+                    warn!(
+                        "[Strategy] {} {} 价位 {} 已在现价 {:.1} 的另一侧,跳过(避免立刻成交)",
+                        level.label, side_str, level.price, cur_price
+                    );
+                    continue;
+                }
+            }
+
             let position_side = if hedge_mode {
                 match level.side {
                     Side::Buy => "LONG",
@@ -482,6 +542,12 @@ impl Engine {
     }
 
     /// 确保止盈止损挂单都在(有持仓时)
+    ///
+    /// 三个要点:
+    /// 1. 匹配保护单时**同时看前缀 + 持仓方向 + 买卖方向**,避免多空反手时把旧单当成"已挂"
+    /// 2. 触发价方向必须合法(价格已经越过止损/止盈时 Binance 会拒单 -2021),
+    ///    这时等价于"止损/止盈已触发" → 直接市价平仓
+    /// 3. 拿不到现价时只做方向判断,不阻断挂单
     async fn ensure_protective_orders(
         &self,
         cfg: &StrategyConfig,
@@ -489,14 +555,8 @@ impl Engine {
         pos: &crate::binance::Position,
         hedge_mode: bool,
         open_algos: &[crate::binance::AlgoOrder],
+        current_price: Option<f64>,
     ) {
-        let has_sl = open_algos
-            .iter()
-            .any(|o| o.client_algo_id.starts_with(SL_PREFIX));
-        let has_tp = open_algos
-            .iter()
-            .any(|o| o.client_algo_id.starts_with(TP_PREFIX));
-
         let is_long = pos.position_amt > 0.0;
         let entry = pos.entry_price;
         if entry <= 0.0 {
@@ -515,6 +575,40 @@ impl Engine {
             "BOTH"
         };
         let qty = pos.position_amt.abs();
+
+        // —— 触发价方向校验:价格已经越过止损/止盈 → 条件单挂不上,直接市价平 ——
+        if let Some(cur) = current_price {
+            if cur > 0.0 {
+                if !validate_trigger_price(cur, sl_price, close_side, "STOP_MARKET") {
+                    warn!(
+                        "[Strategy] 现价 {:.2} 已越过止损价 {:.2}({}),条件单挂不上 → 市价平仓",
+                        cur, sl_price, pos.position_side
+                    );
+                    self.market_close(api, &cfg.symbol, close_side, position_side, qty)
+                        .await;
+                    return;
+                }
+                if !validate_trigger_price(cur, tp_price, close_side, "TAKE_PROFIT_MARKET") {
+                    warn!(
+                        "[Strategy] 现价 {:.2} 已越过止盈价 {:.2}({}),条件单挂不上 → 市价平仓",
+                        cur, tp_price, pos.position_side
+                    );
+                    self.market_close(api, &cfg.symbol, close_side, position_side, qty)
+                        .await;
+                    return;
+                }
+            }
+        }
+
+        let sl_prefix = format!("{}x{}_", SL_PREFIX, pos.position_side);
+        let tp_prefix = format!("{}x{}_", TP_PREFIX, pos.position_side);
+        // 交易所返回里 side 可能缺失(空串时不做方向判断,避免重复挂保护单)
+        let has_sl = open_algos.iter().any(|o| {
+            o.client_algo_id.starts_with(&sl_prefix) && (o.side.is_empty() || o.side == close_side)
+        });
+        let has_tp = open_algos.iter().any(|o| {
+            o.client_algo_id.starts_with(&tp_prefix) && (o.side.is_empty() || o.side == close_side)
+        });
 
         if !has_sl {
             let client_id = format!("{}x{}_{}", SL_PREFIX, pos.position_side, entry as i64);
@@ -543,6 +637,29 @@ impl Engine {
                 qty,
             )
             .await;
+        }
+    }
+
+    /// 市价平仓(止损/止盈价位已被价格越过去时的兜底)
+    async fn market_close(
+        &self,
+        api: &BinanceApi,
+        symbol: &str,
+        side: &str,
+        position_side: &str,
+        qty: f64,
+    ) {
+        match api.place_market_order(symbol, side, position_side, qty).await {
+            Ok(r) if r.success => info!(
+                "[Strategy] 已市价平仓 {} {} qty={} orderId={:?}",
+                symbol, side, qty, r.order_id
+            ),
+            Ok(r) => error!(
+                "[Strategy] 市价平仓失败 {}: {}",
+                symbol,
+                r.error.unwrap_or_else(|| "未知错误".into())
+            ),
+            Err(e) => error!("[Strategy] 市价平仓异常 {}: {}", symbol, e),
         }
     }
 
@@ -592,6 +709,32 @@ impl Engine {
     }
 }
 
+/// 校验保护单触发价方向(对齐 wick-sr-detector/src/order.rs 的 validate_stop_price)
+///
+/// - STOP_MARKET 平多(SELL):触发价必须 < 现价;平空(BUY):必须 > 现价
+/// - TAKE_PROFIT_MARKET 平多(SELL):触发价必须 > 现价;平空(BUY):必须 < 现价
+///
+/// 方向不合法 = 价格已经越过了这一档,Binance 会以 -2021 拒单。
+fn validate_trigger_price(current_price: f64, trigger: f64, side: &str, order_type: &str) -> bool {
+    match order_type {
+        "STOP_MARKET" => {
+            if side == "SELL" {
+                trigger < current_price
+            } else {
+                trigger > current_price
+            }
+        }
+        "TAKE_PROFIT_MARKET" => {
+            if side == "SELL" {
+                trigger > current_price
+            } else {
+                trigger < current_price
+            }
+        }
+        _ => true,
+    }
+}
+
 /// 数量按精度取整(BTCUSDC 3 位 / ETHUSDC 3 位,默认 3 位)
 fn round_qty(qty: f64, symbol: &str) -> f64 {
     let decimals = match symbol.to_uppercase().as_str() {
@@ -608,4 +751,37 @@ pub fn now_sec() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 止损触发价方向() {
+        // 平多(SELL):止损必须在现价下方
+        assert!(validate_trigger_price(100.0, 98.0, "SELL", "STOP_MARKET"));
+        // 价格已经跌破止损 → 方向非法(条件单会被 -2021 拒)
+        assert!(!validate_trigger_price(100.0, 102.0, "SELL", "STOP_MARKET"));
+        // 平空(BUY):止损必须在现价上方
+        assert!(validate_trigger_price(100.0, 102.0, "BUY", "STOP_MARKET"));
+        assert!(!validate_trigger_price(100.0, 98.0, "BUY", "STOP_MARKET"));
+    }
+
+    #[test]
+    fn 止盈触发价方向() {
+        // 平多(SELL):止盈必须在现价上方
+        assert!(validate_trigger_price(100.0, 110.0, "SELL", "TAKE_PROFIT_MARKET"));
+        assert!(!validate_trigger_price(100.0, 90.0, "SELL", "TAKE_PROFIT_MARKET"));
+        // 平空(BUY):止盈必须在现价下方
+        assert!(validate_trigger_price(100.0, 90.0, "BUY", "TAKE_PROFIT_MARKET"));
+        assert!(!validate_trigger_price(100.0, 110.0, "BUY", "TAKE_PROFIT_MARKET"));
+    }
+
+    #[test]
+    fn 数量向下取整不超保证金() {
+        assert_eq!(round_qty(0.1239, "BTCUSDC"), 0.123);
+        assert_eq!(round_qty(1.0, "BTCUSDC"), 1.0);
+        assert_eq!(round_qty(0.0004, "ETHUSDC"), 0.0);
+    }
 }
