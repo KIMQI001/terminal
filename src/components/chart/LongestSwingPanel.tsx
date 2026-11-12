@@ -11,6 +11,8 @@
  *   会扫过价格区间覆盖该价位的 K 线),从 HH / LL 左边开始取第一根:
  *   HH 射线 → 第一根**阳线**(显示 阳O / 阳H / 阳C,点击**做空**);
  *   LL 射线 → 第一根**阴线**(显示 阴O / 阴L / 阴C,点击**做多**)。
+ * - 触发价是否**已触发**:每个价位(阳O/阳H/阳C、阴O/阴L/阴C)向右发一条水平射线,
+ *   后续哪根 K 线的价格区间"遮挡"(覆盖)了它,就说明该价位**已经触发过** → 显示浅红框。
  * - 点击起点/终点/触发价位 → 预填下单,同「日K锚点」面板。
  * - 可见性:**仅 admin 账号**渲染(见 DailyKPanel)。
  */
@@ -48,7 +50,19 @@ interface TriggerCandle {
   candle: Candle;
   /** 该 K 线在 pivot 左边多少根 */
   distance: number;
+  /** 该 K 线在 candles 数组里的下标(向右扫覆盖用) */
+  index: number;
 }
+
+/** 某个价位是否已被后续 K 线"遮挡"(价格区间覆盖该价位) */
+interface LevelCoverage {
+  covered: boolean;
+  /** 最早遮挡到它的 K 线时间(秒) */
+  hitTime: number | null;
+}
+
+/** 价位 → 覆盖情况(键为 阳O/阳H/阳C 或 阴O/阴L/阴C) */
+type CoverageMap = Record<string, LevelCoverage>;
 
 
 /** 时间戳(秒) → "MM-DD HH:mm" */
@@ -107,9 +121,39 @@ function findRayTrigger(
     const bull = c.close > c.open;
     const bear = c.close < c.open;
     const match = kind === "bullishBelow" ? bull : bear;
-    if (match) return { candle: c, distance: pivotIdx - j };
+    if (match) return { candle: c, distance: pivotIdx - j, index: j };
   }
   return null;
+}
+
+/**
+ * 从触发 K 线的**右边**开始,给每个价位向右发一条水平射线,
+ * 看后续哪根 K 线的价格区间"遮挡"(覆盖)了它 —— 覆盖了就说明该价位**已经被触发过**。
+ *
+ * 例:阳线行做空,阳O 是挂单入场位;价格之后跌回 阳O → 该挂单已被成交 → 标红框。
+ */
+function findLevelCoverage(
+  candles: Candle[],
+  triggerIdx: number,
+  levels: [string, number][]
+): CoverageMap {
+  const res: CoverageMap = {};
+  for (const [label] of levels) res[label] = { covered: false, hitTime: null };
+  for (let j = triggerIdx + 1; j < candles.length; j++) {
+    const c = candles[j];
+    if (!c) continue;
+    let all = true;
+    for (const [label, price] of levels) {
+      if (res[label].covered) continue;
+      if (c.low <= price && price <= c.high) {
+        res[label] = { covered: true, hitTime: c.time };
+      } else {
+        all = false;
+      }
+    }
+    if (all) break;
+  }
+  return res;
 }
 
 
@@ -164,6 +208,7 @@ function TriggerRow({
   side,
   pivotLabel,
   pivotPrice,
+  coverage,
   onClick,
 }: {
   trigger: TriggerCandle | null;
@@ -171,6 +216,7 @@ function TriggerRow({
   side: "buy" | "sell";
   pivotLabel: string;
   pivotPrice: number;
+  coverage?: CoverageMap;
   onClick: (price: number, side: "buy" | "sell") => void;
 }) {
   const isBuy = side === "buy";
@@ -210,16 +256,29 @@ function TriggerRow({
         >
           {sideLabel}
         </span>
-        {chips.map(([label, price]) => (
-          <button
-            key={label}
-            onClick={() => onClick(price, side)}
-            className="font-semibold hover:underline cursor-pointer"
-            title={`${pivotLabel}射线向左扫到的第一根${kindName}的${label} —— 点击预填${sideAction}`}
-          >
-            {label} {price.toFixed(1)}
-          </button>
-        ))}
+        {chips.map(([label, price]) => {
+          const cov = coverage?.[label];
+          const covered = !!cov?.covered;
+          const tip = `${pivotLabel}射线向左扫到的第一根${kindName}的${label} —— 点击预填${sideAction}` +
+            (covered
+              ? `\n⚠ 该价位已被后续 K 线遮挡(最早 ${cov?.hitTime ? formatTime(cov.hitTime) : "?"}),即已触发过`
+              : `\n尚未被后续 K 线遮挡,该价位还没被触发`);
+          return (
+            <button
+              key={label}
+              onClick={() => onClick(price, side)}
+              className={cn(
+                "font-semibold hover:underline cursor-pointer px-0.5 rounded border",
+                covered
+                  ? "border-red-300 bg-red-50/60 text-red-600"
+                  : "border-transparent"
+              )}
+              title={tip}
+            >
+              {label} {price.toFixed(1)}
+            </button>
+          );
+        })}
       </div>
       <div className="flex items-center gap-1.5 pl-0.5 mt-px text-gray-400">
         <span>
@@ -247,6 +306,10 @@ function LegRow({
     aboveLL: TriggerCandle | null;
     hhPrice: number;
     llPrice: number;
+    /** HH 射线阳线行三个价位的覆盖情况 */
+    bullCoverage: CoverageMap;
+    /** LL 射线阴线行三个价位的覆盖情况 */
+    bearCoverage: CoverageMap;
   } | null;
   onPriceClick: (price: number, side?: "buy" | "sell") => void;
 }) {
@@ -293,6 +356,7 @@ function LegRow({
             side="sell"
             pivotLabel="HH"
             pivotPrice={triggers.hhPrice}
+            coverage={triggers.bullCoverage}
             onClick={(p, s) => onPriceClick(p, s)}
           />
           <TriggerRow
@@ -301,6 +365,7 @@ function LegRow({
             side="buy"
             pivotLabel="LL"
             pivotPrice={triggers.llPrice}
+            coverage={triggers.bearCoverage}
             onClick={(p, s) => onPriceClick(p, s)}
           />
         </div>
@@ -392,11 +457,30 @@ export function LongestSwingPanel() {
     const ll = maxAmplitudeLeg.from.type === "low" ? maxAmplitudeLeg.from : maxAmplitudeLeg.to;
     const hhIdx = findCandleIndex(candles, hh);
     const llIdx = findCandleIndex(candles, ll);
+    const belowHH = hhIdx >= 0 ? findRayTrigger(candles, hh, hhIdx, "bullishBelow") : null;
+    const aboveLL = llIdx >= 0 ? findRayTrigger(candles, ll, llIdx, "bearishAbove") : null;
+    // 向右射线:这些价位有没有被后续 K 线遮挡(=已经被触发过)
+    const bullCoverage = belowHH
+      ? findLevelCoverage(candles, belowHH.index, [
+          ["阳O", belowHH.candle.open],
+          ["阳H", belowHH.candle.high],
+          ["阳C", belowHH.candle.close],
+        ])
+      : {};
+    const bearCoverage = aboveLL
+      ? findLevelCoverage(candles, aboveLL.index, [
+          ["阴O", aboveLL.candle.open],
+          ["阴L", aboveLL.candle.low],
+          ["阴C", aboveLL.candle.close],
+        ])
+      : {};
     return {
       hhPrice: hh.price,
       llPrice: ll.price,
-      belowHH: hhIdx >= 0 ? findRayTrigger(candles, hh, hhIdx, "bullishBelow") : null,
-      aboveLL: llIdx >= 0 ? findRayTrigger(candles, ll, llIdx, "bearishAbove") : null,
+      belowHH,
+      aboveLL,
+      bullCoverage,
+      bearCoverage,
     };
   }, [candles, maxAmplitudeLeg]);
 
@@ -436,6 +520,9 @@ export function LongestSwingPanel() {
                   onPriceClick={handlePriceClick}
                 />
               )}
+              <div className="text-[9px] text-gray-400 pt-1 border-t border-dashed border-gray-100">
+                浅红框 = 该价位向右的射线被后续 K 线遮挡,即已经被触发过
+              </div>
             </>
           )}
         </div>
