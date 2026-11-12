@@ -10,7 +10,7 @@
 
 import { useState, useEffect } from "react";
 import { useChartStore } from "@/stores/chartStore";
-import { HistoricalDailyHLPanel } from "./HistoricalDailyHLPanel";
+import { LongestSwingPanel } from "./LongestSwingPanel";
 import { useOrderStore } from "@/stores/orderStore";
 import { fetchKlines } from "@/lib/binance/api";
 
@@ -272,9 +272,9 @@ export function DailyKPanel() {
               {renderAnchorColumn("4D", fourDayAnchor, "text-purple-600")}
             </div>
           </div>
-          {/* 下方：历史日K HL（10 天） */}
+          {/* 下方：最长波段（最近 5 个 HH + 5 个 LL 中幅度最大的波段） */}
           <div className="border-t border-gray-200">
-            <HistoricalDailyHLPanel />
+            <LongestSwingPanel />
           </div>
         </div>
       )}
