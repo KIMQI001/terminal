@@ -1,14 +1,12 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useChartStore, DailyHLLines } from "@/stores/chartStore";
-import { detectFVGs } from "@/lib/chart/indicators/fvg";
 import { cn } from "@/lib/utils";
 
 type ZoneType = 'P' | 'M' | 'D';
-type AttackSide = 'bull' | 'bear' | 'none';
 
 export function DailyHLPanel() {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -16,17 +14,9 @@ export function DailyHLPanel() {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const { dailyHL, candles, symbol, dailyHLLines, toggleDailyHLLine } = useChartStore();
 
-  // 找最新存活的 FVG → 推断当前进攻方
-  //   - 找到 latestLiveFVG(没被填的)
-  //   - bearish FVG(上影在上,缺口在 K 线上方)→ 卖方未完成订单 → 空方进攻
-  //   - bullish FVG(下影在下,缺口在 K 线下方)→ 买方未完成订单 → 多方进攻
-  const attackSide: AttackSide = useMemo(() => {
-    if (candles.length < 3) return 'none';
-    const fvgs = detectFVGs(candles);  // 已过滤 fillPercentage < 80
-    if (fvgs.length === 0) return 'none';
-    const latest = fvgs[fvgs.length - 1];  // 最新(按 time 正序)
-    return latest.type === 'bearish' ? 'bear' : 'bull';
-  }, [candles]);
+  // 注:顶部原有的「攻防按钮(L/S)」与 MTFPanel 的 FVG 灯计算完全相同
+  // (detectFVGs(candles) → 最新一个 FVG 的 type),属于重复显示,已移除,
+  // FVG 方向灯统一由 MTFPanel 提供。
 
   // 点击外部关闭下拉框
   useEffect(() => {
@@ -125,27 +115,6 @@ export function DailyHLPanel() {
 
   return (
     <div className="flex items-center gap-1">
-      {/* 攻防按钮(基于最新存活 FVG 推断) */}
-      <Button
-        variant="outline"
-        size="sm"
-        className={cn(
-          "px-2 h-7 text-xs gap-1",
-          attackSide === 'bull' && "border-green-500 text-green-600",
-          attackSide === 'bear' && "border-red-500 text-red-600",
-          attackSide === 'none' && "border-gray-300 text-gray-400"
-        )}
-        title="最新存活的 FVG:看跌→空方进攻,看涨→多方进攻"
-      >
-        <div className={cn(
-          "w-2 h-2 rounded-full",
-          attackSide === 'bull' && "bg-green-500",
-          attackSide === 'bear' && "bg-red-500",
-          attackSide === 'none' && "bg-gray-300"
-        )} />
-        <span>{attackSide === 'bull' ? 'L' : attackSide === 'bear' ? 'S' : '—'}</span>
-      </Button>
-
       {/* Daily Range 按钮 */}
       <div className="relative">
         <Button
