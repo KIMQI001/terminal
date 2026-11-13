@@ -129,10 +129,15 @@ impl Engine {
     /// 设置 / 更新配置(会自动重启策略)
     pub async fn configure(&self, cfg: StrategyConfig) {
         let mut rt = self.rt.lock().await;
-        // 配置变了 → 先把旧的挂单撤掉
+        // 配置变了(哪怕只是改保证金比例/止损点数)→ 先把**自己**挂的入场单撤掉,
+        // 否则下一轮重新挂单会和旧单重复(两倍仓位)
         if let (Some(old_api), Some(old_cfg)) = (rt.api.as_ref(), rt.config.as_ref()) {
-            if old_cfg.symbol != cfg.symbol {
-                let _ = old_api.cancel_orders_by_prefix(&old_cfg.symbol, ENTRY_PREFIX).await;
+            match old_api.cancel_orders_by_prefix(&old_cfg.symbol, ENTRY_PREFIX).await {
+                Ok(n) if n > 0 => {
+                    info!("[Strategy] 重新配置,撤掉 {} 个旧入场挂单", n);
+                }
+                Ok(_) => {}
+                Err(e) => warn!("[Strategy] 撤旧入场挂单失败: {}", e),
             }
         }
         rt.armed = false;
