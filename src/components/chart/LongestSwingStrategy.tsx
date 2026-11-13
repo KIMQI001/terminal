@@ -32,6 +32,8 @@ interface StrategyStatus {
   leverage: number | null;
   orders: { client_order_id: string; label: string; price: number; side: string; quantity: number; order_type: string }[];
   position: { position_side: string; amount: number; entry_price: number; quantity: number } | null;
+  /** hedge 模式下可能同时有多头和空头 */
+  positions?: { position_side: string; amount: number; entry_price: number; quantity: number }[];
   last_error: string | null;
   updated_at: number;
 }
@@ -237,12 +239,25 @@ export function LongestSwingStrategy() {
         )}
       </div>
 
-      {status?.position && (
-        <div className="text-[9px] font-mono text-green-700">
-          持仓 {status.position.position_side} {status.position.quantity} @{" "}
-          {status.position.entry_price.toFixed(1)}
-        </div>
-      )}
+      {(() => {
+        // 多空两边都成交时两个持仓都要显示
+        const posList =
+          status?.positions && status.positions.length > 0
+            ? status.positions
+            : status?.position
+              ? [status.position]
+              : [];
+        if (posList.length === 0) return null;
+        return (
+          <div className="text-[9px] font-mono text-green-700 space-y-0.5">
+            {posList.map((p) => (
+              <div key={p.position_side}>
+                持仓 {p.position_side} {p.quantity} @ {p.entry_price.toFixed(1)}
+              </div>
+            ))}
+          </div>
+        );
+      })()}
       {status && status.orders.length > 0 && (
         <div className="text-[9px] font-mono text-gray-500 space-y-0.5">
           {status.orders.map((o) => (

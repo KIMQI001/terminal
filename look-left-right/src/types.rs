@@ -243,7 +243,10 @@ pub struct StrategyStatus {
     pub armed_leg: Option<(i64, i64)>,
     pub frame: Option<Frame>,
     pub orders: Vec<PlacedOrder>,
+    /// 第一个持仓(兼容旧字段;多空两边都有仓位时用 positions 看全)
     pub position: Option<PositionInfo>,
+    /// 当前全部持仓(hedge 模式下可能同时有 LONG 和 SHORT)
+    pub positions: Vec<PositionInfo>,
     pub last_error: Option<String>,
     pub updated_at: i64,
 }

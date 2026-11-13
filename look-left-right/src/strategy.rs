@@ -36,6 +36,8 @@ pub struct Runtime {
     pub frame: Option<Frame>,
     pub orders: Vec<PlacedOrder>,
     pub position: Option<PositionInfo>,
+    /// 当前全部持仓(hedge 模式下可能同时有 LONG 和 SHORT)
+    pub positions: Vec<PositionInfo>,
     pub current_price: Option<f64>,
     pub balance: Option<f64>,
     pub leverage: Option<u32>,
@@ -59,6 +61,7 @@ impl Runtime {
             frame: None,
             orders: Vec::new(),
             position: None,
+            positions: Vec::new(),
             current_price: None,
             balance: None,
             leverage: None,
@@ -90,6 +93,7 @@ impl Runtime {
             frame: self.frame.clone(),
             orders: self.orders.clone(),
             position: self.position.clone(),
+            positions: self.positions.clone(),
             last_error: self.last_error.clone(),
             updated_at: self.updated_at,
         }
@@ -122,6 +126,7 @@ impl Engine {
         rt.armed_covered.clear();
         rt.orders.clear();
         rt.position = None;
+        rt.positions.clear();
         rt.state = StrategyState::Waiting;
         rt.last_error = None;
         rt.running = true;
@@ -211,16 +216,21 @@ impl Engine {
             .collect();
 
         if !my_positions.is_empty() {
-            let pos = &my_positions[0];
+            let pos_infos: Vec<PositionInfo> = my_positions
+                .iter()
+                .map(|p| PositionInfo {
+                    position_side: p.position_side.clone(),
+                    amount: p.position_amt,
+                    entry_price: p.entry_price,
+                    quantity: p.position_amt.abs(),
+                })
+                .collect();
             {
                 let mut rt = self.rt.lock().await;
                 rt.state = StrategyState::InPosition;
-                rt.position = Some(PositionInfo {
-                    position_side: pos.position_side.clone(),
-                    amount: pos.position_amt,
-                    entry_price: pos.entry_price,
-                    quantity: pos.position_amt.abs(),
-                });
+                rt.position = pos_infos.first().cloned();
+                // hedge 模式下可能同时持有多头和空头,两个都要记下来
+                rt.positions = pos_infos.clone();
                 rt.armed = false;
                 rt.orders.clear(); // 入场挂单已撤,列表同步清空
             }
@@ -243,15 +253,20 @@ impl Engine {
                 }
             }
             // 撤掉方向不符的保护单(多空反手时残留的旧保护单,留着会误平新仓)
+            // 当前**没有任何持仓**的方向才算"不符"
+            let live_sides: Vec<String> =
+                my_positions.iter().map(|p| p.position_side.clone()).collect();
             for a in live_algo.iter() {
                 let is_protective = a.client_algo_id.starts_with(SL_PREFIX)
                     || a.client_algo_id.starts_with(TP_PREFIX);
-                if !is_protective || a.position_side == pos.position_side {
+                if !is_protective || live_sides.contains(&a.position_side) {
                     continue;
                 }
                 warn!(
                     "[Strategy] 撤掉方向不符的保护单 algoId={}({} → 当前 {})",
-                    a.algo_id, a.position_side, pos.position_side
+                    a.algo_id,
+                    a.position_side,
+                    live_sides.join("/")
                 );
                 if let Ok(r) = api.cancel_algo_order(&cfg.symbol, a.algo_id).await {
                     if !r.success {
@@ -264,9 +279,11 @@ impl Engine {
                 }
             }
 
-            // 确保止盈止损都在
-            self.ensure_protective_orders(&cfg, &api, pos, hedge_mode, &live_algo, price)
-                .await;
+            // 确保**每个**持仓都有止盈止损(多空两边都成交时,两边都要保护)
+            for p in my_positions.iter() {
+                self.ensure_protective_orders(&cfg, &api, p, hedge_mode, &live_algo, price)
+                    .await;
+            }
             return Ok(());
         }
 
@@ -274,6 +291,7 @@ impl Engine {
         {
             let mut rt = self.rt.lock().await;
             rt.position = None;
+            rt.positions.clear();
         }
 
         // —— 3.5 仓位没了但保护单还挂着 → 撤掉(否则残留的条件单会反向开仓) ——
