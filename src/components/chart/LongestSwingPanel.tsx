@@ -13,6 +13,9 @@
  *   LL 射线 → 第一根**阴线**(显示 阴O / 阴L / 阴C,点击**做多**)。
  * - 触发价是否**已触发**:从波段的 HH / LL **之后**开始,给每个价位(阳O/阳H/阳C、阴O/阴L/阴C)
  *   向右发一条水平射线,后续哪根 K 线的价格区间"遮挡"(覆盖)了它,就说明该价位**已经触发过** → 显示浅红框。
+ * - 另外两行:**最新 HH** 和 **最新 LL**(图上 age=0 的那两条射线),各自用同一套射线规则
+ *   找自己的关键价位(最新 HH → 阳O/阳H/阳C 做空;最新 LL → 阴O/阴L/阴C 做多),
+ *   覆盖判定同样从该 pivot 之后开始。
  * - 点击起点/终点/触发价位 → 预填下单,同「日K锚点」面板。
  * - 底部「框架策略」区块:把这 6 个价位交给 Rust 服务 look-left-right 自动挂单
  *   (任一价位被触发 → 框架成立 → 给其余未触发价位挂单;止损 200 / 止盈 1000;
@@ -213,6 +216,7 @@ function TriggerRow({
   pivotLabel,
   pivotPrice,
   coverage,
+  rayLabel,
   onClick,
 }: {
   trigger: TriggerCandle | null;
@@ -221,8 +225,12 @@ function TriggerRow({
   pivotLabel: string;
   pivotPrice: number;
   coverage?: CoverageMap;
+  /** 射线名称(默认用 pivotLabel,如「最新HH」/「波段HH」) */
+  rayLabel?: string;
   onClick: (price: number, side: "buy" | "sell") => void;
 }) {
+  const ray = rayLabel ?? pivotLabel;
+
   const isBuy = side === "buy";
   const kindName = kind === "bullish" ? "阳线" : "阴线";
   const sideLabel = isBuy ? "多" : "空";
@@ -263,10 +271,10 @@ function TriggerRow({
         {chips.map(([label, price]) => {
           const cov = coverage?.[label];
           const covered = !!cov?.covered;
-          const tip = `${pivotLabel}射线向左扫到的第一根${kindName}的${label} —— 点击预填${sideAction}` +
+          const tip = `${ray}射线向左扫到的第一根${kindName}的${label} —— 点击预填${sideAction}` +
             (covered
-              ? `\n⚠ ${pivotLabel} 之后的 K 线已遮挡该价位(最早 ${cov?.hitTime ? formatTime(cov.hitTime) : "?"}),即已触发过`
-              : `\n${pivotLabel} 之后的 K 线还没遮挡该价位,该价位还没被触发`);
+              ? `\n⚠ ${ray} 之后的 K 线已遮挡该价位(最早 ${cov?.hitTime ? formatTime(cov.hitTime) : "?"}),即已触发过`
+              : `\n${ray} 之后的 K 线还没遮挡该价位,该价位还没被触发`);
           return (
             <button
               key={label}
@@ -286,9 +294,63 @@ function TriggerRow({
       </div>
       <div className="flex items-center gap-1.5 pl-0.5 mt-px text-gray-400">
         <span>
-          {pivotLabel}射线 左{distance}根K {diffPct > 0 ? "+" : ""}
+          {ray}射线 左{distance}根K {diffPct > 0 ? "+" : ""}
           {diffPct.toFixed(2)}% · {formatTime(candle.time)}
         </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 单个 pivot(最新 HH / 最新 LL)的展示行
+ *
+ * 和「一条波段」共用同一套射线逻辑:
+ * - HH 射线向左扫第一根**阳线** → 阳O / 阳H / 阳C(做空)
+ * - LL 射线向左扫第一根**阴线** → 阴O / 阴L / 阴C(做多)
+ * 覆盖判定同样是「从该 pivot 之后开始,看后续 K 线有没有遮挡这个价位」。
+ */
+function PivotRow({
+  pivot,
+  title,
+  rank,
+  kind,
+  side,
+  trigger,
+  coverage,
+  rayLabel,
+  onPriceClick,
+}: {
+  pivot: SwingPoint;
+  title: string;
+  rank: number;
+  kind: "bullish" | "bearish";
+  side: "buy" | "sell";
+  trigger: TriggerCandle | null;
+  coverage: CoverageMap;
+  rayLabel: string;
+  onPriceClick: (price: number, side?: "buy" | "sell") => void;
+}) {
+  return (
+    <div className="rounded px-1.5 py-1 border bg-gray-50/70 border-gray-100">
+      <div className="flex items-center justify-between text-[9px] text-gray-500 mb-0.5">
+        <span className="font-medium text-gray-600">{title}</span>
+        <span className="font-mono text-gray-400">{formatTime(pivot.time)}</span>
+      </div>
+      <div className="flex items-center gap-1.5 text-[11px] font-mono">
+        <EndpointButton point={pivot} rank={rank} onClick={(p) => onPriceClick(p)} />
+      </div>
+      <div className="mt-1 pt-1 border-t border-dashed border-gray-200 space-y-0.5">
+        <TriggerRow
+          trigger={trigger}
+          kind={kind}
+          side={side}
+          pivotLabel={pivot.type === "high" ? "HH" : "LL"}
+          pivotPrice={pivot.price}
+          coverage={coverage}
+          rayLabel={rayLabel}
+          onClick={(p, s) => onPriceClick(p, s)}
+        />
       </div>
     </div>
   );
@@ -426,6 +488,17 @@ export function LongestSwingPanel() {
     return result;
   }, [swingPoints]);
 
+  // 最新的 swing high / swing low(rank = 1,对应图上 age=0 的那条射线)
+  const latestHigh = useMemo(() => {
+    const highs = swingPoints.filter((sp) => sp.type === "high");
+    return highs.length > 0 ? highs[highs.length - 1] : null;
+  }, [swingPoints]);
+
+  const latestLow = useMemo(() => {
+    const lows = swingPoints.filter((sp) => sp.type === "low");
+    return lows.length > 0 ? lows[lows.length - 1] : null;
+  }, [swingPoints]);
+
   // 幅度最大的波段(用户要的"最长的波段")
   const maxAmplitudeLeg = useMemo(() => {
     if (legs.length === 0) return null;
@@ -491,6 +564,43 @@ export function LongestSwingPanel() {
   const showDurationLeg =
     maxDurationLeg && maxAmplitudeLeg && maxDurationLeg !== maxAmplitudeLeg;
 
+  // 最新 HH / 最新 LL 各自的射线触发价 + 覆盖情况
+  //   HH 射线向左第一根阳线(阳O/阳H/阳C,做空)
+  //   LL 射线向左第一根阴线(阴O/阴L/阴C,做多)
+  const latestTriggers = useMemo(() => {
+    const build = (
+      pivot: SwingPoint | null,
+      kind: "bullishBelow" | "bearishAbove"
+    ): { trigger: TriggerCandle | null; coverage: CoverageMap } | null => {
+      if (!pivot) return null;
+      const idx = findCandleIndex(candles, pivot);
+      if (idx < 0) return { trigger: null, coverage: {} };
+      const trigger = findRayTrigger(candles, pivot, idx, kind);
+      const coverage: CoverageMap = trigger
+        ? findLevelCoverage(
+            candles,
+            idx,
+            kind === "bullishBelow"
+              ? [
+                  ["阳O", trigger.candle.open],
+                  ["阳H", trigger.candle.high],
+                  ["阳C", trigger.candle.close],
+                ]
+              : [
+                  ["阴O", trigger.candle.open],
+                  ["阴L", trigger.candle.low],
+                  ["阴C", trigger.candle.close],
+                ]
+          )
+        : {};
+      return { trigger, coverage };
+    };
+    return {
+      high: build(latestHigh, "bullishBelow"),
+      low: build(latestLow, "bearishAbove"),
+    };
+  }, [candles, latestHigh, latestLow]);
+
   return (
     <div className="bg-white/95 border border-gray-200 rounded-lg shadow-lg">
       <div
@@ -521,6 +631,32 @@ export function LongestSwingPanel() {
                 <LegRow
                   leg={maxDurationLeg}
                   title="持续最久"
+                  onPriceClick={handlePriceClick}
+                />
+              )}
+              {latestHigh && latestTriggers?.high && (
+                <PivotRow
+                  pivot={latestHigh}
+                  title="最新 HH"
+                  rank={1}
+                  kind="bullish"
+                  side="sell"
+                  trigger={latestTriggers.high.trigger}
+                  coverage={latestTriggers.high.coverage}
+                  rayLabel="最新HH"
+                  onPriceClick={handlePriceClick}
+                />
+              )}
+              {latestLow && latestTriggers?.low && (
+                <PivotRow
+                  pivot={latestLow}
+                  title="最新 LL"
+                  rank={1}
+                  kind="bearish"
+                  side="buy"
+                  trigger={latestTriggers.low.trigger}
+                  coverage={latestTriggers.low.coverage}
+                  rayLabel="最新LL"
                   onPriceClick={handlePriceClick}
                 />
               )}
