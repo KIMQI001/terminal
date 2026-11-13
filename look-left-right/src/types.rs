@@ -204,8 +204,10 @@ fn default_poll_interval() -> u64 {
 pub enum StrategyState {
     /// 未启动
     Idle,
-    /// 运行中,等待框架成立
+    /// 运行中,等待框架成立(还没有任何价位被触发过)
     Waiting,
+    /// 已经建过框架,等**新的**价位被触发后再挂单
+    WaitingTrigger,
     /// 框架已成立,阶梯挂单已挂出,等待成交
     Armed,
     /// 已有持仓,其余挂单已撤,只留止盈止损
@@ -251,6 +253,8 @@ pub struct StrategyStatus {
     /// 当前全部持仓(hedge 模式下可能同时有 LONG 和 SHORT)
     pub positions: Vec<PositionInfo>,
     pub last_error: Option<String>,
+    /// 处于等待状态时的具体原因(面板上直接显示,免得只看到一个笼统的"等待")
+    pub wait_reason: Option<String>,
     pub updated_at: i64,
 }
 

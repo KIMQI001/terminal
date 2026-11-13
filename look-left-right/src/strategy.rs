@@ -47,6 +47,14 @@ pub struct Runtime {
     pub armed_covered: Vec<String>,
     /// 是否已挂出阶梯
     pub armed: bool,
+    /// 上一轮是否有持仓(平仓后用来触发"按剩余未触发价位重新挂单")
+    pub had_position: bool,
+    /// 本轮是"平仓后重新挂单"(这一轮要避开刚开仓的那个价位,防止同价位反复开仓)
+    pub rearm: bool,
+    /// 上一笔持仓的开仓价(平仓后避免在同一个价位反复开仓)
+    pub last_entry_price: Option<f64>,
+    /// 等待状态的具体原因(面板显示)
+    pub wait_reason: Option<String>,
     pub last_error: Option<String>,
     pub updated_at: i64,
 }
@@ -68,6 +76,10 @@ impl Runtime {
             armed_leg: None,
             armed_covered: Vec::new(),
             armed: false,
+            had_position: false,
+            rearm: false,
+            last_entry_price: None,
+            wait_reason: None,
             last_error: None,
             updated_at: now_sec(),
         }
@@ -95,6 +107,7 @@ impl Runtime {
             orders: self.orders.clone(),
             position: self.position.clone(),
             positions: self.positions.clone(),
+            wait_reason: self.wait_reason.clone(),
             last_error: self.last_error.clone(),
             updated_at: self.updated_at,
         }
@@ -128,7 +141,11 @@ impl Engine {
         rt.orders.clear();
         rt.position = None;
         rt.positions.clear();
+        rt.had_position = false;
+        rt.rearm = false;
+        rt.last_entry_price = None;
         rt.state = StrategyState::Waiting;
+        rt.wait_reason = Some("已启动,等待框架成立".to_string());
         rt.last_error = None;
         rt.running = true;
         rt.api = Some(Arc::new(BinanceApi::new(
@@ -234,6 +251,9 @@ impl Engine {
                 rt.positions = pos_infos.clone();
                 rt.armed = false;
                 rt.orders.clear(); // 入场挂单已撤,列表同步清空
+                rt.had_position = true;
+                rt.last_entry_price = pos_infos.first().map(|p| p.entry_price);
+                rt.wait_reason = None;
             }
             // 撤掉所有入场挂单(只有确实还挂着才撤,省掉无谓的接口调用)
             let live = api.get_open_orders(&cfg.symbol).await.unwrap_or_default();
@@ -293,6 +313,17 @@ impl Engine {
             let mut rt = self.rt.lock().await;
             rt.position = None;
             rt.positions.clear();
+            // —— 3.4 刚从持仓状态回来(平仓了)→ 清掉"已触发记录",
+            //      这样本轮就可以按**剩余未触发**的价位重新挂单(而不是干等新的触发)
+            if rt.had_position {
+                rt.had_position = false;
+                rt.rearm = true;
+                rt.armed_covered.clear();
+                info!(
+                    "[Strategy] 仓位已平,重新按剩余未触发价位挂单(上轮开仓价 {:?})",
+                    rt.last_entry_price
+                );
+            }
         }
 
         // —— 3.5 仓位没了但保护单还挂着 → 撤掉(否则残留的条件单会反向开仓) ——
@@ -319,6 +350,7 @@ impl Engine {
         let Some(frame) = frame else {
             let mut rt = self.rt.lock().await;
             rt.state = StrategyState::Waiting;
+            rt.wait_reason = Some("算不出框架(波段数据不足)".to_string());
             return Ok(());
         };
 
@@ -338,13 +370,17 @@ impl Engine {
                 rt.armed = false;
                 rt.armed_covered.clear();
                 rt.orders.clear();
+                rt.rearm = false; // 换波段 = 新框架,不需要避开上一轮的价位
             }
         }
 
-        // —— 5. 框架是否成立 ——
+        // —— 5. 框架是否成立(至少一个价位被触发过)——
         if !frame.is_established() {
             let mut rt = self.rt.lock().await;
             rt.state = StrategyState::Waiting;
+            rt.wait_reason = Some(
+                "还没有任何价位被触发过(6 个价位全是未触发)—— 框架不成立,先不挂单".to_string(),
+            );
             return Ok(());
         }
 
@@ -369,7 +405,11 @@ impl Engine {
                     let mut rt = self.rt.lock().await;
                     rt.armed = false;
                     rt.orders.clear();
-                    rt.state = StrategyState::Waiting;
+                    rt.state = StrategyState::WaitingTrigger;
+                    rt.wait_reason = Some(
+                        "入场挂单已不在交易所(成交后已平 / 被外部撤销),等新的价位被触发再挂"
+                            .to_string(),
+                    );
                 }
             }
             return Ok(());
@@ -388,17 +428,44 @@ impl Engine {
         let first_arm = armed_covered.is_empty();
         if !(first_arm || has_new_trigger) {
             let mut rt = self.rt.lock().await;
-            rt.state = StrategyState::Waiting;
+            rt.state = StrategyState::WaitingTrigger;
+            rt.wait_reason = Some(
+                "本轮框架已经挂过单,还没有新的价位被触发(平仓后会按剩余未触发价位重新挂)"
+                    .to_string(),
+            );
             return Ok(());
         }
 
         // —— 8. 建立框架 → 给未触发的价位挂单 ——
-        let levels: Vec<Level> = frame.uncovered_levels().into_iter().cloned().collect();
+        let mut levels: Vec<Level> = frame.uncovered_levels().into_iter().cloned().collect();
+        // 平仓后重新挂单的这一轮:避开刚开仓的那个价位(防止同价位反复开仓)
+        let (rearm, last_entry) = {
+            let rt = self.rt.lock().await;
+            (rt.rearm, rt.last_entry_price)
+        };
+        if rearm {
+            if let Some(entry) = last_entry {
+                let before = levels.len();
+                levels = skip_last_entry_level(levels, entry);
+                if levels.len() < before {
+                    info!(
+                        "[Strategy] 重新挂单时跳过刚开仓的价位({:.1}),剩余 {} 档",
+                        entry,
+                        levels.len()
+                    );
+                }
+            }
+        }
+        {
+            let mut rt = self.rt.lock().await;
+            rt.rearm = false;
+        }
         if levels.is_empty() {
             let mut rt = self.rt.lock().await;
             rt.armed = true;
             rt.armed_covered = covered_labels;
             rt.state = StrategyState::Armed;
+            rt.wait_reason = None;
             return Ok(());
         }
 
@@ -413,6 +480,7 @@ impl Engine {
         rt.armed_covered = covered_labels;
         rt.orders = placed;
         rt.state = StrategyState::Armed;
+        rt.wait_reason = None;
         // 打印完整算式:总保证金 = 余额 × margin_pct,再平均分给 n 个未触发价位
         let per_margin = balance * cfg.margin_pct / levels.len().max(1) as f64;
         info!(
@@ -759,6 +827,17 @@ fn validate_trigger_price(current_price: f64, trigger: f64, side: &str, order_ty
     }
 }
 
+/// 平仓后重新挂单时,去掉"刚开仓的那个价位"(防止同价位反复开仓)
+///
+/// 判定:价位与开仓价相差 < max(开仓价 × 0.05%, 1 点) 认为是同一个价位
+pub fn skip_last_entry_level(levels: Vec<Level>, entry: f64) -> Vec<Level> {
+    let eps = (entry * 0.0005).max(1.0);
+    levels
+        .into_iter()
+        .filter(|l| (l.price - entry).abs() > eps)
+        .collect()
+}
+
 /// 每档保证金 = 余额 × margin_pct ÷ 未触发价位数
 ///
 /// 例:余额 30、margin_pct 0.9、2 个未触发价位 → 总保证金 27,每档 13.5
@@ -790,6 +869,7 @@ pub fn now_sec() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::LevelKind;
 
     #[test]
     fn 止损触发价方向() {
@@ -820,8 +900,25 @@ mod tests {
     }
 
     #[test]
-    fn 保证金按未触发价位数分档() {
-        // 余额 30、9 成、2 个未触发价位 → 总保证金 27,每档 13.5
+    fn 平仓重挂时跳过刚开仓的价位() {
+        let mk = |label: &str, price: f64| Level {
+            label: label.to_string(),
+            price,
+            side: Side::Sell,
+            kind: LevelKind::Bull,
+            pivot_label: "HH".to_string(),
+            covered: false,
+            covered_at: None,
+        };
+        let levels = vec![mk("阳H", 74770.0), mk("阳C", 74373.4), mk("阳O", 74312.9)];
+        // 开仓价 74770 → 这个价位被跳过,其余两个保留
+        let left = skip_last_entry_level(levels, 74770.0);
+        assert_eq!(left.len(), 2);
+        assert!(left.iter().all(|l| l.price != 74770.0));
+    }
+
+    #[test]
+    fn 保证金按未触发价位数分档() {        // 余额 30、9 成、2 个未触发价位 → 总保证金 27,每档 13.5
         let per = calc_per_level_margin(30.0, 0.9, 2);
         assert!((per - 13.5).abs() < 1e-9, "每档保证金 = {per}");
         // 1 档 → 全额 9 成

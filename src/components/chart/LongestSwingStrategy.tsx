@@ -17,7 +17,7 @@ import { useUserStore } from "@/stores/userStore";
 import { cn } from "@/lib/utils";
 
 interface StrategyStatus {
-  state: "idle" | "waiting" | "armed" | "in_position" | "stopped";
+  state: "idle" | "waiting" | "waiting_trigger" | "armed" | "in_position" | "stopped";
   running: boolean;
   symbol: string;
   timeframe: string;
@@ -37,12 +37,15 @@ interface StrategyStatus {
   /** hedge 模式下可能同时有多头和空头 */
   positions?: { position_side: string; amount: number; entry_price: number; quantity: number }[];
   last_error: string | null;
+  /** 等待状态的具体原因 */
+  wait_reason?: string | null;
   updated_at: number;
 }
 
 const STATE_TEXT: Record<string, { text: string; cls: string }> = {
   idle: { text: "未启动", cls: "bg-gray-100 text-gray-500" },
   waiting: { text: "等待框架成立", cls: "bg-amber-100 text-amber-700" },
+  waiting_trigger: { text: "等待新触发", cls: "bg-amber-100 text-amber-700" },
   armed: { text: "已挂单待成交", cls: "bg-blue-100 text-blue-700" },
   in_position: { text: "持仓中", cls: "bg-green-100 text-green-700" },
   stopped: { text: "已停止", cls: "bg-gray-100 text-gray-500" },
@@ -158,6 +161,10 @@ export function LongestSwingStrategy() {
           <span className={cn("px-1 rounded text-[9px] font-semibold", st.cls)}>{st.text}</span>
         )}
       </div>
+
+      {status?.wait_reason && (
+        <div className="text-[9px] font-mono text-amber-600 leading-tight">{status.wait_reason}</div>
+      )}
 
       <div className="grid grid-cols-3 gap-1 text-[9px] font-mono text-gray-500">
         <label className="flex flex-col gap-0.5">
