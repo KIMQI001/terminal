@@ -163,6 +163,7 @@ pub struct StrategyConfig {
     #[serde(default)]
     pub is_testnet: bool,
     /// 总保证金预算 = 余额 × margin_pct,再平均分给阶梯上的每个单
+    /// (例:余额 30、margin_pct 0.9、2 个未触发价位 → 总保证金 27,每档 13.5)
     #[serde(default = "default_margin_pct")]
     pub margin_pct: f64,
     /// 止损点数(绝对值)
@@ -183,7 +184,7 @@ pub struct StrategyConfig {
 }
 
 fn default_margin_pct() -> f64 {
-    0.375
+    0.9
 }
 fn default_sl_points() -> f64 {
     200.0
@@ -241,6 +242,8 @@ pub struct StrategyStatus {
     pub leverage: Option<u32>,
     /// 已建立框架时的波段标识
     pub armed_leg: Option<(i64, i64)>,
+    /// 当前框架里**未触发**的价位数量(决定保证金怎么分档)
+    pub uncovered_count: Option<usize>,
     pub frame: Option<Frame>,
     pub orders: Vec<PlacedOrder>,
     /// 第一个持仓(兼容旧字段;多空两边都有仓位时用 positions 看全)

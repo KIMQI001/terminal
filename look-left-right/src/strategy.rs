@@ -83,13 +83,14 @@ impl Runtime {
             exchange: cfg.map(|c| c.exchange.clone()).unwrap_or_default(),
             user_id: cfg.map(|c| c.user_id).unwrap_or(0),
             dry_run: cfg.map(|c| c.dry_run).unwrap_or(true),
-            margin_pct: cfg.map(|c| c.margin_pct).unwrap_or(0.375),
+            margin_pct: cfg.map(|c| c.margin_pct).unwrap_or(0.9),
             sl_points: cfg.map(|c| c.sl_points).unwrap_or(200.0),
             tp_points: cfg.map(|c| c.tp_points).unwrap_or(1000.0),
             current_price: self.current_price,
             balance: self.balance,
             leverage: self.leverage,
             armed_leg: self.armed_leg,
+            uncovered_count: self.frame.as_ref().map(|f| f.uncovered_levels().len()),
             frame: self.frame.clone(),
             orders: self.orders.clone(),
             position: self.position.clone(),
@@ -412,12 +413,18 @@ impl Engine {
         rt.armed_covered = covered_labels;
         rt.orders = placed;
         rt.state = StrategyState::Armed;
+        // 打印完整算式:总保证金 = 余额 × margin_pct,再平均分给 n 个未触发价位
+        let per_margin = balance * cfg.margin_pct / levels.len().max(1) as f64;
         info!(
-            "[Strategy] 框架成立,已挂 {} 个入场单(balance={:.2} margin_pct={} lev={})",
+            "[Strategy] 框架成立,已挂 {} 个入场单 | 余额 {:.2} × 保证金比例 {} = 总保证金 {:.2} ÷ {} 档 = 每档保证金 {:.4} × 杠杆 {} = 每档名义 ≈ {:.0}",
             rt.orders.len(),
             balance,
             cfg.margin_pct,
-            leverage
+            balance * cfg.margin_pct,
+            levels.len(),
+            per_margin,
+            leverage,
+            per_margin * leverage
         );
         Ok(())
     }
@@ -436,9 +443,8 @@ impl Engine {
         hedge_mode: bool,
     ) -> Vec<PlacedOrder> {
         let mut placed = Vec::new();
-        let n = levels.len() as f64;
         // 总保证金预算 = 余额 × margin_pct,平均分给每一档
-        let per_margin = balance * cfg.margin_pct / n;
+        let per_margin = calc_per_level_margin(balance, cfg.margin_pct, levels.len());
         let (hh_t, ll_t) = frame.leg_signature();
         let cur_price = price.unwrap_or(0.0);
 
@@ -753,6 +759,16 @@ fn validate_trigger_price(current_price: f64, trigger: f64, side: &str, order_ty
     }
 }
 
+/// 每档保证金 = 余额 × margin_pct ÷ 未触发价位数
+///
+/// 例:余额 30、margin_pct 0.9、2 个未触发价位 → 总保证金 27,每档 13.5
+pub fn calc_per_level_margin(balance: f64, margin_pct: f64, levels: usize) -> f64 {
+    if levels == 0 {
+        return 0.0;
+    }
+    balance * margin_pct / levels as f64
+}
+
 /// 数量按精度取整(BTCUSDC 3 位 / ETHUSDC 3 位,默认 3 位)
 fn round_qty(qty: f64, symbol: &str) -> f64 {
     let decimals = match symbol.to_uppercase().as_str() {
@@ -801,5 +817,18 @@ mod tests {
         assert_eq!(round_qty(0.1239, "BTCUSDC"), 0.123);
         assert_eq!(round_qty(1.0, "BTCUSDC"), 1.0);
         assert_eq!(round_qty(0.0004, "ETHUSDC"), 0.0);
+    }
+
+    #[test]
+    fn 保证金按未触发价位数分档() {
+        // 余额 30、9 成、2 个未触发价位 → 总保证金 27,每档 13.5
+        let per = calc_per_level_margin(30.0, 0.9, 2);
+        assert!((per - 13.5).abs() < 1e-9, "每档保证金 = {per}");
+        // 1 档 → 全额 9 成
+        assert!((calc_per_level_margin(30.0, 0.9, 1) - 27.0).abs() < 1e-9);
+        // 4 档 → 每档 27/4
+        assert!((calc_per_level_margin(30.0, 0.9, 4) - 6.75).abs() < 1e-9);
+        // 没有价位 → 0
+        assert_eq!(calc_per_level_margin(30.0, 0.9, 0), 0.0);
     }
 }

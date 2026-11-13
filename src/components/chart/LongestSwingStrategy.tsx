@@ -30,6 +30,8 @@ interface StrategyStatus {
   current_price: number | null;
   balance: number | null;
   leverage: number | null;
+  /** 当前框架里未触发的价位数量(保证金按它分档) */
+  uncovered_count?: number | null;
   orders: { client_order_id: string; label: string; price: number; side: string; quantity: number; order_type: string }[];
   position: { position_side: string; amount: number; entry_price: number; quantity: number } | null;
   /** hedge 模式下可能同时有多头和空头 */
@@ -51,7 +53,7 @@ export function LongestSwingStrategy() {
   const activeExchange = useUserStore((s) => s.activeExchange);
   const token = useUserStore((s) => s.token);
 
-  const [marginPct, setMarginPct] = useState(0.375);
+  const [marginPct, setMarginPct] = useState(0.9);
   const [slPoints, setSlPoints] = useState(200);
   const [tpPoints, setTpPoints] = useState(1000);
   const [dryRun, setDryRun] = useState(true);
@@ -159,7 +161,7 @@ export function LongestSwingStrategy() {
 
       <div className="grid grid-cols-3 gap-1 text-[9px] font-mono text-gray-500">
         <label className="flex flex-col gap-0.5">
-          <span>保证金比例</span>
+          <span>总保证金比例</span>
           <input
             type="number"
             step="0.01"
@@ -191,6 +193,36 @@ export function LongestSwingStrategy() {
           />
         </label>
       </div>
+
+      {(() => {
+        // 保证金算式:总保证金 = 余额 × 保证金比例,再平均分给 n 个未触发价位
+        const effPct = status?.running ? status.margin_pct : marginPct;
+        const n = status?.uncovered_count ?? status?.orders.length ?? 0;
+        const bal = status?.balance ?? null;
+        const lev = status?.leverage ?? null;
+        if (bal == null) {
+          return (
+            <div className="text-[9px] font-mono text-gray-400">
+              启动后读取余额 → 总保证金 = 余额 × {effPct} ÷ 未触发价位数
+            </div>
+          );
+        }
+        const total = bal * effPct;
+        const per = n > 0 ? total / n : 0;
+        return (
+          <div className="text-[9px] font-mono text-gray-500">
+            余 {bal.toFixed(2)} × {effPct} = 总保证金 {total.toFixed(2)}
+            {n > 0 ? (
+              <>
+                {" "}÷ {n} 档 = 每档 {per.toFixed(2)}
+                {lev ? ` × ${lev}x = 名义 ${(per * lev).toFixed(0)}` : ""}
+              </>
+            ) : (
+              " · 等框架成立后按未触发价位分档"
+            )}
+          </div>
+        );
+      })()}
 
       <div className="flex items-center justify-between text-[9px] text-gray-500">
         <label className="flex items-center gap-1 cursor-pointer">
