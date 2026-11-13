@@ -16,6 +16,10 @@
  * - 另外两行:**最新 HH** 和 **最新 LL**(图上 age=0 的那两条射线),各自用同一套射线规则
  *   找自己的关键价位(最新 HH → 阳O/阳H/阳C 做空;最新 LL → 阴O/阴L/阴C 做多),
  *   覆盖判定同样从该 pivot 之后开始。
+ *   射线扫不到时**放宽到价位外侧**再找:最新 HH → 继续向左找**价位上方**的阳线;
+ *   最新 LL → 继续向左找**价位下方**的阴线(找到的会标「放宽」)。
+ *   ⚠ 最长波段那一行**不**放宽 —— Rust 侧 look-left-right/detector.rs 用的是严格规则,
+ *   两边要保持一致,否则面板显示的价位和策略实际挂单的价位会不一样。
  * - 点击起点/终点/触发价位 → 预填下单,同「日K锚点」面板。
  * - 底部「框架策略」区块:把这 6 个价位交给 Rust 服务 look-left-right 自动挂单
  *   (任一价位被触发 → 框架成立 → 给其余未触发价位挂单;止损 200 / 止盈 1000;
@@ -59,6 +63,8 @@ interface TriggerCandle {
   distance: number;
   /** 该 K 线在 candles 数组里的下标(向右扫覆盖用) */
   index: number;
+  /** true = 射线没扫到,放宽到"价位外侧"才找到的这根(下方阴K / 上方阳K) */
+  relaxed?: boolean;
 }
 
 /** 某个价位是否已被后续 K 线"遮挡"(价格区间覆盖该价位) */
@@ -112,14 +118,25 @@ function findCandleIndex(candles: Candle[], pivot: SwingPoint): number {
  * - bearishAbove: LL 射线扫到的第一根**阴线**(close < open)
  *
  * distance = 该 K 线在 pivot 左边多少根。
+ *
+ * relaxOutside = true(最新 HH / 最新 LL 用):第一轮扫不到时**放宽到价位外侧**再找:
+ * - HH 射线:继续向左找**价位上方**的阳线(整根 K 都在价位之上)
+ * - LL 射线:继续向左找**价位下方**的阴线(整根 K 都在价位之下)
+ * 放宽找到的会标 relaxed = true(面板上会标出来),价位方向和第一轮一致
+ * (做空用上方阳线 / 做多用下方阴线)。
+ *
+ * ⚠ 最长波段那一行**不开**放宽 —— Rust 侧 look-left-right/detector.rs 用的是严格规则,
+ *   两边必须保持一致,否则面板显示的 6 个价位和策略实际挂单的价位会不一样。
  */
 function findRayTrigger(
   candles: Candle[],
   pivot: SwingPoint,
   pivotIdx: number,
-  kind: "bullishBelow" | "bearishAbove"
+  kind: "bullishBelow" | "bearishAbove",
+  relaxOutside = false
 ): TriggerCandle | null {
   const level = pivot.price;
+  // 第一轮:射线扫到(价格区间覆盖该价位)且颜色符合
   for (let j = pivotIdx - 1; j >= 0; j--) {
     const c = candles[j];
     if (!c) continue;
@@ -129,6 +146,25 @@ function findRayTrigger(
     const bear = c.close < c.open;
     const match = kind === "bullishBelow" ? bull : bear;
     if (match) return { candle: c, distance: pivotIdx - j, index: j };
+  }
+  if (!relaxOutside) return null;
+  // 第二轮:放宽 —— LL 找价位**下方**的阴线 / HH 找价位**上方**的阳线
+  for (let j = pivotIdx - 1; j >= 0; j--) {
+    const c = candles[j];
+    if (!c) continue;
+    const bull = c.close > c.open;
+    const bear = c.close < c.open;
+    if (kind === "bullishBelow") {
+      // 阳线整根都在价位之上
+      if (bull && c.low > level) {
+        return { candle: c, distance: pivotIdx - j, index: j, relaxed: true };
+      }
+    } else {
+      // 阴线整根都在价位之下
+      if (bear && c.high < level) {
+        return { candle: c, distance: pivotIdx - j, index: j, relaxed: true };
+      }
+    }
   }
   return null;
 }
@@ -271,7 +307,12 @@ function TriggerRow({
         {chips.map(([label, price]) => {
           const cov = coverage?.[label];
           const covered = !!cov?.covered;
-          const tip = `${ray}射线向左扫到的第一根${kindName}的${label} —— 点击预填${sideAction}` +
+          const where = kind === "bullish" ? "上方" : "下方";
+          const tip =
+            (trigger.relaxed
+              ? `${ray}射线没扫到价位,向左放宽找到的第一根${kindName}(在价位${where})的${label}`
+              : `${ray}射线向左扫到的第一根${kindName}的${label}`) +
+            ` —— 点击预填${sideAction}` +
             (covered
               ? `\n⚠ ${ray} 之后的 K 线已遮挡该价位(最早 ${cov?.hitTime ? formatTime(cov.hitTime) : "?"}),即已触发过`
               : `\n${ray} 之后的 K 线还没遮挡该价位,该价位还没被触发`);
@@ -297,6 +338,14 @@ function TriggerRow({
           {ray}射线 左{distance}根K {diffPct > 0 ? "+" : ""}
           {diffPct.toFixed(2)}% · {formatTime(candle.time)}
         </span>
+        {trigger.relaxed && (
+          <span
+            className="px-1 rounded leading-4 font-semibold bg-amber-100 text-amber-700"
+            title="射线没扫到该价位,放宽到价位外侧找到的同色 K 线"
+          >
+            放宽
+          </span>
+        )}
       </div>
     </div>
   );
@@ -575,7 +624,8 @@ export function LongestSwingPanel() {
       if (!pivot) return null;
       const idx = findCandleIndex(candles, pivot);
       if (idx < 0) return { trigger: null, coverage: {} };
-      const trigger = findRayTrigger(candles, pivot, idx, kind);
+      // 最新 HH / 最新 LL:射线扫不到时放宽(向下找阴K / 向上找阳K)
+      const trigger = findRayTrigger(candles, pivot, idx, kind, true);
       const coverage: CoverageMap = trigger
         ? findLevelCoverage(
             candles,
