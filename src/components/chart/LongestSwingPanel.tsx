@@ -239,6 +239,9 @@ function EndpointButton({
   );
 }
 
+/** 价位距离 pivot(HH/LL)小于这个点数 → 高亮 */
+const NEAR_LEVEL_POINTS = 50;
+
 /**
  * 触发价一块:
  * - kind = bullish(阳线)→ 阳O / 阳H / 阳C,点击后**做空**
@@ -253,6 +256,7 @@ function TriggerRow({
   pivotPrice,
   coverage,
   rayLabel,
+  showDistance,
   onClick,
 }: {
   trigger: TriggerCandle | null;
@@ -263,6 +267,8 @@ function TriggerRow({
   coverage?: CoverageMap;
   /** 射线名称(默认用 pivotLabel,如「最新HH」/「波段HH」) */
   rayLabel?: string;
+  /** 是否显示「距离 HH/LL 多少点」,小于 50 点高亮 */
+  showDistance?: boolean;
   onClick: (price: number, side: "buy" | "sell") => void;
 }) {
   const ray = rayLabel ?? pivotLabel;
@@ -308,11 +314,18 @@ function TriggerRow({
           const cov = coverage?.[label];
           const covered = !!cov?.covered;
           const where = kind === "bullish" ? "上方" : "下方";
+          // 与 pivot(HH/LL)的点差(绝对值)
+          const dist = showDistance ? Math.abs(price - pivotPrice) : null;
+          const near = dist !== null && dist < NEAR_LEVEL_POINTS;
           const tip =
             (trigger.relaxed
               ? `${ray}射线没扫到价位,向左放宽找到的第一根${kindName}(在价位${where})的${label}`
               : `${ray}射线向左扫到的第一根${kindName}的${label}`) +
             ` —— 点击预填${sideAction}` +
+            (dist !== null
+              ? `\n距 ${pivotLabel}(${pivotPrice.toFixed(1)}) ${dist.toFixed(1)} 点` +
+                (near ? `(小于 ${NEAR_LEVEL_POINTS} 点,很近)` : "")
+              : "") +
             (covered
               ? `\n⚠ ${ray} 之后的 K 线已遮挡该价位(最早 ${cov?.hitTime ? formatTime(cov.hitTime) : "?"}),即已触发过`
               : `\n${ray} 之后的 K 线还没遮挡该价位,该价位还没被触发`);
@@ -324,11 +337,23 @@ function TriggerRow({
                 "font-semibold hover:underline cursor-pointer px-0.5 rounded border",
                 covered
                   ? "border-red-300 bg-red-50/60 text-red-600"
-                  : "border-transparent"
+                  : "border-transparent",
+                near && !covered && "border-amber-300 bg-amber-100 text-amber-800",
+                near && covered && "ring-1 ring-amber-400"
               )}
               title={tip}
             >
               {label} {price.toFixed(1)}
+              {dist !== null && (
+                <span
+                  className={cn(
+                    "ml-0.5 font-normal",
+                    near ? "text-amber-700 font-bold" : "text-gray-400"
+                  )}
+                >
+                  ({pivotLabel} {dist.toFixed(0)}点)
+                </span>
+              )}
             </button>
           );
         })}
@@ -472,6 +497,7 @@ function LegRow({
             pivotLabel="HH"
             pivotPrice={triggers.hhPrice}
             coverage={triggers.bullCoverage}
+            showDistance
             onClick={(p, s) => onPriceClick(p, s)}
           />
           <TriggerRow
@@ -481,6 +507,7 @@ function LegRow({
             pivotLabel="LL"
             pivotPrice={triggers.llPrice}
             coverage={triggers.bearCoverage}
+            showDistance
             onClick={(p, s) => onPriceClick(p, s)}
           />
         </div>
