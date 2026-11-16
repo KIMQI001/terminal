@@ -1572,24 +1572,26 @@ export function TradingChart() {
   }, [swingPoints, enabled.swingPoints, chartType]);
 
   // 日K锚点 OHLC 价格线（1D 实线 / 4D 虚线）
-  const dailyKLineIdsRef = useRef<Set<string>>(new Set());
+  //
+  // 增量维护:价格变了用 applyOptions 原地移动,**不要** remove + recreate。
+  // 原来每次 store 一变就把整批线删掉重建,加上 store 本身每个 tick 都变,
+  // 结果就是线一闪就没,根本看不清。现在:
+  //   - 缺哪条才 create
+  //   - 价格变了才 applyOptions 移动
+  //   - 不再需要的才 remove
+  // 这批线由本 effect 独占(dk-PriceLinesRef),不放进 priceLinesRef,
+  // 免得被下面「持仓/挂单」那个 effect 的整批清理误删。
+  const dailyKPriceLinesRef = useRef<Map<string, IPriceLine>>(new Map());
   useEffect(() => {
-    if (!dailyKLineEnabled || !candleSeriesRef.current) {
+    const series = candleSeriesRef.current;
+    const map = dailyKPriceLinesRef.current;
+
+    if (!dailyKLineEnabled || !series) {
       // 开关关闭时清掉旧线
-      if (candleSeriesRef.current) {
-        const toRemove = priceLinesRef.current.filter((l) => dailyKLineIdsRef.current.has((l as any)._tag));
-        toRemove.forEach((l) => candleSeriesRef.current?.removePriceLine(l));
-        priceLinesRef.current = priceLinesRef.current.filter((l) => !dailyKLineIdsRef.current.has((l as any)._tag));
-        dailyKLineIdsRef.current.clear();
-      }
+      map.forEach((line) => series?.removePriceLine(line));
+      map.clear();
       return;
     }
-
-    // 清除旧的日K锚点线
-    const toRemove = priceLinesRef.current.filter((l) => dailyKLineIdsRef.current.has((l as any)._tag));
-    toRemove.forEach((l) => candleSeriesRef.current?.removePriceLine(l));
-    priceLinesRef.current = priceLinesRef.current.filter((l) => !dailyKLineIdsRef.current.has((l as any)._tag));
-    dailyKLineIdsRef.current.clear();
 
     const LINE_COLORS: Record<'O' | 'H' | 'L' | 'C', string> = {
       O: '#3b82f6',  // 蓝
@@ -1597,25 +1599,32 @@ export function TradingChart() {
       L: '#22c55e',  // 绿
       C: '#f97316',  // 橙
     };
+    type DesiredLine = {
+      tag: string;
+      price: number;
+      color: string;
+      lineWidth: 1 | 2;
+      lineStyle: 0 | 2;
+      title: string;
+    };
+    const desired: DesiredLine[] = [];
+
     // 只画 1D（4D 聚合数据有时异常）
     const anchor = dailyKAnchors['1D'];
-    if (anchor && candleSeriesRef.current) {
+    if (anchor) {
       const FIELD: Record<'O' | 'H' | 'L' | 'C', 'open' | 'high' | 'low' | 'close'> = {
         O: 'open', H: 'high', L: 'low', C: 'close',
       };
       (['O', 'H', 'L', 'C'] as const).forEach((line) => {
         if (!anchor.visible[line]) return;
-        const pl = candleSeriesRef.current!.createPriceLine({
+        desired.push({
+          tag: `dk-1D-${line}`,
           price: anchor[FIELD[line]],
           color: LINE_COLORS[line],
           lineWidth: 1,
           lineStyle: 0,
-          axisLabelVisible: true,
           title: `1D ${line}`,
         });
-        (pl as any)._tag = `dk-1D-${line}`;
-        dailyKLineIdsRef.current.add(`dk-1D-${line}`);
-        priceLinesRef.current.push(pl);
       });
 
       // ===== 新增:日 K SR(R level + S level)+ 趋势 K 时画 OC 中点 =====
@@ -1633,36 +1642,66 @@ export function TradingChart() {
         { name: 'S', price: (anchor.low + bodyBottom) / 2, color: '#22c55e' }, // 绿
       ];
       srLines.forEach(({ name, price, color }) => {
-        const pl = candleSeriesRef.current!.createPriceLine({
+        desired.push({
+          tag: `dk-1D-sr-${name}`,
           price,
           color,
           lineWidth: 2,  // 粗一点突出大级别
           lineStyle: 2,  // 虚线区别于 O/H/L/C 实线
-          axisLabelVisible: true,
           title: `1D ${name}`,
         });
-        (pl as any)._tag = `dk-1D-sr-${name}`;
-        dailyKLineIdsRef.current.add(`dk-1D-sr-${name}`);
-        priceLinesRef.current.push(pl);
       });
 
       // 趋势 K 时(实体 ≥ 40% 整 K)画 OC 中点 = (open + close) / 2
       if (bodyRatio >= 0.4) {
-        const ocMid = (anchor.open + anchor.close) / 2;
-        const pl = candleSeriesRef.current!.createPriceLine({
-          price: ocMid,
+        desired.push({
+          tag: 'dk-1D-oc-mid',
+          price: (anchor.open + anchor.close) / 2,
           color: '#8b5cf6',  // 紫
           lineWidth: 1,
           lineStyle: 0,  // 实线
-          axisLabelVisible: true,
           title: '1D OC Mid',
         });
-        (pl as any)._tag = 'dk-1D-oc-mid';
-        dailyKLineIdsRef.current.add('dk-1D-oc-mid');
-        priceLinesRef.current.push(pl);
       }
     }
+
+    // 1. 删掉这次不需要的线(比如用户把某条线关掉了 / OC Mid 条件不再满足)
+    const desiredTags = new Set(desired.map((d) => d.tag));
+    map.forEach((line, tag) => {
+      if (desiredTags.has(tag)) return;
+      series.removePriceLine(line);
+      map.delete(tag);
+    });
+
+    // 2. 新增 / 移动
+    desired.forEach((d) => {
+      const existing = map.get(d.tag);
+      if (existing) {
+        // 价格没变就什么都不做;变了就原地移动(不删了重建 → 不会闪)
+        if (existing.options().price !== d.price) {
+          existing.applyOptions({ price: d.price });
+        }
+        return;
+      }
+      const pl = series.createPriceLine({
+        price: d.price,
+        color: d.color,
+        lineWidth: d.lineWidth,
+        lineStyle: d.lineStyle,
+        axisLabelVisible: true,
+        title: d.title,
+      });
+      (pl as any)._tag = d.tag;
+      map.set(d.tag, pl);
+    });
   }, [dailyKAnchors, dailyKLineEnabled]);
+
+  // 换 symbol → 旧 symbol 的日K锚点线先撤掉(等新锚点到了再画)
+  useEffect(() => {
+    const map = dailyKPriceLinesRef.current;
+    map.forEach((line) => candleSeriesRef.current?.removePriceLine(line));
+    map.clear();
+  }, [symbol]);
   useEffect(() => {
     if (!candleSeriesRef.current) return;
 

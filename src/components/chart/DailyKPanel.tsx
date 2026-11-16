@@ -8,7 +8,7 @@
  * - 点击 L → 做多（L 价位，SL = L - 200）
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useChartStore } from "@/stores/chartStore";
 import { useOrderStore } from "@/stores/orderStore";
 import { fetchKlines } from "@/lib/binance/api";
@@ -20,6 +20,9 @@ interface AnchorCandle {
   low: number;
   close: number;
 }
+
+/** 日K数据缓存有效期(毫秒)—— 60s 内复用同一份日K,不再每次价格跳动都重拉 */
+const DAILY_CACHE_MS = 60_000;
 
 interface AnchorResult {
   candle: AnchorCandle;
@@ -56,6 +59,21 @@ function findAnchor(klines: AnchorCandle[], currentPrice: number): AnchorCandle 
 }
 
 /**
+ * 两个锚点的价格数据是否完全一样
+ * —— 一样就不用往 store 写(store 一变,图上的价格线就要重画)
+ */
+function sameAnchor(a: AnchorCandle | null, b: AnchorCandle | null): boolean {
+  if (!a || !b) return a === b;
+  return (
+    a.time === b.time &&
+    a.open === b.open &&
+    a.high === b.high &&
+    a.low === b.low &&
+    a.close === b.close
+  );
+}
+
+/**
  * 把日K聚合成 N 日K（例如 4D = 每 4 根日K合并）
  */
 function aggregateNDaily(dailyKlines: AnchorCandle[], n: number): AnchorCandle[] {
@@ -86,11 +104,52 @@ export function DailyKPanel() {
 
   const currentPrice = candles.length > 0 ? candles[candles.length - 1].close : 0;
 
+  // ===== 日K数据缓存 =====
+  // 原来每根 tick(价格每跳一下)都重新拉 365 根日K + 重写 store,
+  // 导致图上的日K锚点价格线被反复 remove/create —— 一闪就没,根本看不清。
+  // 现在:日K数据缓存 60s;锚点价格数据没变就不写 store。
+  const dailyCacheRef = useRef<{ symbol: string; data: AnchorCandle[]; fetchedAt: number } | null>(null);
+  const dailyFetchingRef = useRef(false);
+
   useEffect(() => {
     if (!symbol || currentPrice <= 0) return;
 
     let cancelled = false;
 
+    // 算出锚点并写 store —— 只有价格数据真的变了才写
+    const applyAnchors = (dailyData: AnchorCandle[]) => {
+      const state = useChartStore.getState();
+
+      // 1D 锚点
+      const dCandle = findAnchor(dailyData, currentPrice);
+      const prev1D = state.dailyKAnchors['1D'];
+      if (!sameAnchor(prev1D, dCandle)) {
+        // 保留已有的 visible 状态（避免每次重算时重置用户选择）
+        const visible = prev1D?.visible ?? { O: true, H: true, L: true, C: true };
+        setDailyKAnchor('1D', dCandle ? { ...dCandle, visible } : null);
+      }
+
+      // 4D 锚点
+      const fourDKlines = aggregateNDaily(dailyData, 4);
+      const fCandle = findAnchor(fourDKlines, currentPrice);
+      const prev4D = state.dailyKAnchors['4D'];
+      if (!sameAnchor(prev4D, fCandle)) {
+        const visible = prev4D?.visible ?? { O: true, H: true, L: true, C: true };
+        setDailyKAnchor('4D', fCandle ? { ...fCandle, visible } : null);
+      }
+    };
+
+    // 缓存还在有效期内 → 直接用缓存算,不发起网络请求
+    const cache = dailyCacheRef.current;
+    if (cache && cache.symbol === symbol && Date.now() - cache.fetchedAt < DAILY_CACHE_MS) {
+      applyAnchors(cache.data);
+      return;
+    }
+
+    // 缓存过期且已经有请求在飞 → 这次不重复发(等在飞的那个回来)
+    if (dailyFetchingRef.current) return;
+
+    dailyFetchingRef.current = true;
     const load = async () => {
       try {
         // 拉 365 天 1D K(覆盖 1 年完整波段)
@@ -99,31 +158,12 @@ export function DailyKPanel() {
         const dailyData = await fetchKlines(symbol, "1d", 365);
         if (cancelled || dailyData.length < 2) return;
 
-        // 1D 锚点
-        const dCandle = findAnchor(dailyData, currentPrice);
-        if (dCandle) {
-          // 保留已有的 visible 状态（避免每次重算时重置用户选择）
-          const existing = dailyKAnchors['1D'];
-          const visible = existing?.visible ?? { O: true, H: true, L: true, C: true };
-          setDailyKAnchor('1D', { ...dCandle, visible });
-        } else {
-          setDailyKAnchor('1D', null);
-        }
-
-        // 4D 锚点
-        const fourDKlines = aggregateNDaily(dailyData, 4);
-        const fCandle = findAnchor(fourDKlines, currentPrice);
-        if (!cancelled) {
-          if (fCandle) {
-            const existing = dailyKAnchors['4D'];
-            const visible = existing?.visible ?? { O: true, H: true, L: true, C: true };
-            setDailyKAnchor('4D', { ...fCandle, visible });
-          } else {
-            setDailyKAnchor('4D', null);
-          }
-        }
+        dailyCacheRef.current = { symbol, data: dailyData, fetchedAt: Date.now() };
+        applyAnchors(dailyData);
       } catch {
         // 静默失败
+      } finally {
+        dailyFetchingRef.current = false;
       }
     };
 
