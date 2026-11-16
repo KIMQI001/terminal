@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User, Maximize2, Minimize2, Building2, Layers, Bot, BarChart3, LineChart } from "lucide-react";
+import { ChevronDown, Activity, Search, ArrowLeftRight, Ruler, Settings, User, Maximize2, Minimize2, Building2, Layers, Bot, BarChart3, LineChart, Rewind } from "lucide-react";
 import { MTFPanel } from "@/components/chart/MTFPanel";
 import { DailyHLPanel } from "@/components/chart/DailyHLPanel";
 import { PriceModeToggle } from "@/components/chart/PriceModeToggle";
@@ -18,6 +18,7 @@ import { useIndicatorStore } from "@/stores/indicatorStore";
 import { useOrderStore } from "@/stores/orderStore";
 import { useMeasurementStore } from "@/stores/measurementStore";
 import { useUserStore } from "@/stores/userStore";
+import { useReplayStore } from "@/stores/replayStore";
 import { Timeframe } from "@/types/chart";
 import { IndicatorState } from "@/types/indicator";
 import { useState, useEffect, useCallback } from "react";
@@ -48,12 +49,15 @@ const indicators: { key: keyof IndicatorState; label: string }[] = [
   { key: "priceBand", label: "Price Band" },
 ];
 
-export function Header() {
+export function Header({ showReplay = false }: { showReplay?: boolean }) {
   const { symbol, timeframe, setSymbol, setTimeframe } = useChartStore();
   const { enabled, toggleIndicator } = useIndicatorStore();
   const { isModalOpen, togglePanel } = useOrderStore();
   const { isToolActive, toggleToolActive } = useMeasurementStore();
   const { isAuthenticated, user, openSettings } = useUserStore();
+  const isReplaying = useReplayStore((s) => s.isReplaying);
+  const startReplay = useReplayStore((s) => s.startReplay);
+  const stopReplay = useReplayStore((s) => s.stopReplay);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -186,6 +190,21 @@ export function Header() {
         >
           <Ruler className="w-3 h-3" />
         </Button>
+
+        {/* 回放模拟盘开关 */}
+        {showReplay && (
+          <Button
+            data-testid="replay-toggle"
+            variant={isReplaying ? "default" : "outline"}
+            size="sm"
+            onClick={() => (isReplaying ? stopReplay() : startReplay())}
+            className={isReplaying ? "bg-orange-500 hover:bg-orange-600" : ""}
+            title={isReplaying ? "退出回放模式" : "进入回放模拟盘(练习 K 线下单,不动真钱)"}
+          >
+            <Rewind className="w-3 h-3 mr-1.5" />
+            回放
+          </Button>
+        )}
 
         {/* 交易按钮 */}
         <Button

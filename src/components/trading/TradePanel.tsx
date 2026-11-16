@@ -7,9 +7,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useOrderStore } from "@/stores/orderStore";
 import { useChartStore } from "@/stores/chartStore";
 import { usePositionStore } from "@/stores/positionStore";
+import { useReplayStore } from "@/stores/replayStore";
 import { OrderForm } from "./OrderForm";
 import { PositionList } from "./PositionList";
 import { OpenOrderList } from "./OpenOrderList";
+import { ReplayOrderForm } from "@/components/replay/ReplayOrderForm";
+import { ReplayBook } from "@/components/replay/ReplayBook";
 
 const BALANCE_POLL_INTERVAL = 3000; // 3秒轮询
 
@@ -17,6 +20,8 @@ export function TradePanel() {
   const { isModalOpen, closeModal } = useOrderStore();
   const { symbol } = useChartStore();
   const { fetchBalances } = usePositionStore();
+  const isReplaying = useReplayStore((s) => s.isReplaying);
+  const replayCapital = useReplayStore((s) => s.config.initialCapital);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // 面板打开时获取真实余额，并启动定时轮询
@@ -59,27 +64,49 @@ export function TradePanel() {
 
       {/* 下单表单 */}
       <div className="flex-1 overflow-y-auto">
-        <div className="p-4">
-          <OrderForm />
-        </div>
-
-        {/* 持仓/挂单 */}
-        <div className="border-t border-[var(--border)]">
-          <Tabs defaultValue="positions" className="w-full">
-            <TabsList className="w-full grid grid-cols-2 rounded-none bg-[var(--bg-tertiary)]">
-              <TabsTrigger value="positions" className="text-xs">持仓</TabsTrigger>
-              <TabsTrigger value="orders" className="text-xs">挂单</TabsTrigger>
-            </TabsList>
-            <div className="p-3">
-              <TabsContent value="positions" className="mt-0 max-h-96 overflow-y-auto">
-                <PositionList />
-              </TabsContent>
-              <TabsContent value="orders" className="mt-0 max-h-96 overflow-y-auto">
-                <OpenOrderList />
-              </TabsContent>
+        {isReplaying ? (
+          <>
+            {/* 回放模式横幅:真实下单已被禁用 */}
+            <div
+              data-testid="replay-banner"
+              className="px-4 py-2 bg-orange-50 border-b border-orange-200 text-orange-700 text-xs font-medium"
+            >
+              ⛔ 回放模式 · 真实下单已禁用 · 虚拟本金 {replayCapital} USDT
             </div>
-          </Tabs>
-        </div>
+
+            <div className="p-4">
+              <ReplayOrderForm />
+            </div>
+
+            <div className="border-t border-[var(--border)] p-3">
+              <ReplayBook />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="p-4">
+              <OrderForm />
+            </div>
+
+            {/* 持仓/挂单 */}
+            <div className="border-t border-[var(--border)]">
+              <Tabs defaultValue="positions" className="w-full">
+                <TabsList className="w-full grid grid-cols-2 rounded-none bg-[var(--bg-tertiary)]">
+                  <TabsTrigger value="positions" className="text-xs">持仓</TabsTrigger>
+                  <TabsTrigger value="orders" className="text-xs">挂单</TabsTrigger>
+                </TabsList>
+                <div className="p-3">
+                  <TabsContent value="positions" className="mt-0 max-h-96 overflow-y-auto">
+                    <PositionList />
+                  </TabsContent>
+                  <TabsContent value="orders" className="mt-0 max-h-96 overflow-y-auto">
+                    <OpenOrderList />
+                  </TabsContent>
+                </div>
+              </Tabs>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

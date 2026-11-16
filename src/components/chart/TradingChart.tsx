@@ -18,6 +18,9 @@ import { useMeasurementStore } from "@/stores/measurementStore";
 import { useOrderStore, type TradingLine } from "@/stores/orderStore";
 import { usePositionStore } from "@/stores/positionStore";
 import { useUserStore } from "@/stores/userStore";
+import { useReplayStore } from "@/stores/replayStore";
+import { ReplayControlBar } from "@/components/replay/ReplayControlBar";
+import { ReplayPanel } from "@/components/replay/ReplayPanel";
 import { MeasurementTool } from "./MeasurementTool";
 import { ICTOverlay } from "./ICTOverlay";
 import { OTEPanel } from "./OTEPanel";
@@ -304,12 +307,20 @@ export function TradingChart() {
     dailyKAnchors,
     dailyKLineEnabled,
     displayMode,
+    seriesVersion,
     setCandles,
     setChartType,
     updateCandle,
     setLoading,
     setConnected,
   } = useChartStore();
+
+  // 回放模式:成交标记(与 swing 的 HH/LL 标记合并后一次性 setMarkers)
+  const replayFills = useReplayStore((s) => s.view.fills);
+  // 回放模式:持仓 / 挂单 / 表单草稿(用于画价格线)
+  const replayPositions = useReplayStore((s) => s.view.positions);
+  const replayOrders = useReplayStore((s) => s.view.orders);
+  const replayDraft = useReplayStore((s) => s.draft);
 
   const {
     enabled,
@@ -676,6 +687,30 @@ export function TradingChart() {
     [enabled, timeframe, setSwingPoints, setMissedPivots, setGhostLevels, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setEquilibriumLevels, setProximitySignals, setFibLevels, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend, setMultiTimeframeEquilibrium]
   );
 
+  // 序列数据版本号变化 → 重建序列 + 重算指标
+  // 正常行情路径不会 bump(seriesVersion 恒为 0),行为完全不变;
+  // 回放模式裁剪 K 线时 replayStore 会 bump,图表据此把序列换成「只到游标」的那一段。
+  useEffect(() => {
+    if (seriesVersion === 0) return;
+
+    buildFilteredSeries();
+
+    const cs = useChartStore.getState();
+    const slice = cs.candles;
+    if (slice.length > 0) {
+      calculateIndicators(slice);
+    }
+
+    // 视图本来贴着最右端时才跟随滚动,否则保持用户自己的平移
+    const ts = chartRef.current?.timeScale();
+    if (ts) {
+      const range = ts.getVisibleLogicalRange();
+      if (!range || cs.candles.length - 1 - range.to < 3) {
+        ts.scrollToRealTime();
+      }
+    }
+  }, [seriesVersion, buildFilteredSeries, calculateIndicators]);
+
   // Initialize chart
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -957,6 +992,9 @@ export function TradingChart() {
       };
       // 使用 WebSocket 实时更新（替换轮询）
       const ws = new BinanceWebSocket(currentSymbol, currentTimeframe, (candle, isClosed) => {
+        // ★ 回放模式：屏蔽实时行情推送（回放结束后自动恢复，不重建 WS）
+        if (useReplayStore.getState().isReplaying) return;
+
         console.log(`[TradingChart] WS K线更新: ${candle.time}, closed=${isClosed}`);
         lastKlineTimeRef.current = candle.time;
 
@@ -1476,22 +1514,50 @@ export function TradingChart() {
   }, [monthlyCandles, candles, enabled.priceBand]);
 
   // Update Swing Points Markers (蜡烛图模式)
+  // ⚠️ setMarkers 是「覆盖式」的(同一 series 只能有一组 marker),
+  //    所以回放成交标记必须和 swing 的 HH/LL 标记**合并**后一次性 setMarkers,
+  //    并按 time 升序排序(lightweight-charts v4 要求)。
   useEffect(() => {
     if (!candleSeriesRef.current) return;
 
+    const markers: SeriesMarker<Time>[] = [];
+
     if (enabled.swingPoints && swingPoints.length > 0) {
-      const markers: SeriesMarker<Time>[] = swingPoints.map((sp) => ({
-        time: sp.time as Time,
-        position: sp.type === "high" ? "aboveBar" : "belowBar",
-        color: sp.type === "high" ? "#22c55e" : "#ef4444",
-        shape: sp.type === "high" ? "arrowDown" : "arrowUp",
-        text: sp.type === "high" ? "HH" : "LL",
-      }));
-      candleSeriesRef.current.setMarkers(markers);
-    } else {
-      candleSeriesRef.current.setMarkers([]);
+      for (const sp of swingPoints) {
+        markers.push({
+          time: sp.time as Time,
+          position: sp.type === "high" ? "aboveBar" : "belowBar",
+          color: sp.type === "high" ? "#22c55e" : "#ef4444",
+          shape: sp.type === "high" ? "arrowDown" : "arrowUp",
+          text: sp.type === "high" ? "HH" : "LL",
+        });
+      }
     }
-  }, [swingPoints, enabled.swingPoints]);
+
+    // 回放成交标记
+    if (replayFills.length > 0) {
+      for (const f of replayFills) {
+        const isEntry = f.kind === "entry";
+        markers.push({
+          time: f.time as Time,
+          position: isEntry
+            ? f.side === "buy" ? "belowBar" : "aboveBar"
+            : f.side === "buy" ? "aboveBar" : "belowBar",
+          color: isEntry ? (f.side === "buy" ? "#2563eb" : "#9333ea") : "#f59e0b",
+          shape: isEntry ? (f.side === "buy" ? "arrowUp" : "arrowDown") : "circle",
+          text: isEntry ? (f.side === "buy" ? "B" : "S") : f.reason === "sl" ? "SL" : f.reason === "tp" ? "TP" : "X",
+        });
+      }
+    }
+
+    if (markers.length === 0) {
+      candleSeriesRef.current.setMarkers([]);
+      return;
+    }
+
+    markers.sort((a, b) => (a.time as number) - (b.time as number));
+    candleSeriesRef.current.setMarkers(markers);
+  }, [swingPoints, enabled.swingPoints, replayFills]);
 
   // 最近 5 个 HH / LL 向左延伸的虚射线(亮橙=HH,亮蓝=LL)
   // 数据源与图上 swing point 标记一致:最近的 5 个 swing high(记 HH)、5 个 swing low(记 LL)
@@ -1695,6 +1761,143 @@ export function TradingChart() {
       map.set(d.tag, pl);
     });
   }, [dailyKAnchors, dailyKLineEnabled]);
+
+  // ---------------------------------------------------------------------------
+  // 回放模式价格线（持仓 entry/SL/TP + 挂单限价 + 表单草稿预览）
+  // 增量维护:create / applyOptions 移动 / remove,和 dailyKPriceLinesRef 同一套路。
+  // 这批线由本 effect 独占(replayPriceLinesRef),**不放进** priceLinesRef,
+  // 免得被上面「持仓/挂单」那个 effect 的整批清理误删。
+  // ---------------------------------------------------------------------------
+  const replayPriceLinesRef = useRef<Map<string, IPriceLine>>(new Map());
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    const map = replayPriceLinesRef.current;
+
+    type DesiredLine = {
+      tag: string;
+      price: number;
+      color: string;
+      lineWidth: 1 | 2;
+      lineStyle: 0 | 2;
+      title: string;
+    };
+    const desired: DesiredLine[] = [];
+
+    // 持仓:entry(实线) / SL(红虚线) / TP(绿虚线)
+    for (const p of replayPositions) {
+      const entryColor = p.side === "buy" ? "#2563eb" : "#9333ea";
+      desired.push({
+        tag: `rp-entry-${p.id}`,
+        price: p.entryPrice,
+        color: entryColor,
+        lineWidth: 2,
+        lineStyle: 0,
+        title: `${p.side === "buy" ? "多" : "空"}仓`,
+      });
+      if (p.stopLoss != null) {
+        desired.push({
+          tag: `rp-sl-${p.id}`,
+          price: p.stopLoss,
+          color: "#ef4444",
+          lineWidth: 1,
+          lineStyle: 2,
+          title: "SL",
+        });
+      }
+      if (p.takeProfit != null) {
+        desired.push({
+          tag: `rp-tp-${p.id}`,
+          price: p.takeProfit,
+          color: "#22c55e",
+          lineWidth: 1,
+          lineStyle: 2,
+          title: "TP",
+        });
+      }
+    }
+
+    // 挂单:限价线
+    for (const o of replayOrders) {
+      if (o.status !== "pending") continue;
+      desired.push({
+        tag: `ro-${o.id}`,
+        price: o.price,
+        color: "#f97316",
+        lineWidth: 1,
+        lineStyle: 2,
+        title: o.side === "buy" ? "挂买" : "挂卖",
+      });
+    }
+
+    // 表单草稿预览(entry / SL / TP)
+    if (replayDraft) {
+      const d = replayDraft;
+      if (d.entry != null && d.entry > 0) {
+        desired.push({
+          tag: "rp-draft-entry",
+          price: d.entry,
+          color: d.side === "buy" ? "#2563eb" : "#9333ea",
+          lineWidth: 1,
+          lineStyle: 2,
+          title: "模拟入场",
+        });
+      }
+      if (d.stopLoss != null && d.stopLoss > 0) {
+        desired.push({
+          tag: "rp-draft-sl",
+          price: d.stopLoss,
+          color: "#ef4444",
+          lineWidth: 1,
+          lineStyle: 2,
+          title: "模拟 SL",
+        });
+      }
+      if (d.takeProfit != null && d.takeProfit > 0) {
+        desired.push({
+          tag: "rp-draft-tp",
+          price: d.takeProfit,
+          color: "#22c55e",
+          lineWidth: 1,
+          lineStyle: 2,
+          title: "模拟 TP",
+        });
+      }
+    }
+
+    if (!series) {
+      map.clear();
+      return;
+    }
+
+    // 1. 删掉这次不需要的线
+    const desiredTags = new Set(desired.map((d) => d.tag));
+    map.forEach((line, tag) => {
+      if (desiredTags.has(tag)) return;
+      series.removePriceLine(line);
+      map.delete(tag);
+    });
+
+    // 2. 新增 / 移动
+    desired.forEach((d) => {
+      const existing = map.get(d.tag);
+      if (existing) {
+        if (existing.options().price !== d.price) {
+          existing.applyOptions({ price: d.price });
+        }
+        return;
+      }
+      const pl = series.createPriceLine({
+        price: d.price,
+        color: d.color,
+        lineWidth: d.lineWidth,
+        lineStyle: d.lineStyle,
+        axisLabelVisible: true,
+        title: d.title,
+      });
+      (pl as unknown as { _tag?: string })._tag = d.tag;
+      map.set(d.tag, pl);
+    });
+  }, [replayPositions, replayOrders, replayDraft]);
 
   // 换 symbol → 旧 symbol 的日K锚点线先撤掉(等新锚点到了再画)
   useEffect(() => {
@@ -2186,6 +2389,8 @@ export function TradingChart() {
         containerRef={chartContainerRef}
       />
       <div className="absolute top-2 right-2 z-10 flex flex-col gap-2">
+        {/* 回放模拟盘面板(置顶) */}
+        <ReplayPanel />
         {/* 最长波段(独立面板,折叠互不影响)—— 仅 admin 可见 */}
         {user?.role === 'admin' && <LongestSwingPanel />}
         <OTEPanel />
@@ -2195,6 +2400,8 @@ export function TradingChart() {
         {user?.role === 'admin' && <LiquidityGridPanel />}
       </div>
       <MeasurementTool />
+      {/* 回放控制条(图表底部) */}
+      <ReplayControlBar />
     </div>
   );
 }

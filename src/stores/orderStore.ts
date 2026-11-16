@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { Order, OrderFormData, OrderStatus, OrderSide } from "@/types/order";
 import { useUserStore } from "./userStore";
+import { useReplayStore } from "./replayStore";
 
 // OTE预填充数据
 export interface OTEPrefillData {
@@ -158,7 +159,23 @@ export const useOrderStore = create<OrderState>((set, get) => ({
   openModal: () => set({ isModalOpen: true }),
   closeModal: () => set({ isModalOpen: false, prefillData: null, tradingLines: [] }),
   togglePanel: () => set((state) => ({ isModalOpen: !state.isModalOpen })),
-  setPrefillData: (data) => set({ prefillData: data }),
+  setPrefillData: (data) => {
+    // 回放模式下，面板点价位改为预填「模拟单」
+    if (useReplayStore.getState().isReplaying) {
+      useReplayStore.getState().setPrefill(
+        data
+          ? {
+              side: data.side,
+              entry: data.entry,
+              stopLoss: data.stopLoss,
+              takeProfit: data.takeProfit,
+            }
+          : null
+      );
+      return;
+    }
+    set({ prefillData: data });
+  },
   setTradingLines: (lines) => set({ tradingLines: lines }),
   clearTradingLines: () => set({ tradingLines: [] }),
 
@@ -185,6 +202,13 @@ export const useOrderStore = create<OrderState>((set, get) => ({
   },
 
   placeOrder: async (data, symbol) => {
+    // 安全红线：回放模式下禁止真实下单
+    if (useReplayStore.getState().isReplaying) {
+      const error = '回放模式下禁止真实下单，请使用模拟下单';
+      set({ orderError: error });
+      return { success: false, error };
+    }
+
     const token = useUserStore.getState().token;
     if (!token) {
       return { success: false, error: '未登录' };
@@ -272,6 +296,11 @@ export const useOrderStore = create<OrderState>((set, get) => ({
   },
 
   cancelOrder: async (id, symbol, isAlgo?: boolean) => {
+    // 安全红线：回放模式下不触碰真实订单
+    if (useReplayStore.getState().isReplaying) {
+      console.warn('[OrderStore] 回放模式下已阻止真实撤单');
+      return false;
+    }
     const token = useUserStore.getState().token;
     if (!token) {
       console.error('未登录，无法取消订单');
@@ -313,6 +342,11 @@ export const useOrderStore = create<OrderState>((set, get) => ({
   },
 
   cancelAllOrders: async (symbol) => {
+    // 安全红线：回放模式下不触碰真实订单
+    if (useReplayStore.getState().isReplaying) {
+      console.warn('[OrderStore] 回放模式下已阻止真实全部撤单');
+      return false;
+    }
     const token = useUserStore.getState().token;
     if (!token) {
       console.error('未登录，无法取消订单');
@@ -497,3 +531,8 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     }
   },
 }));
+
+// 开发模式下暴露到 window，方便端到端脚本断言（生产构建不暴露）
+if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+  (window as unknown as Record<string, unknown>).__orderStore = useOrderStore;
+}

@@ -43,7 +43,7 @@ export default function Home() {
     <AuthGuard>
       {!isLandscape && <LandscapePrompt />}
       <div className="flex flex-col h-screen bg-[var(--bg-primary)]">
-        <Header />
+        <Header showReplay />
         <main className="flex-1 flex overflow-hidden">
           <div className="flex-1 overflow-hidden">
             <TradingChart />

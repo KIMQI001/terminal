@@ -47,12 +47,18 @@ interface ChartState {
   displayMode: KlineDisplayMode;
   /** 进入显示模式那一刻的现价锚点(快照,保证可见 K 线集合稳定不闪烁) */
   displayAnchorPrice: number | null;
+  /**
+   * 序列数据版本号 —— 外部(例如回放模式裁剪 K 线)改完 candles 后 bump,
+   * 图表据此重建序列 + 重算指标。正常行情路径不 bump,行为完全不变。
+   */
+  seriesVersion: number;
 
   setSymbol: (symbol: string) => void;
   setTimeframe: (timeframe: Timeframe) => void;
   setChartType: (type: "candlestick" | "line") => void;
   setCandles: (candles: Candle[]) => void;
   updateCandle: (candle: Candle) => void;
+  bumpSeriesVersion: () => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setConnected: (connected: boolean) => void;
@@ -114,6 +120,8 @@ export const useChartStore = create<ChartState>((set) => ({
       return { candles: newCandles };
     }),
   setLoading: (isLoading) => set({ isLoading }),
+  seriesVersion: 0,
+  bumpSeriesVersion: () => set((state) => ({ seriesVersion: state.seriesVersion + 1 })),
   setError: (error) => set({ error }),
   setConnected: (isConnected) => set({ isConnected }),
   setLiquidationData: (liquidationData) => set({ liquidationData }),
@@ -156,3 +164,8 @@ export const useChartStore = create<ChartState>((set) => ({
       };
     }),
 }));
+
+// 开发模式下暴露到 window，方便端到端脚本断言（生产构建不暴露）
+if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+  (window as unknown as Record<string, unknown>).__chartStore = useChartStore;
+}

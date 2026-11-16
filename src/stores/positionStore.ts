@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { Position, Balance } from "@/types/order";
 import { useUserStore } from "./userStore";
+import { useReplayStore } from "./replayStore";
 
 interface PositionState {
   positions: Position[];
@@ -75,6 +76,11 @@ export const usePositionStore = create<PositionState>((set, get) => ({
   },
 
   closePosition: async (id) => {
+    // 安全红线：回放模式下禁止平真实仓位
+    if (useReplayStore.getState().isReplaying) {
+      console.warn('[PositionStore] 回放模式下禁止平真实仓位');
+      return;
+    }
     const token = useUserStore.getState().token;
     if (!token) {
       console.log('No token found, cannot close position');
@@ -316,6 +322,10 @@ export const usePositionStore = create<PositionState>((set, get) => ({
     stopLoss?: number,
     takeProfit?: number
   ) => {
+    // 安全红线：回放模式下禁止修改真实仓位 SL/TP
+    if (useReplayStore.getState().isReplaying) {
+      return { success: false, error: '回放模式下禁止修改真实仓位 SL/TP' };
+    }
     const token = useUserStore.getState().token;
     if (!token) return { success: false, error: '未登录' };
 
@@ -430,3 +440,8 @@ export const usePositionStore = create<PositionState>((set, get) => ({
     }
   },
 }));
+
+// 开发模式下暴露到 window，方便端到端脚本断言（生产构建不暴露）
+if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+  (window as unknown as Record<string, unknown>).__positionStore = usePositionStore;
+}
