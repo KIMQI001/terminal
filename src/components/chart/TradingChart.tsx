@@ -23,6 +23,7 @@ import { ICTOverlay } from "./ICTOverlay";
 import { OTEPanel } from "./OTEPanel";
 import { FVGPanel } from "./FVGPanel";
 import { DailyKPanel } from "./DailyKPanel";
+import { LongestSwingPanel } from "./LongestSwingPanel";
 import { LiquidityGridPanel } from "./LiquidityGridPanel";
 import { OBPanel } from "./OBPanel";
 import { OrderCancelOverlay } from "./OrderCancelOverlay";
@@ -2146,6 +2147,8 @@ export function TradingChart() {
         containerRef={chartContainerRef}
       />
       <div className="absolute top-2 right-2 z-10 flex flex-col gap-2">
+        {/* 最长波段(独立面板,折叠互不影响)—— 仅 admin 可见 */}
+        {user?.role === 'admin' && <LongestSwingPanel />}
         <OTEPanel />
         <FVGPanel />
         <OBPanel />

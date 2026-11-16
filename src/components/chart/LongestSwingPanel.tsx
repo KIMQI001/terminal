@@ -24,7 +24,7 @@
  * - 底部「框架策略」区块:把这 6 个价位交给 Rust 服务 look-left-right 自动挂单
  *   (任一价位被触发 → 框架成立 → 给其余未触发价位挂单;止损 200 / 止盈 1000;
  *    有持仓则撤掉其余挂单只留止盈止损;下单量按余额比例)。
- * - 可见性:**仅 admin 账号**渲染(见 DailyKPanel)。
+ * - 可见性:**仅 admin 账号**渲染(见 TradingChart 的面板栈,独立面板,折叠互不影响)。
  */
 
 import { useMemo, useState } from "react";
