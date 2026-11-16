@@ -77,6 +77,36 @@ interface LevelCoverage {
 /** 价位 → 覆盖情况(键为 阳O/阳H/阳C 或 阴O/阴L/阴C) */
 type CoverageMap = Record<string, LevelCoverage>;
 
+/** OB(Order Block):pivot 左边**紧邻**的那根 K 线 */
+interface OrderBlock {
+  candle: Candle;
+  /** 在 candles 数组里的下标 */
+  index: number;
+  /** true = 阳线(close > open) */
+  bullish: boolean;
+}
+
+/**
+ * 找 pivot 左边**紧邻**的那根 K 线(订单块 OB):
+ * - HH 左边紧邻的是**阳线** → 该阳K 的 O/C 是供应区(做空)
+ * - LL 左边紧邻的是**阴线** → 该阴K 的 O/C 是需求区(做多)
+ * - 颜色不符(比如 HH 左边紧邻的是阴线)→ 没有 OB
+ */
+function findOrderBlock(
+  candles: Candle[],
+  pivotIdx: number,
+  wantBullish: boolean
+): OrderBlock | null {
+  const i = pivotIdx - 1;
+  if (i < 0 || i >= candles.length) return null;
+  const c = candles[i];
+  const bullish = c.close > c.open;
+  const bearish = c.close < c.open;
+  if (wantBullish && !bullish) return null;
+  if (!wantBullish && !bearish) return null;
+  return { candle: c, index: i, bullish };
+}
+
 
 /** 时间戳(秒) → "MM-DD HH:mm" */
 function formatTime(ts: number): string {
@@ -243,6 +273,60 @@ function EndpointButton({
 const NEAR_LEVEL_POINTS = 50;
 
 /**
+ * OB(Order Block)一行:
+ * - HH 左边紧邻的阳K → 供应区(做空)
+ * - LL 左边紧邻的阴K → 需求区(做多)
+ * 显示这根 K 线的 O / C 两个价位,点击预填下单。
+ */
+function ObRow({
+  ob,
+  side,
+  pivotLabel,
+  onClick,
+}: {
+  ob: OrderBlock | null;
+  side: "buy" | "sell";
+  pivotLabel: string;
+  onClick: (price: number, side: "buy" | "sell") => void;
+}) {
+  if (!ob) return null;
+  const c = ob.candle;
+  const isSell = side === "sell";
+  const action = isSell ? "做空" : "做多";
+  const tip =
+    `${pivotLabel} 左边紧邻的${ob.bullish ? "阳线" : "阴线"}(${formatTime(c.time)}) —— ` +
+    `订单块(OB)区:开 ${c.open.toFixed(1)} / 收 ${c.close.toFixed(1)} —— 点击预填${action}`;
+  return (
+    <div className="flex items-center gap-1.5 text-[9px] font-mono">
+      <span
+        className={cn(
+          "px-1 rounded leading-4 font-semibold",
+          isSell ? "bg-red-500/15 text-red-600" : "bg-green-500/15 text-green-600"
+        )}
+      >
+        OB
+      </span>
+      <span className="text-gray-400">{ob.bullish ? "阳K" : "阴K"}</span>
+      <button
+        onClick={() => onClick(c.open, side)}
+        className="font-semibold hover:underline cursor-pointer px-0.5 rounded"
+        title={tip}
+      >
+        O {c.open.toFixed(1)}
+      </button>
+      <button
+        onClick={() => onClick(c.close, side)}
+        className="font-semibold hover:underline cursor-pointer px-0.5 rounded"
+        title={tip}
+      >
+        C {c.close.toFixed(1)}
+      </button>
+      <span className="text-gray-400">{formatTime(c.time)}</span>
+    </div>
+  );
+}
+
+/**
  * 触发价一块:
  * - kind = bullish(阳线)→ 阳O / 阳H / 阳C,点击后**做空**
  * - kind = bearish(阴线)→ 阴O / 阴L / 阴C,点击后**做多**
@@ -392,6 +476,7 @@ function PivotRow({
   side,
   trigger,
   coverage,
+  ob,
   rayLabel,
   onPriceClick,
 }: {
@@ -402,6 +487,8 @@ function PivotRow({
   side: "buy" | "sell";
   trigger: TriggerCandle | null;
   coverage: CoverageMap;
+  /** pivot 左边紧邻的 K 线(订单块) */
+  ob: OrderBlock | null;
   rayLabel: string;
   onPriceClick: (price: number, side?: "buy" | "sell") => void;
 }) {
@@ -423,6 +510,12 @@ function PivotRow({
           pivotPrice={pivot.price}
           coverage={coverage}
           rayLabel={rayLabel}
+          onClick={(p, s) => onPriceClick(p, s)}
+        />
+        <ObRow
+          ob={ob}
+          side={side}
+          pivotLabel={pivot.type === "high" ? "HH" : "LL"}
           onClick={(p, s) => onPriceClick(p, s)}
         />
       </div>
@@ -450,6 +543,10 @@ function LegRow({
     bullCoverage: CoverageMap;
     /** LL 射线阴线行三个价位的覆盖情况 */
     bearCoverage: CoverageMap;
+    /** HH 左边紧邻的阳K(订单块,做空) */
+    hhOb: OrderBlock | null;
+    /** LL 左边紧邻的阴K(订单块,做多) */
+    llOb: OrderBlock | null;
   } | null;
   onPriceClick: (price: number, side?: "buy" | "sell") => void;
 }) {
@@ -508,6 +605,18 @@ function LegRow({
             pivotPrice={triggers.llPrice}
             coverage={triggers.bearCoverage}
             showDistance
+            onClick={(p, s) => onPriceClick(p, s)}
+          />
+          <ObRow
+            ob={triggers.hhOb}
+            side="sell"
+            pivotLabel="HH"
+            onClick={(p, s) => onPriceClick(p, s)}
+          />
+          <ObRow
+            ob={triggers.llOb}
+            side="buy"
+            pivotLabel="LL"
             onClick={(p, s) => onPriceClick(p, s)}
           />
         </div>
@@ -634,6 +743,9 @@ export function LongestSwingPanel() {
       aboveLL,
       bullCoverage,
       bearCoverage,
+      // OB:HH 左边紧邻的阳K / LL 左边紧邻的阴K
+      hhOb: hhIdx >= 0 ? findOrderBlock(candles, hhIdx, true) : null,
+      llOb: llIdx >= 0 ? findOrderBlock(candles, llIdx, false) : null,
     };
   }, [candles, maxAmplitudeLeg]);
 
@@ -647,10 +759,14 @@ export function LongestSwingPanel() {
     const build = (
       pivot: SwingPoint | null,
       kind: "bullishBelow" | "bearishAbove"
-    ): { trigger: TriggerCandle | null; coverage: CoverageMap } | null => {
+    ): {
+      trigger: TriggerCandle | null;
+      coverage: CoverageMap;
+      ob: OrderBlock | null;
+    } | null => {
       if (!pivot) return null;
       const idx = findCandleIndex(candles, pivot);
-      if (idx < 0) return { trigger: null, coverage: {} };
+      if (idx < 0) return { trigger: null, coverage: {}, ob: null };
       // 最新 HH / 最新 LL:射线扫不到时放宽(向下找阴K / 向上找阳K)
       const trigger = findRayTrigger(candles, pivot, idx, kind, true);
       const coverage: CoverageMap = trigger
@@ -670,7 +786,7 @@ export function LongestSwingPanel() {
                 ]
           )
         : {};
-      return { trigger, coverage };
+      return { trigger, coverage, ob: findOrderBlock(candles, idx, kind === "bullishBelow") };
     };
     return {
       high: build(latestHigh, "bullishBelow"),
@@ -720,6 +836,7 @@ export function LongestSwingPanel() {
                   side="sell"
                   trigger={latestTriggers.high.trigger}
                   coverage={latestTriggers.high.coverage}
+                  ob={latestTriggers.high.ob}
                   rayLabel="最新HH"
                   onPriceClick={handlePriceClick}
                 />
@@ -733,6 +850,7 @@ export function LongestSwingPanel() {
                   side="buy"
                   trigger={latestTriggers.low.trigger}
                   coverage={latestTriggers.low.coverage}
+                  ob={latestTriggers.low.ob}
                   rayLabel="最新LL"
                   onPriceClick={handlePriceClick}
                 />
