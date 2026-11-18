@@ -32,7 +32,7 @@ import { OBPanel } from "./OBPanel";
 import { OrderCancelOverlay } from "./OrderCancelOverlay";
 import { fetchKlines } from "@/lib/binance/api";
 import { BinanceWebSocket } from "@/lib/binance/websocket";
-import { detectSwingPoints, detectPivotsFull, detectAllPivots, classifyPivots } from "@/lib/chart/indicators/swingPoints";
+import { detectSwingPoints, detectPivotsFull, detectAllPivots, classifyPivots, findLongLegSwingIndices, LONG_LEG_HH_COLOR, LONG_LEG_LL_COLOR } from "@/lib/chart/indicators/swingPoints";
 import { detectOrderBlocks } from "@/lib/chart/indicators/orderBlocks";
 import { detectEngulfingPinbar } from "@/lib/chart/indicators/engulfingPinbar";
 import { detectFVGs } from "@/lib/chart/indicators/fvg";
@@ -1658,11 +1658,17 @@ export function TradingChart() {
     const markers: SeriesMarker<Time>[] = [];
 
     if (enabled.swingPoints && swingPoints.length > 0) {
+      // 长 leg（相邻摆动点价差 > 1500 点）的两端特殊配色：HH 蓝、LL 橙
+      const longLegIdx = findLongLegSwingIndices(swingPoints);
       for (const sp of swingPoints) {
+        const isLongLeg = longLegIdx.has(sp.index);
+        const color = isLongLeg
+          ? sp.type === "high" ? LONG_LEG_HH_COLOR : LONG_LEG_LL_COLOR
+          : sp.type === "high" ? "#22c55e" : "#ef4444";
         markers.push({
           time: sp.time as Time,
           position: sp.type === "high" ? "aboveBar" : "belowBar",
-          color: sp.type === "high" ? "#22c55e" : "#ef4444",
+          color,
           shape: sp.type === "high" ? "arrowDown" : "arrowUp",
           text: sp.type === "high" ? "HH" : "LL",
         });
@@ -1738,13 +1744,18 @@ export function TradingChart() {
       const classifiedPivots = classifyPivots(allPivots, 0.5);
 
       if (classifiedPivots.length > 0) {
+        // 长 leg（相邻摆动点价差 > 1500 点）的两端特殊配色：HH 蓝、LL 橙
+        const longLegIdx = findLongLegSwingIndices(classifiedPivots);
+
         // 高线系列标记 HH/LH (局部高点)
         const highMarkers: SeriesMarker<Time>[] = classifiedPivots
           .filter((sp) => sp.type === "high")
           .map((sp) => ({
             time: sp.time as Time,
             position: "inBar" as const,
-            color: sp.classification === "HH" ? "#22c55e" : "#f97316", // HH=绿色, LH=橙色
+            color: longLegIdx.has(sp.index)
+              ? LONG_LEG_HH_COLOR
+              : sp.classification === "HH" ? "#22c55e" : "#f97316", // HH=绿色, LH=橙色
             shape: "circle" as const,
             text: sp.classification, // 显示 HH 或 LH
           }));
@@ -1755,7 +1766,9 @@ export function TradingChart() {
           .map((sp) => ({
             time: sp.time as Time,
             position: "inBar" as const,
-            color: sp.classification === "HL" ? "#22c55e" : "#f97316", // HL=绿色, LL=橙色
+            color: longLegIdx.has(sp.index)
+              ? LONG_LEG_LL_COLOR
+              : sp.classification === "HL" ? "#22c55e" : "#f97316", // HL=绿色, LL=橙色
             shape: "circle" as const,
             text: sp.classification, // 显示 HL 或 LL
           }));

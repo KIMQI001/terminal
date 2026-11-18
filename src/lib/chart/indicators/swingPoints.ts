@@ -92,6 +92,43 @@ export function detectAllPivots(
 }
 
 /**
+ * 「长波段」判定阈值：相邻两个摆动点(HH↔LL)的价格差 > 1500 点算长 leg
+ */
+export const LONG_LEG_MIN_POINTS = 1500;
+
+/** 长 leg 的 HH 端点颜色（蓝） */
+export const LONG_LEG_HH_COLOR = "#3b82f6";
+/** 长 leg 的 LL 端点颜色（橙） */
+export const LONG_LEG_LL_COLOR = "#f97316";
+
+/**
+ * 找出所有属于「长 leg」的摆动点 index
+ *
+ * leg = 相邻两个摆动点之间的一段行情（高 ↔ 低），
+ * 长度 = |priceA - priceB|（价格点）。超过阈值的 leg，其两端点会被特殊配色：
+ * HH(高点) 用蓝色、LL(低点) 用橙色。
+ *
+ * @param points - 摆动点（需按时间/下标升序）
+ * @param minPoints - 长 leg 阈值（价格点），默认 1500
+ * @returns 属于长 leg 的摆动点 index 集合
+ */
+export function findLongLegSwingIndices(
+  points: Array<{ type: "high" | "low"; price: number; index: number }>,
+  minPoints: number = LONG_LEG_MIN_POINTS
+): Set<number> {
+  const longLeg = new Set<number>();
+  for (let i = 0; i + 1 < points.length; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    if (Math.abs(a.price - b.price) > minPoints) {
+      longLeg.add(a.index);
+      longLeg.add(b.index);
+    }
+  }
+  return longLeg;
+}
+
+/**
  * Swing Point 分类类型（HH/HL/LH/LL）
  */
 export type SwingClassification = "HH" | "HL" | "LH" | "LL";
