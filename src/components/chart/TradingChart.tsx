@@ -80,6 +80,12 @@ import type { FVG, OrderBlock } from "@/types/indicator";
 import type { FibLevel } from "@/lib/chart/primitives";
 
 /**
+ * 回放视图常量:
+ * - REPLAY_VIEW_BARS:进入回放时可见的 K 数量(≈一屏,能看清蜡烛)
+ */
+const REPLAY_VIEW_BARS = 150;
+
+/**
  * 收集 FVG/OB 的 3 档 fib 水平位(画在图上的水平虚线)。
  *
  * FVG 的档位虚线跟随 FVG 开关,OB 的档位虚线跟随 Order Blocks 开关 ——
@@ -286,6 +292,21 @@ export function TradingChart() {
   const anchorPriceLineRef = useRef<IPriceLine | null>(null);
   // 已应用到蜡烛序列的可见 K 线时间点(实时行情刷新时用来判断是否需要整段重建)
   const appliedVisibleTimesRef = useRef<number[]>([]);
+
+  // 回放视图状态:是否已进入回放 + 进入回放前的可见范围(退出时还原)
+  const replayViewRef = useRef<{
+    inReplay: boolean;
+    restore: { from: number; to: number } | null;
+  }>({ inReplay: false, restore: null });
+
+  // 右侧 ICT 面板栈(盖在图上)—— 回放时要把最新 K 停在它的左边,否则会被挡住
+  const rightPanelsRef = useRef<HTMLDivElement | null>(null);
+  const rightInsetPx = useCallback(() => {
+    const el = rightPanelsRef.current;
+    if (!el) return 0;
+    const w = el.getBoundingClientRect().width;
+    return w > 0 ? w + 16 : 0;
+  }, []);
 
   // Shift 键状态
   const [isShiftPressed, setIsShiftPressed] = useState(false);
@@ -693,6 +714,25 @@ export function TradingChart() {
   useEffect(() => {
     if (seriesVersion === 0) return;
 
+    const ts = chartRef.current?.timeScale();
+    const replayState = useReplayStore.getState();
+
+    // ① 视图策略要在 buildFilteredSeries 之前判定:
+    //    进入回放的那一刻,时间轴上还挂着回放前的完整数据 —— 这时抓到的可见范围
+    //    才是「回放前的原视图」(setData 之后右端会被数据末尾夹断,抓不到了)。
+    let restoreAfterBuild: { from: number; to: number } | null = null;
+    let justEnteredReplay = false;
+    if (replayState.isReplaying && !replayViewRef.current.inReplay) {
+      replayViewRef.current.inReplay = true;
+      justEnteredReplay = true;
+      const r = ts?.getVisibleLogicalRange();
+      replayViewRef.current.restore = r ? { from: r.from, to: r.to } : null;
+    } else if (!replayState.isReplaying && replayViewRef.current.inReplay) {
+      replayViewRef.current.inReplay = false;
+      restoreAfterBuild = replayViewRef.current.restore;
+      replayViewRef.current.restore = null;
+    }
+
     buildFilteredSeries();
 
     const cs = useChartStore.getState();
@@ -701,15 +741,60 @@ export function TradingChart() {
       calculateIndicators(slice);
     }
 
-    // 视图本来贴着最右端时才跟随滚动,否则保持用户自己的平移
-    const ts = chartRef.current?.timeScale();
-    if (ts) {
-      const range = ts.getVisibleLogicalRange();
-      if (!range || cs.candles.length - 1 - range.to < 3) {
-        ts.scrollToRealTime();
-      }
+    const lastIndex = slice.length - 1;
+
+    // ===== 刚退出回放 → 还原进入回放前的视图 =====
+    if (restoreAfterBuild) {
+      if (ts) ts.setVisibleLogicalRange(restoreAfterBuild);
+      return;
     }
-  }, [seriesVersion, buildFilteredSeries, calculateIndicators]);
+
+    // ===== 非回放:原有逻辑 =====
+    if (!replayState.isReplaying) {
+      // 视图本来贴着最右端时才跟随滚动,否则保持用户自己的平移
+      if (ts) {
+        const range = ts.getVisibleLogicalRange();
+        if (!range || cs.candles.length - 1 - range.to < 3) {
+          ts.scrollToRealTime();
+        }
+      }
+      return;
+    }
+
+    // ===== 回放中 =====
+    // 右侧被 ICT 面板栈盖住,最新回放 K 会被挡住 → 给面板栈留出空间,
+    // 把最新 K 钉在「面板左边」的固定位置。
+    if (!ts) return;
+    const inset = rightInsetPx();
+    const usable = Math.max(ts.width() * 0.4, ts.width() - inset);
+
+    if (justEnteredReplay) {
+      // 刚进入回放(原视图已在上面记下):
+      //  把视图收到回放窗口末尾 —— 否则一万多根历史把回放挤成一条线,看不清最新 K
+      const barSpacing = usable / REPLAY_VIEW_BARS; // 每根 K 占的像素
+      const len = ts.width() / barSpacing; // 可见区间长度(右侧留白给面板)
+      const from = Math.max(0, lastIndex - REPLAY_VIEW_BARS);
+      ts.setVisibleLogicalRange({ from, to: from + len });
+      return;
+    }
+
+    // 回看态(cursor < frontier):不动视图,让用户自己看历史
+    if (replayState.cursor < replayState.frontier) return;
+
+    // 前进:把「最新回放 K」钉在右侧固定位置(保持用户当前的缩放级别)
+    const range = ts.getVisibleLogicalRange();
+    if (!range) {
+      const barSpacing = usable / REPLAY_VIEW_BARS;
+      const len = ts.width() / barSpacing;
+      const from = Math.max(0, lastIndex - REPLAY_VIEW_BARS);
+      ts.setVisibleLogicalRange({ from, to: from + len });
+      return;
+    }
+    const visibleBars = range.to - range.from; // 保持可见根数 → 缩放级别不变
+    const spacing = ts.width() / visibleBars; // setVisibleLogicalRange 会按这个算 barSpacing
+    const from = lastIndex - usable / spacing; // 让最新 K 落在「面板左边」
+    ts.setVisibleLogicalRange({ from, to: from + visibleBars });
+  }, [seriesVersion, buildFilteredSeries, calculateIndicators, rightInsetPx]);
 
   // Initialize chart
   useEffect(() => {
@@ -799,6 +884,11 @@ export function TradingChart() {
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
+
+    // 开发模式下暴露图表实例(便于调试时间轴/可见范围),生产环境不暴露
+    if (process.env.NODE_ENV !== "production") {
+      (window as unknown as { __chart?: IChartApi }).__chart = chart;
+    }
 
     // 成交量柱状图
     const volumeSeries = chart.addHistogramSeries({
@@ -2388,7 +2478,7 @@ export function TradingChart() {
         seriesRef={candleSeriesRef}
         containerRef={chartContainerRef}
       />
-      <div className="absolute top-2 right-2 z-10 flex flex-col gap-2">
+      <div ref={rightPanelsRef} data-testid="chart-right-panels" className="absolute top-2 right-2 z-10 flex flex-col gap-2">
         {/* 回放模拟盘面板(置顶) */}
         <ReplayPanel />
         {/* 最长波段(独立面板,折叠互不影响)—— 仅 admin 可见 */}
