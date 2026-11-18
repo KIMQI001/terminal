@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useReplayStore } from "@/stores/replayStore";
@@ -34,8 +34,15 @@ export function ReplayOrderForm() {
   const [notice, setNotice] = useState<string | null>(null);
   // 提交后收起图上的草稿预览线(表单本身保留,可继续下单)
   const [draftOff, setDraftOff] = useState(false);
+  // 用户手动改过止损/止盈 → 不再自动覆盖
+  const slManual = useRef(false);
+  const tpManual = useRef(false);
 
   const isReview = status === "review" || cursor < frontier;
+
+  // 默认止损/止盈点数（入场价 ± N 点）
+  const slPoints = config.defaultStopLossPoints ?? 0;
+  const tpPoints = config.defaultTakeProfitPoints ?? 0;
 
   // 预填（面板点价位 / 双击图表）
   useEffect(() => {
@@ -43,6 +50,8 @@ export function ReplayOrderForm() {
     setSide(prefill.side);
     setOrderType("limit");
     setPrice(String(prefill.entry));
+    slManual.current = !!prefill.stopLoss;
+    tpManual.current = !!prefill.takeProfit;
     setStopLoss(prefill.stopLoss ? String(prefill.stopLoss) : "");
     setTakeProfit(prefill.takeProfit ? String(prefill.takeProfit) : "");
     setError(null);
@@ -54,6 +63,18 @@ export function ReplayOrderForm() {
   useEffect(() => {
     if (orderType === "market" && lastPrice > 0) setPrice(String(lastPrice));
   }, [orderType, lastPrice]);
+
+  // 自动填默认止损/止盈（入场价 ± 默认点数；用户手动改过就不再覆盖）
+  const entryForDefault = orderType === "market" ? lastPrice : parseFloat(price) || 0;
+  useEffect(() => {
+    if (!(entryForDefault > 0)) return;
+    if (!slManual.current) {
+      setStopLoss(slPoints > 0 ? (entryForDefault + (side === "buy" ? -slPoints : slPoints)).toFixed(2) : "");
+    }
+    if (!tpManual.current) {
+      setTakeProfit(tpPoints > 0 ? (entryForDefault + (side === "buy" ? tpPoints : -tpPoints)).toFixed(2) : "");
+    }
+  }, [entryForDefault, side, slPoints, tpPoints]);
 
   // 图上预览线（entry / SL / TP）
   useEffect(() => {
@@ -89,10 +110,9 @@ export function ReplayOrderForm() {
       setError(res.error ?? "下单失败");
       return;
     }
-    // 提交后保留入场价(按钮保持可点,可继续下单),只清掉 SL/TP 便于下一单重填
+    // 提交后保留入场价与 SL/TP(按钮保持可点,可继续下单),
+    // 这样「止盈/止损后等待新单」时直接再点一次就是新的一单
     setPrefill(null);
-    setStopLoss("");
-    setTakeProfit("");
     setDraftOff(true); // 收起图上的草稿预览线(挂单自己的价格线不受影响)
     setNotice("已提交模拟单，可继续下单");
   };
@@ -101,6 +121,14 @@ export function ReplayOrderForm() {
   const touchForm = () => {
     setDraftOff(false);
     setNotice(null);
+  };
+
+  // 换方向 → 止损/止盈方向相反，重新按默认点数自动填
+  const switchSide = (s: "buy" | "sell") => {
+    touchForm();
+    slManual.current = false;
+    tpManual.current = false;
+    setSide(s);
   };
 
   const btnCls = (active: boolean, buy: boolean) =>
@@ -122,10 +150,10 @@ export function ReplayOrderForm() {
 
       {/* 方向 */}
       <div className="flex gap-1 p-1 bg-[var(--bg-tertiary)] rounded-lg">
-        <button className={btnCls(side === "buy", true)} onClick={() => { touchForm(); setSide("buy"); }}>
+        <button className={btnCls(side === "buy", true)} onClick={() => switchSide("buy")}>
           开多 BUY
         </button>
-        <button className={btnCls(side === "sell", false)} onClick={() => { touchForm(); setSide("sell"); }}>
+        <button className={btnCls(side === "sell", false)} onClick={() => switchSide("sell")}>
           开空 SELL
         </button>
       </div>
@@ -165,9 +193,9 @@ export function ReplayOrderForm() {
         <Input
           data-testid="replay-sim-sl"
           type="number"
-          placeholder="止损价格（可留空）"
+          placeholder={slPoints > 0 ? `止损价格（默认 ${slPoints} 点）` : "止损价格（可留空）"}
           value={stopLoss}
-          onChange={(e) => { touchForm(); setStopLoss(e.target.value); }}
+          onChange={(e) => { touchForm(); slManual.current = true; setStopLoss(e.target.value); }}
           suffix="USDT"
         />
       </div>
@@ -178,9 +206,9 @@ export function ReplayOrderForm() {
         <Input
           data-testid="replay-sim-tp"
           type="number"
-          placeholder="止盈价格（可留空）"
+          placeholder={tpPoints > 0 ? `止盈价格（默认 ${tpPoints} 点）` : "止盈价格（可留空）"}
           value={takeProfit}
-          onChange={(e) => { touchForm(); setTakeProfit(e.target.value); }}
+          onChange={(e) => { touchForm(); tpManual.current = true; setTakeProfit(e.target.value); }}
           suffix="USDT"
         />
       </div>

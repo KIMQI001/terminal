@@ -70,6 +70,8 @@ interface ReplayState {
   frontier: number;
   /** 「跳到最新」计数：每次点「跳到最新」+1，图表据此把视角重新接管回最新 K */
   jumpNonce: number;
+  /** 止盈/止损触发后暂停，等待用户下新单（true 时不能继续播放） */
+  awaitingOrder: boolean;
 
   /** 引擎状态（真相） */
   engine: ReplayEngineState;
@@ -100,7 +102,7 @@ interface ReplayState {
   play: () => void;
   pause: () => void;
   togglePlay: () => void;
-  stepForward: () => void;
+  stepForward: (opts?: { manual?: boolean }) => void;
   stepBack: () => void;
   jumpToFront: () => void;
   seekTo: (bar: number) => void;
@@ -268,6 +270,7 @@ export const useReplayStore = create<ReplayState>()(
       cursor: -1,
       frontier: -1,
       jumpNonce: 0,
+      awaitingOrder: false,
 
       engine: createInitialState({ ...DEFAULT_REPLAY_CONFIG, symbol: "BTCUSDC", timeframe: "15m" }),
       view: emptyView(DEFAULT_REPLAY_CONFIG.initialCapital),
@@ -323,6 +326,7 @@ export const useReplayStore = create<ReplayState>()(
           windowStartIndex: win.windowStartIndex,
           cursor: 0,
           frontier: -1,
+          awaitingOrder: false,
           engine,
           view: computeView(engine, win.bars, 0),
           prefill: null,
@@ -401,9 +405,11 @@ export const useReplayStore = create<ReplayState>()(
       },
 
       play: () => {
-        const { status } = get();
+        const { status, awaitingOrder } = get();
         const { speed } = get().config;
         if (status !== "paused" && status !== "running") return;
+        // 止盈/止损触发后已暂停 → 必须先下新单才能继续播放
+        if (awaitingOrder) return;
         stopTimer();
         set({ status: "running" });
         const interval = Math.max(120, 1000 / Math.max(0.5, speed));
@@ -414,7 +420,7 @@ export const useReplayStore = create<ReplayState>()(
             set({ status: "paused" });
             return;
           }
-          s.stepForward();
+          s.stepForward({ manual: false });
         }, interval);
       },
 
@@ -429,21 +435,38 @@ export const useReplayStore = create<ReplayState>()(
         else get().play();
       },
 
-      stepForward: () => {
+      stepForward: (opts) => {
         const { engine, bars, config, frontier, status } = get();
         if (!get().isReplaying) return;
         if (frontier + 1 >= bars.length) return;
 
+        const prevTradeCount = engine.trades.length;
         const nextIndex = frontier + 1;
         const nextEngine = simulateBar(engine, bars[nextIndex], nextIndex, config);
         const nextCursor = nextIndex;
+
+        // 本根触发止损/止盈 → 立刻暂停，等待用户下新单
+        const hitExit = nextEngine.trades
+          .slice(prevTradeCount)
+          .some((t) => t.exitReason === "sl" || t.exitReason === "tp");
+        if (hitExit) stopTimer();
+
+        const nextStatus: ReplayStatus = hitExit
+          ? "paused"
+          : status === "running"
+            ? "running"
+            : status === "review"
+              ? "review"
+              : "paused";
 
         set({
           engine: nextEngine,
           frontier: nextIndex,
           cursor: nextCursor,
           view: computeView(nextEngine, bars, nextCursor),
-          status: status === "running" ? "running" : status === "review" ? "review" : "paused",
+          status: nextStatus,
+          // 手动单步 = 用户接管，继续往下走 → 解除「等待新单」
+          awaitingOrder: hitExit ? true : opts?.manual ? false : get().awaitingOrder,
         });
         applyVisible(get().fullCandles, get().windowStartIndex, nextCursor);
       },
@@ -520,6 +543,8 @@ export const useReplayStore = create<ReplayState>()(
         set({
           engine: nextEngine,
           view: computeView(nextEngine, bars, cursor),
+          // 下了新单 → 解除「止盈/止损后暂停，等待新单」
+          awaitingOrder: false,
         });
         return result;
       },
@@ -614,6 +639,21 @@ export const useReplayStore = create<ReplayState>()(
     }),
     {
       name: "replay-settings",
+      version: 2,
+      migrate: (persisted) => {
+        // v1 → v2：默认参数改为 1 BTC / 100000U 本金 / 默认止损 100 点、止盈 10000 点
+        const old = (persisted as { config?: Partial<ReplayConfig> } | undefined)?.config ?? {};
+        return {
+          config: {
+            ...DEFAULT_REPLAY_CONFIG,
+            ...old,
+            initialCapital: DEFAULT_REPLAY_CONFIG.initialCapital,
+            quantity: DEFAULT_REPLAY_CONFIG.quantity,
+            defaultStopLossPoints: DEFAULT_REPLAY_CONFIG.defaultStopLossPoints,
+            defaultTakeProfitPoints: DEFAULT_REPLAY_CONFIG.defaultTakeProfitPoints,
+          },
+        };
+      },
       partialize: (state) => ({
         config: state.config,
       }),

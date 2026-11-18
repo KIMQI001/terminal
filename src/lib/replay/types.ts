@@ -35,12 +35,16 @@ export interface ReplayConfig {
   maxDrawdownPct: number;
   /** 播放速度（根/秒） */
   speed: number;
+  /** 默认止损点数（入场价 ± N 个价格点） */
+  defaultStopLossPoints: number;
+  /** 默认止盈点数（入场价 ± N 个价格点） */
+  defaultTakeProfitPoints: number;
 }
 
 export const DEFAULT_REPLAY_CONFIG: Omit<ReplayConfig, "symbol" | "timeframe"> = {
   barCount: 300,
-  initialCapital: 1000,
-  quantity: 0.001,
+  initialCapital: 100000,
+  quantity: 1,
   leverage: 1,
   maxPositions: 1,
   maxRiskPerTradePct: 2,
@@ -48,6 +52,8 @@ export const DEFAULT_REPLAY_CONFIG: Omit<ReplayConfig, "symbol" | "timeframe"> =
   maxMarginUsagePct: 50,
   maxDrawdownPct: 15,
   speed: 2,
+  defaultStopLossPoints: 100,
+  defaultTakeProfitPoints: 10000,
 };
 
 /** 模拟挂单 */

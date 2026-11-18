@@ -52,7 +52,7 @@ const indicators: { key: keyof IndicatorState; label: string }[] = [
 export function Header({ showReplay = false }: { showReplay?: boolean }) {
   const { symbol, timeframe, setSymbol, setTimeframe } = useChartStore();
   const { enabled, toggleIndicator } = useIndicatorStore();
-  const { isModalOpen, togglePanel } = useOrderStore();
+  const { isModalOpen, togglePanel, openModal } = useOrderStore();
   const { isToolActive, toggleToolActive } = useMeasurementStore();
   const { isAuthenticated, user, openSettings } = useUserStore();
   const isReplaying = useReplayStore((s) => s.isReplaying);
@@ -197,7 +197,15 @@ export function Header({ showReplay = false }: { showReplay?: boolean }) {
             data-testid="replay-toggle"
             variant={isReplaying ? "default" : "outline"}
             size="sm"
-            onClick={() => (isReplaying ? stopReplay() : startReplay())}
+            onClick={() => {
+              if (isReplaying) {
+                stopReplay();
+                return;
+              }
+              startReplay();
+              // 回放模式：模拟下单表单只在右侧「交易」面板里 → 顺手打开它
+              openModal();
+            }}
             className={isReplaying ? "bg-orange-500 hover:bg-orange-600" : ""}
             title={isReplaying ? "退出回放模式" : "进入回放模拟盘(练习 K 线下单,不动真钱)"}
           >

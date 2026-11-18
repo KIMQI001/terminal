@@ -34,6 +34,8 @@ const cfg: ReplayConfig = {
   maxMarginUsagePct: 50,
   maxDrawdownPct: 15,
   speed: 2,
+  defaultStopLossPoints: 100,
+  defaultTakeProfitPoints: 10000,
 };
 
 function bar(time: number, o: number, h: number, l: number, c: number): Candle {

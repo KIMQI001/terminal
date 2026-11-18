@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { History, X } from "lucide-react";
 import { useReplayStore } from "@/stores/replayStore";
-import { ReplayOrderForm } from "./ReplayOrderForm";
 import { ReplayScoreCard } from "./ReplayScoreCard";
 import { ReplayHistoryModal } from "./ReplayHistoryModal";
 import { ReplayFillsList, ReplayOrdersList, ReplayPositionsList } from "./ReplayBook";
@@ -146,7 +145,13 @@ export function ReplayPanel() {
 
             <div className="h-px bg-gray-100" />
 
-            <ReplayOrderForm />
+            {/* 下单表单只保留右侧「交易」面板那一份，这里不重复渲染 */}
+            <div
+              data-testid="replay-order-form-hint"
+              className="text-[10px] text-gray-500 leading-relaxed bg-gray-50 rounded px-2 py-1.5"
+            >
+              下单请用右侧「交易」面板的模拟下单表单（点击图上价位可自动预填）。
+            </div>
 
             <div className="h-px bg-gray-100" />
 
@@ -208,6 +213,8 @@ export function ReplayPanel() {
                   {numField("杠杆", "leverage", 1, 1, "x")}
                   {numField("最大持仓", "maxPositions", 1, 1, "笔")}
                   {numField("单笔风险上限", "maxRiskPerTradePct", 0.5, 0.1, "%")}
+                  {numField("默认止损", "defaultStopLossPoints", 10, 0, "点")}
+                  {numField("默认止盈", "defaultTakeProfitPoints", 100, 0, "点")}
                 </div>
                 <button
                   data-testid="replay-apply-settings"

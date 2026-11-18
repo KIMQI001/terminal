@@ -17,6 +17,7 @@ export function ReplayControlBar() {
   const bars = useReplayStore((s) => s.bars);
   const view = useReplayStore((s) => s.view);
   const config = useReplayStore((s) => s.config);
+  const awaitingOrder = useReplayStore((s) => s.awaitingOrder);
   const togglePlay = useReplayStore((s) => s.togglePlay);
   const stepForward = useReplayStore((s) => s.stepForward);
   const stepBack = useReplayStore((s) => s.stepBack);
@@ -57,19 +58,35 @@ export function ReplayControlBar() {
       <button
         data-testid="replay-play"
         className={btn}
-        title={status === "running" ? "暂停" : "播放"}
-        disabled={atEnd}
+        title={
+          awaitingOrder
+            ? "止盈/止损后已暂停，请先下新单"
+            : status === "running"
+              ? "暂停"
+              : "播放"
+        }
+        disabled={atEnd || awaitingOrder}
         onClick={togglePlay}
       >
         {status === "running" ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
       </button>
+
+      {/* 止盈/止损后暂停：等用户下新单 */}
+      {awaitingOrder && (
+        <span
+          data-testid="replay-awaiting-order"
+          className="px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold"
+        >
+          ⏸ 已暂停 · 等待新单
+        </span>
+      )}
 
       <button
         data-testid="replay-step-back"
         className={btn}
         title="单步后退（仅回看视图，不改账本）"
         disabled={cursor < 0}
-        onClick={stepBack}
+        onClick={() => stepBack()}
       >
         <StepBack className="w-3.5 h-3.5" />
       </button>
@@ -79,7 +96,7 @@ export function ReplayControlBar() {
         className={btn}
         title="单步前进"
         disabled={atEnd}
-        onClick={stepForward}
+        onClick={() => stepForward({ manual: true })}
       >
         <StepForward className="w-3.5 h-3.5" />
       </button>

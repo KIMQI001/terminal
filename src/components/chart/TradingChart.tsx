@@ -301,6 +301,8 @@ export function TradingChart() {
 
   // 「跳到最新」计数 —— 图表据此把视角重新接管回最新 K(用户主动点的)
   const jumpNonceRef = useRef<number>(-1);
+  // 回放中「重新钉住最新 K」的回调 —— 图表宽度变化(右侧交易面板开合)后重新钉一次
+  const replayRepinRef = useRef<(() => void) | null>(null);
 
   // 右侧 ICT 面板栈(盖在图上)—— 回放时要把最新 K 停在它的左边,否则会被挡住
   const rightPanelsRef = useRef<HTMLDivElement | null>(null);
@@ -754,6 +756,7 @@ export function TradingChart() {
 
     // ===== 非回放:原有逻辑 =====
     if (!replayState.isReplaying) {
+      replayRepinRef.current = null;
       // 视图本来贴着最右端时才跟随滚动,否则保持用户自己的平移
       if (ts) {
         const range = ts.getVisibleLogicalRange();
@@ -772,31 +775,44 @@ export function TradingChart() {
     //    (rightOffset 不变 → 老 K 向左滚动、最新 K 不动),
     //    用户拖动图表时我们完全不干预 → 他拖到哪就停在哪,不会把视角拽回去。
     if (!ts) return;
-    const inset = rightInsetPx();
-    const usable = Math.max(ts.width() * 0.4, ts.width() - inset);
 
     // 把「最新回放 K」钉到「面板左边」(宽度 = width - inset)
     //   x(最新K) = width - (rightOffset + 0.5) * barSpacing - 1
     // keepZoom=true 时沿用用户当前的缩放级别,只把最新 K 拉回面板左边
-    const focusToFront = (keepZoom: boolean) => {
+    // ⚠️ inset / width 都实时取 —— 图表宽度是异步生效的,不能缓存旧值
+    const focusToFront = (keepZoom: boolean, lastIdx: number = lastIndex) => {
+      const w = ts!.width();
+      const ins = rightInsetPx();
+      const usable = Math.max(w * 0.4, w - ins);
       const range = ts!.getVisibleLogicalRange();
-      const curSpacing = range ? ts!.width() / (range.to - range.from + 1) : 0;
+      const curSpacing = range ? w / (range.to - range.from + 1) : 0;
       const barSpacing = keepZoom && curSpacing >= 1 ? curSpacing : usable / REPLAY_VIEW_BARS;
-      const len = ts!.width() / barSpacing; // 可见槽位总数(右侧留白给面板)
-      const rightOffset = (inset - 1) / barSpacing - 0.5;
-      const to = rightOffset + lastIndex;
+      const len = w / barSpacing; // 可见槽位总数(右侧留白给面板)
+      const rightOffset = (ins - 1) / barSpacing - 0.5;
+      const to = rightOffset + lastIdx;
       ts!.setVisibleLogicalRange({ from: to - len + 1, to });
     };
+
+    // 图表宽度变了(右侧交易面板开合)→ 重新钉一次,保证最新 K 仍贴在面板左边
+    const repin = () => {
+      const cur = useChartStore.getState().candles.length - 1;
+      focusToFront(false, cur);
+    };
+    replayRepinRef.current = repin;
 
     if (justEnteredReplay) {
       // 刚进入回放(原视图已在上面记下):
       //  把视图收到回放窗口末尾 —— 否则一万多根历史把回放挤成一条线,看不清最新 K
       focusToFront(false);
+      jumpNonceRef.current = replayState.jumpNonce;
       return;
     }
 
     // 回看态(cursor < frontier):不动视图,让用户自己看历史
-    if (replayState.cursor < replayState.frontier) return;
+    if (replayState.cursor < replayState.frontier) {
+      replayRepinRef.current = null;
+      return;
+    }
 
     // 用户主动点「跳到最新」→ 重新接管视角,把最新 K 钉回面板左边
     if (replayState.jumpNonce !== jumpNonceRef.current) {
@@ -1008,14 +1024,28 @@ export function TradingChart() {
           width: chartContainerRef.current.clientWidth,
           height: chartContainerRef.current.clientHeight,
         });
+        // 回放中:宽度变了 → 把最新 K 重新钉到面板左边。
+        // ⚠️ 图表的新宽度是异步生效的,等两帧再钉,否则会按旧宽度算位置。
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => replayRepinRef.current?.());
+        });
       }
     };
 
     window.addEventListener("resize", handleResize);
     handleResize();
 
+    // 容器尺寸变化也要重画（例如右侧「交易」面板打开/关闭），
+    // 否则 canvas 会保持旧宽度 → 右边一截被面板盖住
+    let resizeObserver: ResizeObserver | null = null;
+    if (chartContainerRef.current && typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(() => handleResize());
+      resizeObserver.observe(chartContainerRef.current);
+    }
+
     return () => {
       window.removeEventListener("resize", handleResize);
+      resizeObserver?.disconnect();
       chart.remove();
     };
   }, []);

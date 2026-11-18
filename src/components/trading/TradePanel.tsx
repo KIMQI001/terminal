@@ -48,7 +48,10 @@ export function TradePanel() {
   if (!isModalOpen) return null;
 
   return (
-    <div className="w-80 h-full flex flex-col border-l border-[var(--border)] bg-[var(--bg-secondary)]">
+    <div
+      data-testid="trade-panel"
+      className="w-80 h-full flex flex-col border-l border-[var(--border)] bg-[var(--bg-secondary)]"
+    >
       {/* 面板头部 */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
         <h2 className="text-sm font-medium">交易 - {symbol}</h2>
