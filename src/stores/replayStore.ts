@@ -639,9 +639,10 @@ export const useReplayStore = create<ReplayState>()(
     }),
     {
       name: "replay-settings",
-      version: 2,
+      version: 3,
       migrate: (persisted) => {
-        // v1 → v2：默认参数改为 1 BTC / 100000U 本金 / 默认止损 100 点、止盈 10000 点
+        // v1 → v2：默认参数改为 1 BTC / 100000U 本金 / 默认止损 100 点
+        // v2 → v3：默认止盈点数 10000 → 1000
         const old = (persisted as { config?: Partial<ReplayConfig> } | undefined)?.config ?? {};
         return {
           config: {

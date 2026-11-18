@@ -53,7 +53,7 @@ export const DEFAULT_REPLAY_CONFIG: Omit<ReplayConfig, "symbol" | "timeframe"> =
   maxDrawdownPct: 15,
   speed: 2,
   defaultStopLossPoints: 100,
-  defaultTakeProfitPoints: 10000,
+  defaultTakeProfitPoints: 1000,
 };
 
 /** 模拟挂单 */
