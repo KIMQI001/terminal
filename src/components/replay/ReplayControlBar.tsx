@@ -84,13 +84,15 @@ export function ReplayControlBar() {
         <StepForward className="w-3.5 h-3.5" />
       </button>
 
-      {isReview && (
+      {/* 跳到最新:回看态 = 游标跳到最新一根;跟随态 = 把图表视角拉回最新 K */}
+      {isReplaying && (
         <button
           data-testid="replay-jump-to-front"
           className="px-2 h-7 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium"
+          title={isReview ? "跳到最新一根" : "把图表视角拉回最新 K"}
           onClick={jumpToFront}
         >
-          跳到最新（第 {frontier + 1} 根）
+          {isReview ? `跳到最新（第 ${frontier + 1} 根）` : "回到最新"}
         </button>
       )}
 

@@ -68,6 +68,8 @@ interface ReplayState {
   cursor: number;
   /** 真相游标（账本已撮合到哪一根） */
   frontier: number;
+  /** 「跳到最新」计数：每次点「跳到最新」+1，图表据此把视角重新接管回最新 K */
+  jumpNonce: number;
 
   /** 引擎状态（真相） */
   engine: ReplayEngineState;
@@ -265,6 +267,7 @@ export const useReplayStore = create<ReplayState>()(
       windowStartIndex: 0,
       cursor: -1,
       frontier: -1,
+      jumpNonce: 0,
 
       engine: createInitialState({ ...DEFAULT_REPLAY_CONFIG, symbol: "BTCUSDC", timeframe: "15m" }),
       view: emptyView(DEFAULT_REPLAY_CONFIG.initialCapital),
@@ -464,6 +467,8 @@ export const useReplayStore = create<ReplayState>()(
           cursor: frontier,
           view: computeView(engine, bars, frontier),
           status: "paused",
+          // 计数 +1 → 图表知道用户要「回到最新」,把视角重新接管回最新 K
+          jumpNonce: get().jumpNonce + 1,
         });
         applyVisible(get().fullCandles, get().windowStartIndex, frontier);
       },

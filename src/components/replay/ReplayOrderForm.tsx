@@ -31,6 +31,9 @@ export function ReplayOrderForm() {
   const [stopLoss, setStopLoss] = useState("");
   const [takeProfit, setTakeProfit] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  // 提交后收起图上的草稿预览线(表单本身保留,可继续下单)
+  const [draftOff, setDraftOff] = useState(false);
 
   const isReview = status === "review" || cursor < frontier;
 
@@ -43,6 +46,8 @@ export function ReplayOrderForm() {
     setStopLoss(prefill.stopLoss ? String(prefill.stopLoss) : "");
     setTakeProfit(prefill.takeProfit ? String(prefill.takeProfit) : "");
     setError(null);
+    setNotice(null);
+    setDraftOff(false);
   }, [prefill]);
 
   // 市价单跟随现价
@@ -55,12 +60,12 @@ export function ReplayOrderForm() {
     const entry = orderType === "market" ? lastPrice : parseFloat(price) || 0;
     const sl = parseFloat(stopLoss) || 0;
     const tp = parseFloat(takeProfit) || 0;
-    if (!(entry > 0)) {
+    if (draftOff || !(entry > 0)) {
       setDraft(null);
       return;
     }
     setDraft({ side, entry, stopLoss: sl > 0 ? sl : undefined, takeProfit: tp > 0 ? tp : undefined });
-  }, [price, stopLoss, takeProfit, side, orderType, lastPrice, setDraft]);
+  }, [price, stopLoss, takeProfit, side, orderType, lastPrice, setDraft, draftOff]);
 
   const qty = config.quantity;
   const entryPrice = orderType === "market" ? lastPrice : parseFloat(price) || 0;
@@ -69,6 +74,7 @@ export function ReplayOrderForm() {
 
   const handleSubmit = () => {
     setError(null);
+    setNotice(null);
     const sl = parseFloat(stopLoss) || undefined;
     const tp = parseFloat(takeProfit) || undefined;
     const res = placeSimOrder({
@@ -83,11 +89,18 @@ export function ReplayOrderForm() {
       setError(res.error ?? "下单失败");
       return;
     }
+    // 提交后保留入场价(按钮保持可点,可继续下单),只清掉 SL/TP 便于下一单重填
     setPrefill(null);
-    setDraft(null);
-    setPrice("");
     setStopLoss("");
     setTakeProfit("");
+    setDraftOff(true); // 收起图上的草稿预览线(挂单自己的价格线不受影响)
+    setNotice("已提交模拟单，可继续下单");
+  };
+
+  // 改了方向/类型/价格 → 重新打开草稿预览线
+  const touchForm = () => {
+    setDraftOff(false);
+    setNotice(null);
   };
 
   const btnCls = (active: boolean, buy: boolean) =>
@@ -109,20 +122,20 @@ export function ReplayOrderForm() {
 
       {/* 方向 */}
       <div className="flex gap-1 p-1 bg-[var(--bg-tertiary)] rounded-lg">
-        <button className={btnCls(side === "buy", true)} onClick={() => setSide("buy")}>
+        <button className={btnCls(side === "buy", true)} onClick={() => { touchForm(); setSide("buy"); }}>
           开多 BUY
         </button>
-        <button className={btnCls(side === "sell", false)} onClick={() => setSide("sell")}>
+        <button className={btnCls(side === "sell", false)} onClick={() => { touchForm(); setSide("sell"); }}>
           开空 SELL
         </button>
       </div>
 
       {/* 类型 */}
       <div className="flex gap-1 p-1 bg-[var(--bg-tertiary)] rounded-lg">
-        <button className={btnCls(orderType === "limit", true)} onClick={() => setOrderType("limit")}>
+        <button className={btnCls(orderType === "limit", true)} onClick={() => { touchForm(); setOrderType("limit"); }}>
           限价
         </button>
-        <button className={btnCls(orderType === "market", true)} onClick={() => setOrderType("market")}>
+        <button className={btnCls(orderType === "market", true)} onClick={() => { touchForm(); setOrderType("market"); }}>
           市价
         </button>
       </div>
@@ -136,7 +149,7 @@ export function ReplayOrderForm() {
           placeholder={lastPrice ? String(lastPrice.toFixed(2)) : "入场价格"}
           value={orderType === "market" ? lastPrice.toFixed(2) : price}
           disabled={orderType === "market"}
-          onChange={(e) => setPrice(e.target.value)}
+          onChange={(e) => { touchForm(); setPrice(e.target.value); }}
           suffix="USDT"
         />
         {orderType === "limit" && lastPrice > 0 && (
@@ -154,7 +167,7 @@ export function ReplayOrderForm() {
           type="number"
           placeholder="止损价格（可留空）"
           value={stopLoss}
-          onChange={(e) => setStopLoss(e.target.value)}
+          onChange={(e) => { touchForm(); setStopLoss(e.target.value); }}
           suffix="USDT"
         />
       </div>
@@ -167,7 +180,7 @@ export function ReplayOrderForm() {
           type="number"
           placeholder="止盈价格（可留空）"
           value={takeProfit}
-          onChange={(e) => setTakeProfit(e.target.value)}
+          onChange={(e) => { touchForm(); setTakeProfit(e.target.value); }}
           suffix="USDT"
         />
       </div>
@@ -184,6 +197,12 @@ export function ReplayOrderForm() {
       {error && (
         <div className="text-xs text-red-500 bg-red-50 px-2 py-1.5 rounded" data-testid="replay-sim-error">
           {error}
+        </div>
+      )}
+
+      {notice && !error && (
+        <div className="text-xs text-green-600 bg-green-50 px-2 py-1.5 rounded" data-testid="replay-sim-notice">
+          {notice}
         </div>
       )}
 

@@ -299,6 +299,9 @@ export function TradingChart() {
     restore: { from: number; to: number } | null;
   }>({ inReplay: false, restore: null });
 
+  // 「跳到最新」计数 —— 图表据此把视角重新接管回最新 K(用户主动点的)
+  const jumpNonceRef = useRef<number>(-1);
+
   // 右侧 ICT 面板栈(盖在图上)—— 回放时要把最新 K 停在它的左边,否则会被挡住
   const rightPanelsRef = useRef<HTMLDivElement | null>(null);
   const rightInsetPx = useCallback(() => {
@@ -764,36 +767,48 @@ export function TradingChart() {
     // ===== 回放中 =====
     // 右侧被 ICT 面板栈盖住,最新回放 K 会被挡住 → 给面板栈留出空间,
     // 把最新 K 钉在「面板左边」的固定位置。
+    //
+    // ⚠️ 钉住之后**不再动视图**:lightweight-charts 自己会把新 K 钉在同一像素位置
+    //    (rightOffset 不变 → 老 K 向左滚动、最新 K 不动),
+    //    用户拖动图表时我们完全不干预 → 他拖到哪就停在哪,不会把视角拽回去。
     if (!ts) return;
     const inset = rightInsetPx();
     const usable = Math.max(ts.width() * 0.4, ts.width() - inset);
 
+    // 把「最新回放 K」钉到「面板左边」(宽度 = width - inset)
+    //   x(最新K) = width - (rightOffset + 0.5) * barSpacing - 1
+    // keepZoom=true 时沿用用户当前的缩放级别,只把最新 K 拉回面板左边
+    const focusToFront = (keepZoom: boolean) => {
+      const range = ts!.getVisibleLogicalRange();
+      const curSpacing = range ? ts!.width() / (range.to - range.from + 1) : 0;
+      const barSpacing = keepZoom && curSpacing >= 1 ? curSpacing : usable / REPLAY_VIEW_BARS;
+      const len = ts!.width() / barSpacing; // 可见槽位总数(右侧留白给面板)
+      const rightOffset = (inset - 1) / barSpacing - 0.5;
+      const to = rightOffset + lastIndex;
+      ts!.setVisibleLogicalRange({ from: to - len + 1, to });
+    };
+
     if (justEnteredReplay) {
       // 刚进入回放(原视图已在上面记下):
       //  把视图收到回放窗口末尾 —— 否则一万多根历史把回放挤成一条线,看不清最新 K
-      const barSpacing = usable / REPLAY_VIEW_BARS; // 每根 K 占的像素
-      const len = ts.width() / barSpacing; // 可见区间长度(右侧留白给面板)
-      const from = Math.max(0, lastIndex - REPLAY_VIEW_BARS);
-      ts.setVisibleLogicalRange({ from, to: from + len });
+      focusToFront(false);
       return;
     }
 
     // 回看态(cursor < frontier):不动视图,让用户自己看历史
     if (replayState.cursor < replayState.frontier) return;
 
-    // 前进:把「最新回放 K」钉在右侧固定位置(保持用户当前的缩放级别)
-    const range = ts.getVisibleLogicalRange();
-    if (!range) {
-      const barSpacing = usable / REPLAY_VIEW_BARS;
-      const len = ts.width() / barSpacing;
-      const from = Math.max(0, lastIndex - REPLAY_VIEW_BARS);
-      ts.setVisibleLogicalRange({ from, to: from + len });
+    // 用户主动点「跳到最新」→ 重新接管视角,把最新 K 钉回面板左边
+    if (replayState.jumpNonce !== jumpNonceRef.current) {
+      jumpNonceRef.current = replayState.jumpNonce;
+      focusToFront(true);
       return;
     }
-    const visibleBars = range.to - range.from; // 保持可见根数 → 缩放级别不变
-    const spacing = ts.width() / visibleBars; // setVisibleLogicalRange 会按这个算 barSpacing
-    const from = lastIndex - usable / spacing; // 让最新 K 落在「面板左边」
-    ts.setVisibleLogicalRange({ from, to: from + visibleBars });
+    jumpNonceRef.current = replayState.jumpNonce;
+
+    // 其它情况(前进/播放):**完全不碰视图** ——
+    //  · 用户没拖过 → 最新 K 天然停在钉住的位置,老 K 向左滚动
+    //  · 用户拖过   → 他的视角原样保留,新 K 继续往右长,图表不跳动
   }, [seriesVersion, buildFilteredSeries, calculateIndicators, rightInsetPx]);
 
   // Initialize chart
