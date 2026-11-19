@@ -7,6 +7,35 @@ import { SwingPoint, Timeframe } from "@/types/chart";
 const INDICATOR_ENABLED_KEY = 'terminal.indicator.enabled';
 const ICT_SETUP_CONFIG_KEY = 'terminal.ictSetup.config';
 
+// 一次性迁移标记 —— BOS/CHoCH 默认值由 false 改为 true
+const INDICATOR_ENABLED_VERSION_KEY = 'terminal.indicator.enabled.version';
+const INDICATOR_ENABLED_VERSION = '2';
+
+/**
+ * 一次性迁移：BOS / CHoCH 的默认值改成了 true。
+ *
+ * 老用户 localStorage 里存的是 false，会直接覆盖新默认值 → 首次加载时把这两个键
+ * 剔除掉，让它们回到新默认值（之后用户自己的选择正常持久化）。
+ */
+const migrateEnabled = (): void => {
+  try {
+    if (localStorage.getItem(INDICATOR_ENABLED_VERSION_KEY) === INDICATOR_ENABLED_VERSION) {
+      return;
+    }
+    localStorage.setItem(INDICATOR_ENABLED_VERSION_KEY, INDICATOR_ENABLED_VERSION);
+
+    const raw = localStorage.getItem(INDICATOR_ENABLED_KEY);
+    if (!raw) return;
+
+    const parsed = JSON.parse(raw) as Partial<IndicatorState>;
+    delete parsed.bos;
+    delete parsed.choch;
+    localStorage.setItem(INDICATOR_ENABLED_KEY, JSON.stringify(parsed));
+  } catch {
+    // 忽略解析/写入错误
+  }
+};
+
 /** 读取 ICT Setup 参数（局部覆盖默认值） */
 const loadIctSetupConfig = (): IctSetupConfig => {
   if (typeof window === 'undefined') return { ...DEFAULT_ICT_SETUP_CONFIG };
@@ -25,6 +54,7 @@ const loadIctSetupConfig = (): IctSetupConfig => {
 // 页面加载时读取 localStorage 覆盖默认 enabled
 const loadEnabled = (): IndicatorState => {
   if (typeof window === 'undefined') return {} as IndicatorState;
+  migrateEnabled();
   try {
     const raw = localStorage.getItem(INDICATOR_ENABLED_KEY);
     if (raw) {
@@ -189,8 +219,8 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
     swingRays: true,
     orderBlocks: false,
     fvg: false,
-    bos: false,
-    choch: false,
+    bos: true,
+    choch: true,
     liquidityZones: false,
     killzones: true,
     ote: true,

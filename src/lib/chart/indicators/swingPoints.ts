@@ -30,12 +30,7 @@ export function detectSwingPoints(
 ): SwingPointType[] {
   const result = detectPivots(candles, length, true, true);
 
-  return result.pivots.map((p) => ({
-    type: p.pivotType,
-    price: p.price,
-    time: p.time,
-    index: p.index,
-  }));
+  return toSwingPoints(result.pivots);
 }
 
 /**
@@ -56,15 +51,30 @@ export function detectPivotsFull(
   const result = detectPivots(candles, length, true, true);
 
   return {
-    pivots: result.pivots.map((p) => ({
-      type: p.pivotType,
-      price: p.price,
-      time: p.time,
-      index: p.index,
-    })),
+    pivots: toSwingPoints(result.pivots),
     missedPivots: result.missedPivots,
     ghostLevels: result.ghostLevels,
   };
+}
+
+/**
+ * RegularPivot → SwingPoint，并附带 HH/HL/LH/LL 分类
+ *
+ * 分类是「结构」信息的下游刚需：图上标记、结构位移判定、FVG tier 都要用。
+ * 所以在这里一次性算好，所有调用方拿到的都是已分类的摆动点。
+ *
+ * @param pivots - detectPivots 返回的 regular pivots（按时间升序）
+ */
+function toSwingPoints(pivots: RegularPivot[]): SwingPointType[] {
+  return classifyPivotsNew(pivots).map((c) => ({
+    type: c.pivotType,
+    price: c.price,
+    time: c.time,
+    index: c.index,
+    classification: c.classification,
+    firstOfType: c.firstOfType,
+    confirmIndex: c.confirmIndex,
+  }));
 }
 
 /**
@@ -88,6 +98,7 @@ export function detectAllPivots(
     price: p.price,
     time: p.time,
     index: p.index,
+    confirmIndex: p.confirmIndex,
   }));
 }
 
@@ -138,6 +149,8 @@ export type SwingClassification = "HH" | "HL" | "LH" | "LL";
  */
 export interface ClassifiedSwingPoint extends SwingPointType {
   classification: SwingClassification;
+  /** 是否是「同类中的第一个」摆动点（无前值可比，展示时应显示 "H" / "L"） */
+  firstOfType?: boolean;
 }
 
 /**
@@ -159,6 +172,7 @@ export function classifyPivots(
     time: p.time,
     index: p.index,
     barIndex: 0, // 旧接口不提供 barIndex
+    confirmIndex: p.confirmIndex ?? p.index,
   }));
 
   const classified = classifyPivotsNew(regularPivots);
@@ -169,6 +183,8 @@ export function classifyPivots(
     time: c.time,
     index: c.index,
     classification: c.classification,
+    firstOfType: c.firstOfType,
+    confirmIndex: c.confirmIndex,
   }));
 }
 
@@ -212,6 +228,8 @@ function filterBySwingPercent(
           time: pivot.time,
           index: pivot.index,
           classification: pivot.classification,
+          firstOfType: pivot.firstOfType,
+          confirmIndex: pivot.confirmIndex,
         });
       } else {
         const change = Math.abs(pivot.price - lastHighPrice) / lastHighPrice * 100;
@@ -222,6 +240,7 @@ function filterBySwingPercent(
             time: pivot.time,
             index: pivot.index,
             classification: pivot.classification,
+            firstOfType: pivot.firstOfType,
           });
         }
       }
@@ -234,6 +253,8 @@ function filterBySwingPercent(
           time: pivot.time,
           index: pivot.index,
           classification: pivot.classification,
+          firstOfType: pivot.firstOfType,
+          confirmIndex: pivot.confirmIndex,
         });
       } else {
         const change = Math.abs(pivot.price - lastLowPrice) / lastLowPrice * 100;
@@ -244,6 +265,7 @@ function filterBySwingPercent(
             time: pivot.time,
             index: pivot.index,
             classification: pivot.classification,
+            firstOfType: pivot.firstOfType,
           });
         }
       }
@@ -256,3 +278,5 @@ function filterBySwingPercent(
 
 // 重新导出类型
 export type { MissedPivot, GhostLevel, PivotResult };
+export { swingLabel } from "./pivotDetector";
+export type { SwingLabel } from "./pivotDetector";

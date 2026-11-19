@@ -33,7 +33,8 @@ import { OBPanel } from "./OBPanel";
 import { OrderCancelOverlay } from "./OrderCancelOverlay";
 import { fetchKlines } from "@/lib/binance/api";
 import { BinanceWebSocket } from "@/lib/binance/websocket";
-import { detectSwingPoints, detectPivotsFull, detectAllPivots, classifyPivots, findLongLegSwingIndices, LONG_LEG_HH_COLOR, LONG_LEG_LL_COLOR } from "@/lib/chart/indicators/swingPoints";
+import { detectSwingPoints, detectPivotsFull, detectAllPivots, classifyPivots, findLongLegSwingIndices, swingLabel, LONG_LEG_HH_COLOR, LONG_LEG_LL_COLOR } from "@/lib/chart/indicators/swingPoints";
+import type { SwingLabel } from "@/lib/chart/indicators/swingPoints";
 import { detectOrderBlocks } from "@/lib/chart/indicators/orderBlocks";
 import { detectEngulfingPinbar } from "@/lib/chart/indicators/engulfingPinbar";
 import { detectFVGs } from "@/lib/chart/indicators/fvg";
@@ -58,8 +59,9 @@ import {
   SwingRayPrimitive,
   SWING_RAY_COUNT,
   IctSetupPrimitive,
+  StructurePrimitive,
 } from "@/lib/chart/primitives";
-import type { SwingRay } from "@/lib/chart/primitives";
+import type { SwingRay, StructureEvent, SwingLeg } from "@/lib/chart/primitives";
 import { computePriceBand } from "@/lib/chart/priceBand";
 import { loadMonthlyCandles } from "@/lib/chart/priceBandLoader";
 import { detectOTEZones } from "@/lib/chart/indicators/ote";
@@ -87,6 +89,32 @@ import type { FibLevel } from "@/lib/chart/primitives";
  * - REPLAY_VIEW_BARS:进入回放时可见的 K 数量(≈一屏,能看清蜡烛)
  */
 const REPLAY_VIEW_BARS = 150;
+
+/**
+ * 摆动点(HH/HL/LH/LL)标签配色 —— 蜡烛图 marker 与折线图 marker 共用同一套规则。
+ *
+ * 配色优先级:
+ *  1) 长 leg 端点(相邻摆动点价差 > 1500 点) —— HH 蓝、LL 橙(优先级最高)
+ *  2) HH / HL —— 绿(多头结构);LH / LL —— 红(空头结构)
+ *  3) H / L(同类中的第一个,或没有分类) —— 中性灰
+ */
+const SWING_COLOR_BULLISH = "#22c55e";
+const SWING_COLOR_BEARISH = "#ef4444";
+const SWING_COLOR_NEUTRAL = "#94a3b8";
+
+function swingLabelColor(
+  label: SwingLabel,
+  isLongLeg: boolean,
+  type: "high" | "low"
+): string {
+  // 长 leg 端点配色优先(高蓝、低橙)
+  if (isLongLeg) {
+    return type === "high" ? LONG_LEG_HH_COLOR : LONG_LEG_LL_COLOR;
+  }
+  if (label === "HH" || label === "HL") return SWING_COLOR_BULLISH;
+  if (label === "LH" || label === "LL") return SWING_COLOR_BEARISH;
+  return SWING_COLOR_NEUTRAL;
+}
 
 /**
  * 收集 FVG/OB 的 3 档 fib 水平位(画在图上的水平虚线)。
@@ -288,6 +316,8 @@ export function TradingChart() {
   const priceBandPrimitiveRef = useRef<PriceBandPrimitive | null>(null);
   // 最新 HH / LL 向左延伸的虚射线
   const swingRayPrimitiveRef = useRef<SwingRayPrimitive | null>(null);
+  // 市场结构层:BOS / CHoCH 结构线 + swing leg 连线
+  const structurePrimitiveRef = useRef<StructurePrimitive | null>(null);
 
   // Trading price lines
   const priceLinesRef = useRef<IPriceLine[]>([]);
@@ -373,6 +403,8 @@ export function TradingChart() {
     setFVGs,
     setBOSSignals,
     setCHoCHSignals,
+    bosSignals,
+    chochSignals,
     setLiquidityZones,
     setIctSetups,
     setOTEZones,
@@ -606,9 +638,11 @@ export function TradingChart() {
 
       const swingLength = getSwingLookback(timeframe);
 
-      // Swing points (LuxAlgo 风格,按 TF 缩放 length) + 分类为 HH/HL/LH/LL
+      // Swing points (LuxAlgo 风格,按 TF 缩放 length)
+      // detectPivotsFull 返回的 pivots 已带 HH/HL/LH/LL 分类与 confirmIndex,
+      // 不再走旧的 classifyPivots 包装(它会额外做 0.5% 摆动幅度过滤并丢掉 confirmIndex)
       const pivotResult = detectPivotsFull(candleData, swingLength);
-      const classifiedPivots = classifyPivots(pivotResult.pivots);
+      const classifiedPivots = pivotResult.pivots;
       setSwingPoints(classifiedPivots);
       setMissedPivots(pivotResult.missedPivots);
       setGhostLevels(pivotResult.ghostLevels);
@@ -624,7 +658,9 @@ export function TradingChart() {
       }
 
       // FVG 始终计算(面板需要数据)— tier 基于 swing points
-      const newFvgs = detectFVGs(candleData, { swingPoints });
+      // 注意:必须用本帧刚算出的 classifiedPivots,
+      // 用 useCallback 闭包里的旧 store 值会永远慢一帧(FVG tier 全错)
+      const newFvgs = detectFVGs(candleData, { swingPoints: classifiedPivots });
       setFVGs(newFvgs);
       // 保存到多周期 FVG 存储（只保存最新的一个）
       const targetTimeframes2 = ['5m', '15m', '1h', '4h', '1d'] as const;
@@ -633,10 +669,11 @@ export function TradingChart() {
       }
 
       // BOS/CHoCH 始终计算（MTF Trend 面板需要数据）
-      const lastPriceForStructure = candleData[candleData.length - 1].close;
-      const { bos, choch } = detectStructure(pivotResult.pivots, lastPriceForStructure);
-      if (enabled.bos) setBOSSignals(bos);
-      if (enabled.choch) setCHoCHSignals(choch);
+      // 新签名:detectStructure(candles, swingPoints) —— 用带分类的摆动点做判定
+      const { bos, choch } = detectStructure(candleData, classifiedPivots);
+      // 开关关闭时清空残留信号(最多保留 60 个 BOS / 20 个 CHoCH)
+      setBOSSignals(enabled.bos ? bos.slice(-60) : []);
+      setCHoCHSignals(enabled.choch ? choch.slice(-20) : []);
 
       // 计算并保存多周期趋势
       const targetTimeframes4 = ['5m', '15m', '1h', '4h', '1d'] as const;
@@ -1005,12 +1042,14 @@ export function TradingChart() {
     const priceBandPrimitive = new PriceBandPrimitive();
     const swingRayPrimitive = new SwingRayPrimitive();
     const ictSetupPrimitive = new IctSetupPrimitive();
+    const structurePrimitive = new StructurePrimitive();
 
     // Attach primitives in order (bottom layer first)
     candleSeries.attachPrimitive(killzonePrimitive);
     candleSeries.attachPrimitive(equilibriumPrimitive);  // EQ 背景：在 killzone 之后、OTE 之前
     candleSeries.attachPrimitive(priceBandPrimitive);    // 价格带：最底层,不遮挡 K 线
     candleSeries.attachPrimitive(swingRayPrimitive);     // 最新 HH/LL 向左虚射线
+    candleSeries.attachPrimitive(structurePrimitive);    // 市场结构：BOS / CHoCH + swing leg
     candleSeries.attachPrimitive(otePrimitive);
     candleSeries.attachPrimitive(ictSetupPrimitive); // ICT Setup：POI / 入场 / 止损 / 目标
     candleSeries.attachPrimitive(breakerBlockPrimitive);
@@ -1034,6 +1073,7 @@ export function TradingChart() {
     equilibriumPrimitiveRef.current = equilibriumPrimitive;
     priceBandPrimitiveRef.current = priceBandPrimitive;
     swingRayPrimitiveRef.current = swingRayPrimitive;
+    structurePrimitiveRef.current = structurePrimitive;
 
     // Handle resize
     const handleResize = () => {
@@ -1321,7 +1361,8 @@ export function TradingChart() {
           setMultiTimeframeOB(tf, sortedObs[0] || null);
 
           // Trend
-          const { bos, choch } = detectStructure(swings, lastPrice);
+          // 新签名:detectStructure(candles, swingPoints) —— 传入该周期的 K 线数组
+          const { bos, choch } = detectStructure(data, swings);
           let trend: 'bullish' | 'bearish' | 'neutral' = 'neutral';
           if (choch.length > 0) {
             trend = choch[choch.length - 1].type;
@@ -1704,15 +1745,14 @@ export function TradingChart() {
       const longLegIdx = findLongLegSwingIndices(swingPoints);
       for (const sp of swingPoints) {
         const isLongLeg = longLegIdx.has(sp.index);
-        const color = isLongLeg
-          ? sp.type === "high" ? LONG_LEG_HH_COLOR : LONG_LEG_LL_COLOR
-          : sp.type === "high" ? "#22c55e" : "#ef4444";
+        // 标签统一走 swingLabel:H/HL/LH/LL/H,L（同类中的第一个显示 H/L）
+        const label = swingLabel(sp);
         markers.push({
           time: sp.time as Time,
           position: sp.type === "high" ? "aboveBar" : "belowBar",
-          color,
+          color: swingLabelColor(label, isLongLeg, sp.type),
           shape: sp.type === "high" ? "arrowDown" : "arrowUp",
-          text: sp.type === "high" ? "HH" : "LL",
+          text: label,
         });
       }
     }
@@ -1765,14 +1805,68 @@ export function TradingChart() {
     // 从最近往前取(倒序遍历,age 从 0 开始递增)
     for (let i = 0; i < Math.min(highs.length, SWING_RAY_COUNT); i++) {
       const sp = highs[highs.length - 1 - i];
-      rays.push({ label: "HH", price: sp.price, time: sp.time, age: i });
+      // 标签用真实的结构分类(HH/LH/H),不再写死
+      rays.push({ label: swingLabel(sp), price: sp.price, time: sp.time, age: i });
     }
     for (let i = 0; i < Math.min(lows.length, SWING_RAY_COUNT); i++) {
       const sp = lows[lows.length - 1 - i];
-      rays.push({ label: "LL", price: sp.price, time: sp.time, age: i });
+      // 标签用真实的结构分类(HL/LL/L),不再写死
+      rays.push({ label: swingLabel(sp), price: sp.price, time: sp.time, age: i });
     }
     primitive.setData(rays);
   }, [swingPoints, enabled.swingRays]);
+
+  // 市场结构层:BOS / CHoCH 结构线 + 相邻摆动点连线
+  //
+  // 走 lightweight-charts 的 Primitive 管线（而不是 absolute 定位的 SVG 覆盖层）:
+  // 价格轴是 autoScale 的,坐标必须每帧重算 —— SVG 覆盖层拿到的永远是过期坐标,
+  // 线会飞到屏幕外(实测同一条线 y=-2976 而真实位置 y=396)。
+  useEffect(() => {
+    const primitive = structurePrimitiveRef.current;
+    if (!primitive) return;
+
+    const events: StructureEvent[] = [];
+    if (enabled.bos) {
+      for (const s of bosSignals) {
+        events.push({
+          kind: "bos",
+          direction: s.type,
+          level: s.level,
+          breakTime: s.time,
+          swingTime: s.swingPoint.time,
+        });
+      }
+    }
+    if (enabled.choch) {
+      for (const s of chochSignals) {
+        events.push({
+          kind: "choch",
+          direction: s.type,
+          level: s.level,
+          breakTime: s.time,
+          swingTime: s.swingPoint.time,
+        });
+      }
+    }
+    primitive.setEvents(events);
+
+    // Swing legs —— 相邻两个摆动点之间的连线
+    const legs: SwingLeg[] = [];
+    if (enabled.swingPoints && swingPoints.length > 1) {
+      for (let i = 1; i < swingPoints.length; i++) {
+        const prev = swingPoints[i - 1];
+        const curr = swingPoints[i];
+        legs.push({
+          time1: prev.time,
+          price1: prev.price,
+          time2: curr.time,
+          price2: curr.price,
+          direction: curr.price > prev.price ? "up" : "down",
+        });
+      }
+    }
+    primitive.setLegs(legs);
+  }, [bosSignals, chochSignals, swingPoints, enabled.bos, enabled.choch, enabled.swingPoints]);
 
   // Update Swing Points Markers (折线图模式) - 使用 detectAllPivots 标记所有波峰波谷
   useEffect(() => {
@@ -1792,28 +1886,30 @@ export function TradingChart() {
         // 高线系列标记 HH/LH (局部高点)
         const highMarkers: SeriesMarker<Time>[] = classifiedPivots
           .filter((sp) => sp.type === "high")
-          .map((sp) => ({
-            time: sp.time as Time,
-            position: "inBar" as const,
-            color: longLegIdx.has(sp.index)
-              ? LONG_LEG_HH_COLOR
-              : sp.classification === "HH" ? "#22c55e" : "#f97316", // HH=绿色, LH=橙色
-            shape: "circle" as const,
-            text: sp.classification, // 显示 HH 或 LH
-          }));
+          .map((sp) => {
+            const label = swingLabel(sp);
+            return {
+              time: sp.time as Time,
+              position: "inBar" as const,
+              color: swingLabelColor(label, longLegIdx.has(sp.index), sp.type),
+              shape: "circle" as const,
+              text: label, // 显示 HH / LH / H
+            };
+          });
 
         // 低线系列标记 HL/LL (局部低点)
         const lowMarkers: SeriesMarker<Time>[] = classifiedPivots
           .filter((sp) => sp.type === "low")
-          .map((sp) => ({
-            time: sp.time as Time,
-            position: "inBar" as const,
-            color: longLegIdx.has(sp.index)
-              ? LONG_LEG_LL_COLOR
-              : sp.classification === "HL" ? "#22c55e" : "#f97316", // HL=绿色, LL=橙色
-            shape: "circle" as const,
-            text: sp.classification, // 显示 HL 或 LL
-          }));
+          .map((sp) => {
+            const label = swingLabel(sp);
+            return {
+              time: sp.time as Time,
+              position: "inBar" as const,
+              color: swingLabelColor(label, longLegIdx.has(sp.index), sp.type),
+              shape: "circle" as const,
+              text: label, // 显示 HL / LL / L
+            };
+          });
 
         highLineSeriesRef.current.setMarkers(highMarkers);
         lowLineSeriesRef.current.setMarkers(lowMarkers);

@@ -27,6 +27,11 @@ export interface RegularPivot {
   time: number;
   index: number;
   barIndex: number; // pivot 相对于当前的位置
+  /**
+   * 该 pivot 被「右侧确认」的下标 = index + length - 1。
+   * 右窗口最后一根 K 收盘后，这个 pivot 才真正成立（此前的尾部 pivot 可能随新数据消失）。
+   */
+  confirmIndex: number;
 }
 
 /**
@@ -194,6 +199,8 @@ export function detectPivots(
           time: current.time,
           index: i,
           barIndex: pivotBarIndex,
+          // 右侧窗口 = candles[i+1 .. i+length-1]，最后一根收盘后该 pivot 才成立
+          confirmIndex: i + length - 1,
         });
       }
 
@@ -284,6 +291,8 @@ export function detectPivots(
           time: current.time,
           index: i,
           barIndex: pivotBarIndex,
+          // 右侧窗口 = candles[i+1 .. i+length-1]，最后一根收盘后该 pivot 才成立
+          confirmIndex: i + length - 1,
         });
       }
 
@@ -435,10 +444,39 @@ function ta_pivotlow(candles: Candle[], i: number, length: number): number | nul
 export type SwingClassification = "HH" | "HL" | "LH" | "LL";
 
 /**
+ * 摆动点的展示标签
+ *
+ * - 同类中的第一个（firstOfType）没有前值可比，classification 是硬编码的默认值，
+ *   展示时不能拿它当结构读数 → 显示 "H" / "L"
+ * - 其余按真实分类显示 "HH" / "HL" / "LH" / "LL"
+ */
+export type SwingLabel = SwingClassification | "H" | "L";
+
+/**
+ * 取摆动点的展示标签
+ *
+ * @param sp - 摆动点（需带 classification / firstOfType）
+ */
+export function swingLabel(sp: {
+  type: "high" | "low";
+  classification?: SwingClassification;
+  firstOfType?: boolean;
+}): SwingLabel {
+  if (sp.firstOfType) return sp.type === "high" ? "H" : "L";
+  if (sp.classification) return sp.classification;
+  return sp.type === "high" ? "H" : "L";
+}
+
+/**
  * 带分类的 Swing Point
  */
 export interface ClassifiedPivot extends RegularPivot {
   classification: SwingClassification;
+  /**
+   * 是否是「同类中的第一个」（高点的第一个 / 低点的第一个）。
+   * 这类点没有前值可比，classification 是硬编码的默认值，展示时应显示 "H" / "L"。
+   */
+  firstOfType?: boolean;
 }
 
 /**
@@ -451,6 +489,7 @@ export function classifyPivots(pivots: RegularPivot[]): ClassifiedPivot[] {
     return pivots.map((p) => ({
       ...p,
       classification: p.pivotType === "high" ? "LH" : "LL" as SwingClassification,
+      firstOfType: true,
     }));
   }
 
@@ -460,28 +499,22 @@ export function classifyPivots(pivots: RegularPivot[]): ClassifiedPivot[] {
 
   let lastHighPrice = 0;
   let lastLowPrice = Infinity;
-  let lastHighClassification: SwingClassification | null = null;
-  let lastLowClassification: SwingClassification | null = null;
 
   for (const pivot of pivots) {
     if (pivot.pivotType === "high") {
       if (lastHighPrice === 0) {
-        result.push({ ...pivot, classification: "LH" });
-        lastHighClassification = "LH";
+        result.push({ ...pivot, classification: "LH", firstOfType: true });
       } else {
         const isHH = pivot.price > lastHighPrice;
         result.push({ ...pivot, classification: isHH ? "HH" : "LH" });
-        lastHighClassification = isHH ? "HH" : "LH";
       }
       lastHighPrice = pivot.price;
     } else {
       if (lastLowPrice === Infinity) {
-        result.push({ ...pivot, classification: "LL" });
-        lastLowClassification = "LL";
+        result.push({ ...pivot, classification: "LL", firstOfType: true });
       } else {
         const isHL = pivot.price > lastLowPrice;
         result.push({ ...pivot, classification: isHL ? "HL" : "LL" });
-        lastLowClassification = isHL ? "HL" : "LL";
       }
       lastLowPrice = pivot.price;
     }

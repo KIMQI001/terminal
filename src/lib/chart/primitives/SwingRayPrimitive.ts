@@ -6,7 +6,8 @@
  * - 从每个 swing low(记作 LL)的价格水平,向左画一条蓝色虚射线到图表左边缘
  *
  * 所有线都画在 pane 的最底层(zOrder='bottom'),不遮挡 K 线;
- * 左端各带一个 "HH" / "LL" 标签(与图上 swing point 标记的文字一致),用来区分颜色含义。
+ * 左端各带一个 "HH" / "HL" / "LH" / "LL" / "H" / "L" 标签(与图上 swing point 标记的文字一致),
+ * 用来区分颜色含义(高点系橙、低点系蓝)。
  * 越旧的射线透明度越低,最近的最高 —— 避免多条同色线糊成一片。
  */
 
@@ -27,8 +28,13 @@ export const SWING_RAY_COUNT = 5;
 
 /** 一条射线 —— 从某个 swing 点向左延伸的水平虚线 */
 export interface SwingRay {
-  /** "HH" = swing high,"LL" = swing low */
-  label: "HH" | "LL";
+  /**
+   * 摆动点分类：
+   * - "HH" = swing high,"LL" = swing low
+   * - "HL" / "LH" = 分类后的次级摆动点
+   * - "H" / "L" = 未分类的原始摆动点
+   */
+  label: "HH" | "HL" | "LH" | "LL" | "H" | "L";
   /** 射线所在的价格水平(swing 点的价格) */
   price: number;
   /** swing 点所在时间(用于算射线的右端 x) */
@@ -43,11 +49,24 @@ interface SwingRayRendererData {
   timeToCoordinate: (time: Time) => Coordinate | null;
 }
 
+/**
+ * 射线配色 —— 保持「高点系橙、低点系蓝」家族配色：
+ * - HH / LH / H（高点系）→ 亮橙
+ * - LL / HL / L（低点系）→ 亮蓝
+ */
 const COLORS = {
-  /** LL —— 亮蓝 */
-  LL: { r: 0, g: 191, b: 255 },
   /** HH —— 亮橙 */
   HH: { r: 255, g: 149, b: 0 },
+  /** LH —— 亮橙 */
+  LH: { r: 255, g: 149, b: 0 },
+  /** H —— 亮橙 */
+  H: { r: 255, g: 149, b: 0 },
+  /** LL —— 亮蓝 */
+  LL: { r: 0, g: 191, b: 255 },
+  /** HL —— 亮蓝 */
+  HL: { r: 0, g: 191, b: 255 },
+  /** L —— 亮蓝 */
+  L: { r: 0, g: 191, b: 255 },
 } as const;
 
 /** 最新的射线最不透明,每旧一条衰减一档 */

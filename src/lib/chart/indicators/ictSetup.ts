@@ -15,9 +15,10 @@
  * 设计说明（为什么自己实现而不用现成检测器）：
  * - `detectLiquidityZones`(liquidity.ts) 会把 `swept:true` 的池直接过滤掉，
  *   而状态机最需要的恰恰是「扫荡事件」，所以这里自己分组并保留已扫状态。
- * - `detectStructure`(structure.ts) 用的是整个数组共用的 currentTrend，
- *   且 BOS.time 是「被突破 swing 的时间」而非突破时刻，
- *   所以位移判定这里基于 swingPoints + candles 自行计算，能给出事件时刻。
+ * - `detectStructure`(structure.ts) 走的是「收盘突破 + 趋势状态机」口径（趋势逐段推进，
+ *   不是全局统计），它的 BOS.time 就是突破那根 K 的时间；但本引擎仍刻意不直接用它：
+ *   位移判定需要的是「扫荡之后、限定 K 线窗口内」的局部反向位移，
+ *   所以这里基于 swingPoints + candles 自行计算，能给出事件时刻。
  *
  * 纯函数，无 React / store 依赖，可在 Node 里直接单测。
  */

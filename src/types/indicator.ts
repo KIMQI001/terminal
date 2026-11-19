@@ -62,16 +62,24 @@ export interface Rejection {
 
 export interface BOS {
   type: "bullish" | "bearish";
+  /** 被突破的结构位价格 */
   level: number;
+  /** 突破发生的那根 K 的时间（收盘价越过结构位的那一刻） */
   time: number;
+  /** 被突破的那个摆动点 */
   swingPoint: SwingPoint;
 }
 
 export interface CHoCH {
   type: "bullish" | "bearish";
+  /** 被突破的结构位价格 */
   level: number;
+  /** 突破发生的那根 K 的时间（收盘价越过结构位的那一刻） */
   time: number;
+  /** 突破前的趋势方向 */
   previousTrend: "up" | "down";
+  /** 被突破的那个摆动点 */
+  swingPoint: SwingPoint;
 }
 
 export interface LiquidityZone {

@@ -11,28 +11,11 @@ interface ICTOverlayProps {
   containerRef: React.RefObject<HTMLDivElement | null>;
 }
 
-interface RenderedLine {
-  x1: number;
-  y: number;
-  x2: number;
-  label: string;
-  type: "bos" | "choch";
-  direction: "bullish" | "bearish";
-}
-
 interface RenderedInducement {
   x: number;
   y: number;
   type: "bullish" | "bearish";
   triggered: boolean;
-}
-
-interface RenderedLeg {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  direction: "up" | "down";
 }
 
 interface RenderedMissedPivot {
@@ -51,12 +34,10 @@ interface RenderedGhostLevel {
 }
 
 export function ICTOverlay({ chartRef, seriesRef, containerRef }: ICTOverlayProps) {
-  const [lines, setLines] = useState<RenderedLine[]>([]);
   const [inducements, setRenderedInducements] = useState<RenderedInducement[]>([]);
-  const [legs, setLegs] = useState<RenderedLeg[]>([]);
   const [missedPivots, setMissedPivots] = useState<RenderedMissedPivot[]>([]);
   const [ghostLevels, setGhostLevels] = useState<RenderedGhostLevel[]>([]);
-  const { enabled, bosSignals, chochSignals, inducements: inducementSignals, swingPoints, missedPivots: missedPivotsData, ghostLevels: ghostLevelsData } = useIndicatorStore();
+  const { enabled, inducements: inducementSignals, missedPivots: missedPivotsData, ghostLevels: ghostLevelsData } = useIndicatorStore();
   const { candles } = useChartStore();
 
   // Convert BOS/CHoCH signals to screen coordinates
@@ -65,52 +46,14 @@ export function ICTOverlay({ chartRef, seriesRef, containerRef }: ICTOverlayProp
 
     const timeScale = chartRef.current.timeScale();
     const series = seriesRef.current;
-    const renderedLines: RenderedLine[] = [];
 
-    // Get chart width for extending lines
-    const chartWidth = timeScale.width();
-
-    // Render BOS signals
-    if (enabled.bos) {
-      for (const bos of bosSignals) {
-        const y = series.priceToCoordinate(bos.level);
-        const x1 = timeScale.timeToCoordinate(bos.swingPoint.time as Time);
-        const x2 = timeScale.timeToCoordinate(bos.time as Time);
-
-        if (y !== null && x1 !== null && x2 !== null) {
-          renderedLines.push({
-            x1,
-            y,
-            x2: Math.min(x2 + 50, chartWidth), // Extend slightly past break point
-            label: "BOS",
-            type: "bos",
-            direction: bos.type,
-          });
-        }
-      }
-    }
-
-    // Render CHoCH signals
-    if (enabled.choch) {
-      for (const choch of chochSignals) {
-        const y = series.priceToCoordinate(choch.level);
-        const x1 = timeScale.timeToCoordinate(choch.time as Time);
-
-        if (y !== null && x1 !== null) {
-          // CHoCH extends to chart edge
-          renderedLines.push({
-            x1: x1 - 30, // Start slightly before the break
-            y,
-            x2: chartWidth,
-            label: "CHoCH",
-            type: "choch",
-            direction: choch.type,
-          });
-        }
-      }
-    }
-
-    setLines(renderedLines);
+    // ── BOS / CHoCH 结构线 + swing legs ─────────────────
+    //
+    // 已经移到 StructurePrimitive 绘制（见 src/lib/chart/primitives/StructurePrimitive.ts）。
+    // 原因：SVG 覆盖层算出来的价格坐标会过期 —— 价格轴是 autoScale 的，
+    // K 线刷新/缩放之后价格区间变了，但 SVG 只在 React effect 里更新一次，
+    // 结果同一条线渲染在 y=-2976（真实位置 y=396），整条线飞到屏幕外。
+    // Primitive 走 lightweight-charts 自己的绘制管线，每帧重算坐标，一定跟 K 线对齐。
 
     // Render Inducements
     const renderedInducements: RenderedInducement[] = [];
@@ -168,28 +111,7 @@ export function ICTOverlay({ chartRef, seriesRef, containerRef }: ICTOverlayProp
 
     setMissedPivots(renderedMissedPivots);
     setGhostLevels(renderedGhostLevels);
-
-    // Render Swing Point Legs
-    const renderedLegs: RenderedLeg[] = [];
-    if (enabled.swingPoints && swingPoints.length > 1) {
-      for (let i = 1; i < swingPoints.length; i++) {
-        const prev = swingPoints[i - 1];
-        const curr = swingPoints[i];
-
-        const x1 = timeScale.timeToCoordinate(prev.time as Time);
-        const y1 = series.priceToCoordinate(prev.price);
-        const x2 = timeScale.timeToCoordinate(curr.time as Time);
-        const y2 = series.priceToCoordinate(curr.price);
-
-        if (x1 !== null && y1 !== null && x2 !== null && y2 !== null) {
-          // Direction based on price movement
-          const direction = curr.price > prev.price ? "up" : "down";
-          renderedLegs.push({ x1, y1, x2, y2, direction });
-        }
-      }
-    }
-    setLegs(renderedLegs);
-  }, [chartRef, seriesRef, containerRef, enabled.bos, enabled.choch, enabled.inducement, enabled.swingPoints, bosSignals, chochSignals, inducementSignals, swingPoints, missedPivotsData, ghostLevelsData]);
+  }, [chartRef, seriesRef, containerRef, enabled.inducement, enabled.swingPoints, inducementSignals, missedPivotsData, ghostLevelsData]);
 
   // Update on data changes or scroll/zoom
   useEffect(() => {
@@ -212,37 +134,13 @@ export function ICTOverlay({ chartRef, seriesRef, containerRef }: ICTOverlayProp
     updateLines();
   }, [candles, updateLines]);
 
-  if (lines.length === 0 && inducements.length === 0 && legs.length === 0 && missedPivots.length === 0 && ghostLevels.length === 0) return null;
+  if (inducements.length === 0 && missedPivots.length === 0 && ghostLevels.length === 0) return null;
 
   return (
     <svg
       className="absolute inset-0 pointer-events-none"
       style={{ width: "100%", height: "100%" }}
     >
-      <defs>
-        {/* BOS dashed line pattern */}
-        <pattern id="bos-dash" patternUnits="userSpaceOnUse" width="8" height="1">
-          <line x1="0" y1="0" x2="4" y2="0" stroke="currentColor" strokeWidth="1" />
-        </pattern>
-      </defs>
-
-      {/* Swing Point Legs */}
-      {legs.map((leg, index) => {
-        const color = leg.direction === "up" ? "#22c55e" : "#ef4444";
-        return (
-          <line
-            key={`leg-${index}`}
-            x1={leg.x1}
-            y1={leg.y1}
-            x2={leg.x2}
-            y2={leg.y2}
-            stroke={color}
-            strokeWidth={2}
-            opacity={0.7}
-          />
-        );
-      })}
-
       {/* Ghost Levels */}
       {ghostLevels.map((gl, index) => (
         <line
@@ -273,70 +171,6 @@ export function ICTOverlay({ chartRef, seriesRef, containerRef }: ICTOverlayProp
           </text>
         </g>
       ))}
-
-      {lines.map((line, index) => {
-        const isBullish = line.direction === "bullish";
-        const isBOS = line.type === "bos";
-
-        // Colors: BOS uses blue, CHoCH uses purple (more attention-grabbing)
-        const color = isBOS
-          ? (isBullish ? "#3b82f6" : "#ef4444") // Blue/Red for BOS
-          : (isBullish ? "#22c55e" : "#a855f7"); // Green/Purple for CHoCH
-
-        const strokeDasharray = isBOS ? "6,4" : "none";
-        const strokeWidth = isBOS ? 1 : 2;
-
-        return (
-          <g key={`${line.type}-${index}`}>
-            {/* Main line */}
-            <line
-              x1={line.x1}
-              y1={line.y}
-              x2={line.x2}
-              y2={line.y}
-              stroke={color}
-              strokeWidth={strokeWidth}
-              strokeDasharray={strokeDasharray}
-              opacity={0.8}
-            />
-
-            {/* Label background */}
-            <rect
-              x={line.x2 - 35}
-              y={line.y - 9}
-              width={35}
-              height={16}
-              rx={3}
-              fill={color}
-              opacity={0.9}
-            />
-
-            {/* Label text */}
-            <text
-              x={line.x2 - 17}
-              y={line.y + 3}
-              textAnchor="middle"
-              fill="white"
-              fontSize="10"
-              fontWeight="500"
-              fontFamily="monospace"
-            >
-              {line.label}
-            </text>
-
-            {/* Break point marker (small circle) */}
-            {isBOS && (
-              <circle
-                cx={line.x2 - 50}
-                cy={line.y}
-                r={3}
-                fill={color}
-                opacity={0.8}
-              />
-            )}
-          </g>
-        );
-      })}
 
       {/* Inducement markers */}
       {inducements.map((ind, index) => {
