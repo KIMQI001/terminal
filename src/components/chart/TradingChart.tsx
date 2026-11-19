@@ -24,6 +24,7 @@ import { ReplayPanel } from "@/components/replay/ReplayPanel";
 import { MeasurementTool } from "./MeasurementTool";
 import { ICTOverlay } from "./ICTOverlay";
 import { OTEPanel } from "./OTEPanel";
+import { ICTSetupPanel } from "./ICTSetupPanel";
 import { FVGPanel } from "./FVGPanel";
 import { DailyKPanel } from "./DailyKPanel";
 import { LongestSwingPanel } from "./LongestSwingPanel";
@@ -56,6 +57,7 @@ import {
   PriceBandPrimitive,
   SwingRayPrimitive,
   SWING_RAY_COUNT,
+  IctSetupPrimitive,
 } from "@/lib/chart/primitives";
 import type { SwingRay } from "@/lib/chart/primitives";
 import { computePriceBand } from "@/lib/chart/priceBand";
@@ -67,6 +69,7 @@ import { detectEquilibriumZones } from "@/lib/chart/indicators/equilibrium";
 import { computeInitialBalance } from "@/lib/chart/indicators/initialBalance";
 import { computeAsiaBias } from "@/lib/chart/indicators/asiaBias";
 import { computeEuropeBias } from "@/lib/chart/indicators/europeBias";
+import { buildIctSetups } from "@/lib/chart/indicators/ictSetup";
 import {
   filterVisibleItems,
   maskHiddenVolume,
@@ -277,6 +280,7 @@ export function TradingChart() {
   const liquidityPrimitiveRef = useRef<LiquidityPrimitive | null>(null);
   const killzonePrimitiveRef = useRef<KillzonePrimitive | null>(null);
   const otePrimitiveRef = useRef<OTEPrimitive | null>(null);
+  const ictSetupPrimitiveRef = useRef<IctSetupPrimitive | null>(null);
   const breakerBlockPrimitiveRef = useRef<BreakerBlockPrimitive | null>(null);
   const liquidationHillPrimitiveRef = useRef<LiquidationHillPrimitive | null>(null);
   const equilibriumPrimitiveRef = useRef<EquilibriumPrimitive | null>(null);
@@ -357,6 +361,8 @@ export function TradingChart() {
     proximitySignals,
     fvgs,
     liquidityZones,
+    ictSetups,
+    ictSetupConfig,
     oteZones,
     breakerBlocks,
     equilibriumLevels,
@@ -368,6 +374,7 @@ export function TradingChart() {
     setBOSSignals,
     setCHoCHSignals,
     setLiquidityZones,
+    setIctSetups,
     setOTEZones,
     setBreakerBlocks,
     setInducements,
@@ -648,6 +655,14 @@ export function TradingChart() {
         setLiquidityZones(zones);
       }
 
+      // ICT Setup 状态机（流动性池 → 扫荡 → 位移 → 回踩 POI → 可入场）
+      // 独立计算，只受 ICT Setup 开关控制，不依赖其他指标的 enabled 门控
+      if (enabled.ictSetup) {
+        setIctSetups(buildIctSetups(candleData, pivotResult.pivots, ictSetupConfig));
+      } else {
+        setIctSetups([]);
+      }
+
       // OTE zones 始终计算（面板需要数据）
       const lastPrice = candleData[candleData.length - 1].close;
       const otes = detectOTEZones(pivotResult.pivots, lastPrice, candleData);
@@ -710,7 +725,7 @@ export function TradingChart() {
         fibLevelPrimitiveRef.current.setData(fibLevels, activeObFibRatio);
       }
     },
-    [enabled, timeframe, setSwingPoints, setMissedPivots, setGhostLevels, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setOTEZones, setBreakerBlocks, setInducements, setEquilibriumLevels, setProximitySignals, setFibLevels, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend, setMultiTimeframeEquilibrium]
+    [enabled, timeframe, ictSetupConfig, setSwingPoints, setMissedPivots, setGhostLevels, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setIctSetups, setOTEZones, setBreakerBlocks, setInducements, setEquilibriumLevels, setProximitySignals, setFibLevels, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend, setMultiTimeframeEquilibrium]
   );
 
   // 序列数据版本号变化 → 重建序列 + 重算指标
@@ -989,6 +1004,7 @@ export function TradingChart() {
     const equilibriumPrimitive = new EquilibriumPrimitive();
     const priceBandPrimitive = new PriceBandPrimitive();
     const swingRayPrimitive = new SwingRayPrimitive();
+    const ictSetupPrimitive = new IctSetupPrimitive();
 
     // Attach primitives in order (bottom layer first)
     candleSeries.attachPrimitive(killzonePrimitive);
@@ -996,6 +1012,7 @@ export function TradingChart() {
     candleSeries.attachPrimitive(priceBandPrimitive);    // 价格带：最底层,不遮挡 K 线
     candleSeries.attachPrimitive(swingRayPrimitive);     // 最新 HH/LL 向左虚射线
     candleSeries.attachPrimitive(otePrimitive);
+    candleSeries.attachPrimitive(ictSetupPrimitive); // ICT Setup：POI / 入场 / 止损 / 目标
     candleSeries.attachPrimitive(breakerBlockPrimitive);
     candleSeries.attachPrimitive(obPrimitive);
     candleSeries.attachPrimitive(fvgPrimitive);
@@ -1011,6 +1028,7 @@ export function TradingChart() {
     liquidityPrimitiveRef.current = liquidityPrimitive;
     killzonePrimitiveRef.current = killzonePrimitive;
     otePrimitiveRef.current = otePrimitive;
+    ictSetupPrimitiveRef.current = ictSetupPrimitive;
     breakerBlockPrimitiveRef.current = breakerBlockPrimitive;
     liquidationHillPrimitiveRef.current = liquidationHillPrimitive;
     equilibriumPrimitiveRef.current = equilibriumPrimitive;
@@ -1600,7 +1618,31 @@ export function TradingChart() {
         enabled.equilibrium ? equilibriumLevels : []
       );
     }
-  }, [orderBlocks, fvgs, proximitySignals, liquidityZones, oteZones, breakerBlocks, equilibriumLevels, liquidationData, activeObFibRatio, enabled.orderBlocks, enabled.fvg, enabled.proximitySignals, enabled.liquidityZones, enabled.killzones, enabled.ote, enabled.breakerBlocks, enabled.equilibrium, timeframe]);
+
+    // Update ICT Setup Primitive（POI / 入场 / 止损 / 目标）
+    if (ictSetupPrimitiveRef.current) {
+      if (enabled.ictSetup) {
+        ictSetupPrimitiveRef.current.setData(
+          ictSetups.map((s) => ({
+            direction: s.direction,
+            state: s.state,
+            pool: {
+              level: s.pool.level,
+              label: `${s.pool.isEqual ? "等" : "前"}${s.direction === "bullish" ? "低" : "高"}池`,
+            },
+            poi: s.poi
+              ? { type: s.poi.type, high: s.poi.high, low: s.poi.low, startTime: s.poi.startTime }
+              : undefined,
+            entry: s.entry?.price,
+            stopLoss: s.stopLoss,
+            targets: s.targets,
+          }))
+        );
+      } else {
+        ictSetupPrimitiveRef.current.setData([]);
+      }
+    }
+  }, [orderBlocks, fvgs, proximitySignals, liquidityZones, ictSetups, oteZones, breakerBlocks, equilibriumLevels, liquidationData, activeObFibRatio, enabled.orderBlocks, enabled.fvg, enabled.proximitySignals, enabled.liquidityZones, enabled.killzones, enabled.ote, enabled.breakerBlocks, enabled.equilibrium, enabled.ictSetup, timeframe]);
 
   // ===== 价格带(Price Band)=====
   // 加载月K —— 价格带的价位源头(月K 的 open/close + 阴K low + 阳K high)
@@ -2539,6 +2581,8 @@ export function TradingChart() {
       <div ref={rightPanelsRef} data-testid="chart-right-panels" className="absolute top-2 right-2 z-10 flex flex-col gap-2">
         {/* 回放模拟盘面板(置顶) */}
         <ReplayPanel />
+        {/* ICT Setup 状态机(流动性 → 扫荡 → 位移 → 回踩 POI → 可入场) */}
+        <ICTSetupPanel />
         {/* 最长波段(独立面板,折叠互不影响)—— 仅 admin 可见 */}
         {user?.role === 'admin' && <LongestSwingPanel />}
         <OTEPanel />

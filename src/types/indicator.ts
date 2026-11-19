@@ -107,4 +107,6 @@ export interface IndicatorState {
   proximitySignals: boolean;
   /** 价格带(Price Band)—— 月K 推导的 5 阻力 + 5 支撑带 */
   priceBand: boolean;
+  /** ICT Setup 状态机（流动性→扫荡→位移→回踩 POI→可入场） */
+  ictSetup: boolean;
 }

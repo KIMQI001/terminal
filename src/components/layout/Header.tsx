@@ -47,6 +47,7 @@ const indicators: { key: keyof IndicatorState; label: string }[] = [
   { key: "rejections", label: "Rejections" },
   { key: "proximitySignals", label: "Proximity Signal" },
   { key: "priceBand", label: "Price Band" },
+  { key: "ictSetup", label: "ICT Setup" },
 ];
 
 export function Header({ showReplay = false }: { showReplay?: boolean }) {

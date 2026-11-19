@@ -18,3 +18,4 @@ export { FibLevelPrimitive, type FibLevel } from './FibLevelPrimitive';
 export { RejectionPrimitive } from './RejectionPrimitive';
 export { PriceBandPrimitive } from './PriceBandPrimitive';
 export { SwingRayPrimitive, SWING_RAY_COUNT, type SwingRay } from './SwingRayPrimitive';
+export { IctSetupPrimitive, type IctSetupRenderItem } from './IctSetupPrimitive';

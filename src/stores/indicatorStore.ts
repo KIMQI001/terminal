@@ -5,6 +5,22 @@ import { SwingPoint, Timeframe } from "@/types/chart";
 
 // localStorage 持久化 key
 const INDICATOR_ENABLED_KEY = 'terminal.indicator.enabled';
+const ICT_SETUP_CONFIG_KEY = 'terminal.ictSetup.config';
+
+/** 读取 ICT Setup 参数（局部覆盖默认值） */
+const loadIctSetupConfig = (): IctSetupConfig => {
+  if (typeof window === 'undefined') return { ...DEFAULT_ICT_SETUP_CONFIG };
+  try {
+    const raw = localStorage.getItem(ICT_SETUP_CONFIG_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<IctSetupConfig>;
+      return { ...DEFAULT_ICT_SETUP_CONFIG, ...parsed };
+    }
+  } catch {
+    // 忽略解析错误
+  }
+  return { ...DEFAULT_ICT_SETUP_CONFIG };
+};
 
 // 页面加载时读取 localStorage 覆盖默认 enabled
 const loadEnabled = (): IndicatorState => {
@@ -31,6 +47,11 @@ import { Inducement } from "@/lib/chart/indicators/inducement";
 import { MissedPivot, GhostLevel } from "@/lib/chart/indicators/swingPoints";
 import { EngulfingPinbar } from "@/lib/chart/indicators/engulfingPinbar";
 import { EquilibriumLevel, ZoneSide } from "@/lib/chart/indicators/equilibrium";
+import {
+  IctSetupSignal,
+  IctSetupConfig,
+  DEFAULT_ICT_SETUP_CONFIG,
+} from "@/lib/chart/indicators/ictSetup";
 import { InitialBalanceData } from "@/lib/chart/indicators/initialBalance";
 import { AsiaBiasData } from "@/lib/chart/indicators/asiaBias";
 import { EuropeBiasData } from "@/lib/chart/indicators/europeBias";
@@ -109,6 +130,10 @@ interface IndicatorStoreState {
   bosSignals: BOS[];
   chochSignals: CHoCH[];
   liquidityZones: LiquidityZone[];
+  /** ICT Setup 状态机当前的多/空 setup 信号 */
+  ictSetups: IctSetupSignal[];
+  /** ICT Setup 状态机参数 */
+  ictSetupConfig: IctSetupConfig;
   oteZones: OTEZone[];
   breakerBlocks: BreakerBlock[];
   inducements: Inducement[];
@@ -135,6 +160,8 @@ interface IndicatorStoreState {
   setBOSSignals: (signals: BOS[]) => void;
   setCHoCHSignals: (signals: CHoCH[]) => void;
   setLiquidityZones: (zones: LiquidityZone[]) => void;
+  setIctSetups: (setups: IctSetupSignal[]) => void;
+  setIctSetupConfig: (config: Partial<IctSetupConfig>) => void;
   setOTEZones: (zones: OTEZone[]) => void;
   setBreakerBlocks: (blocks: BreakerBlock[]) => void;
   setInducements: (inducements: Inducement[]) => void;
@@ -174,6 +201,8 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
     proximitySignals: false,
     // 价格带默认关闭 —— 10 条 400 点宽的带会盖住较多图表区域,按需在 ICT Indicators 里打开
     priceBand: false,
+    // ICT Setup 状态机默认开启 —— 只画当前 setup 的 POI/入场/止损/目标,不铺满图表
+    ictSetup: true,
   };
   return {
     enabled: { ...defaultEnabled, ...persistedEnabled },
@@ -190,6 +219,8 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
   bosSignals: [],
   chochSignals: [],
   liquidityZones: [],
+  ictSetups: [],
+  ictSetupConfig: loadIctSetupConfig(),
   oteZones: [],
   breakerBlocks: [],
   inducements: [],
@@ -257,6 +288,17 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
   setBOSSignals: (signals) => set({ bosSignals: signals }),
   setCHoCHSignals: (signals) => set({ chochSignals: signals }),
   setLiquidityZones: (zones) => set({ liquidityZones: zones }),
+  setIctSetups: (setups) => set({ ictSetups: setups }),
+  setIctSetupConfig: (config) =>
+    set((state) => {
+      const merged = { ...state.ictSetupConfig, ...config };
+      try {
+        localStorage.setItem(ICT_SETUP_CONFIG_KEY, JSON.stringify(merged));
+      } catch {
+        // 忽略写入失败
+      }
+      return { ictSetupConfig: merged };
+    }),
   setOTEZones: (zones) => set({ oteZones: zones }),
   setBreakerBlocks: (blocks) => set({ breakerBlocks: blocks }),
   setInducements: (inducements) => set({ inducements }),
@@ -313,6 +355,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
       bosSignals: [],
       chochSignals: [],
       liquidityZones: [],
+      ictSetups: [],
       oteZones: [],
       breakerBlocks: [],
       inducements: [],
