@@ -4,7 +4,10 @@
  * 画出市场结构层的三样东西：
  * - **Swing legs**：相邻两个摆动点之间的连线（涨=绿、跌=红）
  * - **BOS**：Break of Structure —— 顺势突破结构位（蓝色虚线=向上突破 / 红色虚线=向下突破）
- * - **CHoCH**：Change of Character —— 逆势突破结构位（绿色实线=向上 / 紫色实线=向下）
+ * - **CHoCH**：Change of Character —— 逆势突破结构位（绿色虚线=向上 / 紫色虚线=向下）
+ * - **预测位**：还没发生的下一个 BOS / CHoCH —— **实线**，从结构位一路画到图表右缘。
+ *   价格一旦**收盘**越过（只被影线插破不算），引擎就会真的报出这个事件 →
+ *   这条线随之变回虚线，同时在更远的位置出现新的实线预测位。
  *
  * ## 为什么用 Primitive 而不是 SVG 覆盖层
  *
@@ -46,6 +49,22 @@ export interface StructureEvent {
   swingTime: number;
 }
 
+/**
+ * 一条**预测**的结构事件 —— 还没发生，价格一旦触及就会变成真的 BOS / CHoCH
+ *
+ * 画成实线；真发生了就由对应的 StructureEvent 接手（虚线）。
+ */
+export interface StructurePredictionEvent {
+  /** "bos" = 顺势突破，"choch" = 逆势突破 */
+  kind: "bos" | "choch";
+  /** 方向："bullish" = 上方目标，"bearish" = 下方目标 */
+  direction: "bullish" | "bearish";
+  /** 目标结构位价格 */
+  level: number;
+  /** 目标结构位所在的摆动点时间（线的起点） */
+  swingTime: number;
+}
+
 /** 一条 swing leg（相邻两个摆动点的连线） */
 export interface SwingLeg {
   /** 起点摆动点的时间 */
@@ -62,6 +81,8 @@ export interface SwingLeg {
 
 interface StructureRendererData {
   events: StructureEvent[];
+  /** 预测位（实线） */
+  predictions: StructurePredictionEvent[];
   legs: SwingLeg[];
   priceToCoordinate: (price: number) => Coordinate | null;
   timeToCoordinate: (time: Time) => Coordinate | null;
@@ -73,7 +94,7 @@ interface StructureRendererData {
 /** BOS 配色：向上突破=蓝，向下突破=红（虚线） */
 const BOS_BULLISH = "#3b82f6";
 const BOS_BEARISH = "#ef4444";
-/** CHoCH 配色：向上=绿，向下=紫（实线） */
+/** CHoCH 配色：向上=绿，向下=紫（虚线） */
 const CHOCH_BULLISH = "#22c55e";
 const CHOCH_BEARISH = "#a855f7";
 /** swing leg 配色 */
@@ -82,6 +103,13 @@ const LEG_DOWN = "#ef4444";
 
 const LABEL_WIDTH = 32;
 const LABEL_HEIGHT = 13;
+
+/** 结构事件的配色：BOS 向上=蓝 / 向下=红，CHoCH 向上=绿 / 向下=紫 */
+function structureColor(kind: "bos" | "choch", direction: "bullish" | "bearish"): string {
+  const isBullish = direction === "bullish";
+  if (kind === "bos") return isBullish ? BOS_BULLISH : BOS_BEARISH;
+  return isBullish ? CHOCH_BULLISH : CHOCH_BEARISH;
+}
 
 /**
  * 同一类事件最多画几个文字标签。
@@ -109,9 +137,9 @@ class StructurePaneRenderer implements ISeriesPrimitivePaneRenderer {
 
   draw(target: CanvasRenderingTarget2D): void {
     if (!this._data) return;
-    const { events, legs, priceToCoordinate, timeToCoordinate, chartWidth, barSpacing } = this._data;
+    const { events, predictions, legs, priceToCoordinate, timeToCoordinate, chartWidth, barSpacing } = this._data;
 
-    target.useMediaCoordinateSpace(({ context: ctx }) => {
+    target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
       // ── Swing legs（画在最底层）────────────────────────
       // 只画可视区内的 leg —— 历史数据可能有几千段，全画会把图糊死
       ctx.lineWidth = 2;
@@ -134,6 +162,51 @@ class StructurePaneRenderer implements ISeriesPrimitivePaneRenderer {
         ctx.stroke();
       }
       ctx.globalAlpha = 1;
+
+      // ── 预测位（实线，延伸到图表右缘）────────────────
+      // 还没发生的下一个 BOS / CHoCH：价格一旦收盘越过（只被影线插破不算），
+      // 引擎就会真的报出这个事件 → 这条线变回虚线，同时更远处出现新的实线预测位。
+      for (const p of predictions) {
+        const y = priceToCoordinate(p.level);
+        if (y === null) continue;
+        if (y < -8 || y > mediaSize.height + 8) continue;
+
+        const xStartRaw = timeToCoordinate(p.swingTime as Time);
+        const xStart = xStartRaw === null ? 0 : Math.max(0, xStartRaw);
+
+        const color = structureColor(p.kind, p.direction);
+
+        // 实线（与已发生事件的虚线区分开）
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 1;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(xStart, y);
+        ctx.lineTo(chartWidth, y);
+        ctx.stroke();
+
+        // 右端标签：预测BOS / 预测CHoCH
+        // 标签放在**线的上方**而不是压在线上 —— 上方目标的摆动点往往很靠右，
+        // 线本身只有几十像素宽，标签压上去会把线整段盖掉。
+        const text = p.kind === "bos" ? "预测BOS" : "预测CHoCH";
+        ctx.font = "11px sans-serif";
+        const tw = ctx.measureText(text).width + 12;
+        const th = 15;
+        const lx = Math.max(0, chartWidth - tw - 3);
+        const ly = y - th - 4;
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.92;
+        ctx.fillRect(lx, ly, tw, th);
+        ctx.globalAlpha = 1;
+
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, lx + tw / 2, ly + th / 2);
+      }
+      ctx.globalAlpha = 1;
+      ctx.setLineDash([]);
 
       // ── BOS / CHoCH 结构线 ────────────────────────────
       // 先算出每条事件的几何信息，再按可视区 + 数量上限过滤，最后统一绘制
@@ -163,15 +236,8 @@ class StructurePaneRenderer implements ISeriesPrimitivePaneRenderer {
         const fallbackX = Math.max(0, xBreak - barSpacing * 10);
         const xStart = xStartRaw === null ? fallbackX : Math.min(xStartRaw, xBreak);
 
-        const isBullish = ev.direction === "bullish";
         const isBOS = ev.kind === "bos";
-        const color = isBOS
-          ? isBullish
-            ? BOS_BULLISH
-            : BOS_BEARISH
-          : isBullish
-            ? CHOCH_BULLISH
-            : CHOCH_BEARISH;
+        const color = structureColor(ev.kind, ev.direction);
 
         // 线：水平，画在结构位上，从被破处延伸到突破点再往后一小段
         const extendPx = barSpacing * 2;
@@ -194,8 +260,9 @@ class StructurePaneRenderer implements ISeriesPrimitivePaneRenderer {
       for (const d of visible) {
         ctx.strokeStyle = d.color;
         ctx.globalAlpha = 0.85;
-        ctx.lineWidth = d.isBOS ? 1 : 2;
-        ctx.setLineDash(d.isBOS ? [6, 4] : []);
+        ctx.lineWidth = d.isBOS ? 1 : 1.5;
+        // 已发生的事件一律虚线；实线留给「预测位」
+        ctx.setLineDash([6, 4]);
         ctx.beginPath();
         ctx.moveTo(d.xStart, d.y);
         ctx.lineTo(d.xEnd, d.y);
@@ -261,6 +328,7 @@ class StructurePaneView implements ISeriesPrimitivePaneView {
 export class StructurePrimitive implements ISeriesPrimitive<Time> {
   private _paneView: StructurePaneView;
   private _events: StructureEvent[] = [];
+  private _predictions: StructurePredictionEvent[] = [];
   private _legs: SwingLeg[] = [];
   private _chart: IChartApiBase<Time> | null = null;
   private _series: SeriesAttachedParameter<Time>["series"] | null = null;
@@ -289,6 +357,7 @@ export class StructurePrimitive implements ISeriesPrimitive<Time> {
 
     const data: StructureRendererData = {
       events: this._events,
+      predictions: this._predictions,
       legs: this._legs,
       priceToCoordinate: (price: number) => this._series!.priceToCoordinate(price),
       timeToCoordinate: (time: Time) => timeScale.timeToCoordinate(time),
@@ -306,6 +375,12 @@ export class StructurePrimitive implements ISeriesPrimitive<Time> {
   /** 更新要画的 BOS / CHoCH */
   setEvents(events: StructureEvent[]): void {
     this._events = events;
+    if (this._requestUpdate) this._requestUpdate();
+  }
+
+  /** 更新要画的预测位（实线） */
+  setPredictions(predictions: StructurePredictionEvent[]): void {
+    this._predictions = predictions;
     if (this._requestUpdate) this._requestUpdate();
   }
 

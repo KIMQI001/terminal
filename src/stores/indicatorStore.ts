@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { IndicatorState, OrderBlock, FVG, BOS, CHoCH, LiquidityZone } from "@/types/indicator";
+import { IndicatorState, OrderBlock, FVG, BOS, CHoCH, LiquidityZone, StructureProjection } from "@/types/indicator";
 import { ProximitySignal } from "@/types/proximitySignal";
 import { SwingPoint, Timeframe } from "@/types/chart";
 
@@ -159,6 +159,8 @@ interface IndicatorStoreState {
   fvgs: FVG[];
   bosSignals: BOS[];
   chochSignals: CHoCH[];
+  /** 预测的下一个 BOS / CHoCH（上下各一个）—— 渲染成实线，触及后变回虚线 */
+  structureProjection: StructureProjection | null;
   liquidityZones: LiquidityZone[];
   /** ICT Setup 状态机当前的多/空 setup 信号 */
   ictSetups: IctSetupSignal[];
@@ -189,6 +191,7 @@ interface IndicatorStoreState {
   setFVGs: (fvgs: FVG[]) => void;
   setBOSSignals: (signals: BOS[]) => void;
   setCHoCHSignals: (signals: CHoCH[]) => void;
+  setStructureProjection: (projection: StructureProjection | null) => void;
   setLiquidityZones: (zones: LiquidityZone[]) => void;
   setIctSetups: (setups: IctSetupSignal[]) => void;
   setIctSetupConfig: (config: Partial<IctSetupConfig>) => void;
@@ -248,6 +251,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
   fvgs: [],
   bosSignals: [],
   chochSignals: [],
+  structureProjection: null,
   liquidityZones: [],
   ictSetups: [],
   ictSetupConfig: loadIctSetupConfig(),
@@ -317,6 +321,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
   setFVGs: (fvgs) => set({ fvgs }),
   setBOSSignals: (signals) => set({ bosSignals: signals }),
   setCHoCHSignals: (signals) => set({ chochSignals: signals }),
+  setStructureProjection: (projection) => set({ structureProjection: projection }),
   setLiquidityZones: (zones) => set({ liquidityZones: zones }),
   setIctSetups: (setups) => set({ ictSetups: setups }),
   setIctSetupConfig: (config) =>
@@ -384,6 +389,7 @@ export const useIndicatorStore = create<IndicatorStoreState>((set) => {
       fvgs: [],
       bosSignals: [],
       chochSignals: [],
+      structureProjection: null,
       liquidityZones: [],
       ictSetups: [],
       oteZones: [],

@@ -82,6 +82,33 @@ export interface CHoCH {
   swingPoint: SwingPoint;
 }
 
+/**
+ * 预测的结构事件 —— 还没发生，但价格一旦**收盘**越过就会变成真的 BOS / CHoCH
+ *
+ * 渲染层画成**实线**；价格收盘越过后引擎会真的报出事件 → 线变回虚线。
+ * 只被影线插破、收盘收回的结构位仍然有效 → 依然会被实线标成「下一个 BOS」。
+ */
+export interface StructurePrediction {
+  /** "bos" = 顺势突破，"choch" = 逆势突破（趋势可能反转） */
+  kind: "bos" | "choch";
+  /** 方向："bullish" = 向上突破上方结构位，"bearish" = 向下突破下方结构位 */
+  direction: "bullish" | "bearish";
+  /** 目标结构位价格 */
+  level: number;
+  /** 目标结构位所在的摆动点（线的起点） */
+  swingPoint: SwingPoint;
+}
+
+/**
+ * 上下两个方向的预测目标
+ * - bullish：上方最近的一个未破结构位 → 破它会发生什么
+ * - bearish：下方最近的一个未破结构位 → 破它会发生什么
+ */
+export interface StructureProjection {
+  bullish: StructurePrediction | null;
+  bearish: StructurePrediction | null;
+}
+
 export interface LiquidityZone {
   type: "buy-side" | "sell-side";
   level: number;

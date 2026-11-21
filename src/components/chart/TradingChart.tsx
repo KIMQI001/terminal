@@ -61,7 +61,7 @@ import {
   IctSetupPrimitive,
   StructurePrimitive,
 } from "@/lib/chart/primitives";
-import type { SwingRay, StructureEvent, SwingLeg } from "@/lib/chart/primitives";
+import type { SwingRay, StructureEvent, StructurePredictionEvent, SwingLeg } from "@/lib/chart/primitives";
 import { computePriceBand } from "@/lib/chart/priceBand";
 import { loadMonthlyCandles } from "@/lib/chart/priceBandLoader";
 import { detectOTEZones } from "@/lib/chart/indicators/ote";
@@ -81,7 +81,7 @@ import {
   type KlineDisplayMode,
 } from "@/lib/chart/klineDisplay";
 import type { ProximitySignal } from "@/types/proximitySignal";
-import type { FVG, OrderBlock } from "@/types/indicator";
+import type { FVG, OrderBlock, StructureProjection } from "@/types/indicator";
 import type { FibLevel } from "@/lib/chart/primitives";
 
 /**
@@ -403,8 +403,10 @@ export function TradingChart() {
     setFVGs,
     setBOSSignals,
     setCHoCHSignals,
+    setStructureProjection,
     bosSignals,
     chochSignals,
+    structureProjection,
     setLiquidityZones,
     setIctSetups,
     setOTEZones,
@@ -670,10 +672,12 @@ export function TradingChart() {
 
       // BOS/CHoCH 始终计算（MTF Trend 面板需要数据）
       // 新签名:detectStructure(candles, swingPoints) —— 用带分类的摆动点做判定
-      const { bos, choch } = detectStructure(candleData, classifiedPivots);
+      const { bos, choch, projection } = detectStructure(candleData, classifiedPivots);
       // 开关关闭时清空残留信号(最多保留 60 个 BOS / 20 个 CHoCH)
       setBOSSignals(enabled.bos ? bos.slice(-60) : []);
       setCHoCHSignals(enabled.choch ? choch.slice(-20) : []);
+      // 预测位（上下各一个）—— 渲染成实线，触及后引擎会报出真事件 → 变回虚线
+      setStructureProjection(projection);
 
       // 计算并保存多周期趋势
       const targetTimeframes4 = ['5m', '15m', '1h', '4h', '1d'] as const;
@@ -762,7 +766,7 @@ export function TradingChart() {
         fibLevelPrimitiveRef.current.setData(fibLevels, activeObFibRatio);
       }
     },
-    [enabled, timeframe, ictSetupConfig, setSwingPoints, setMissedPivots, setGhostLevels, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setLiquidityZones, setIctSetups, setOTEZones, setBreakerBlocks, setInducements, setEquilibriumLevels, setProximitySignals, setFibLevels, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend, setMultiTimeframeEquilibrium]
+    [enabled, timeframe, ictSetupConfig, setSwingPoints, setMissedPivots, setGhostLevels, setOrderBlocks, setFVGs, setBOSSignals, setCHoCHSignals, setStructureProjection, setLiquidityZones, setIctSetups, setOTEZones, setBreakerBlocks, setInducements, setEquilibriumLevels, setProximitySignals, setFibLevels, setMultiTimeframeOTE, setMultiTimeframeFVG, setMultiTimeframeOB, setMultiTimeframeTrend, setMultiTimeframeEquilibrium]
   );
 
   // 序列数据版本号变化 → 重建序列 + 重算指标
@@ -1850,6 +1854,28 @@ export function TradingChart() {
     }
     primitive.setEvents(events);
 
+    // 预测位（实线）—— 还没发生的下一个 BOS / CHoCH，上下各一个
+    const predictions: StructurePredictionEvent[] = [];
+    if (structureProjection) {
+      const push = (
+        pred: StructureProjection["bullish"],
+        fallbackKind: "bos" | "choch"
+      ) => {
+        if (!pred) return;
+        if (pred.kind === "bos" && !enabled.bos) return;
+        if (pred.kind === "choch" && !enabled.choch) return;
+        predictions.push({
+          kind: pred.kind ?? fallbackKind,
+          direction: pred.direction,
+          level: pred.level,
+          swingTime: pred.swingPoint.time,
+        });
+      };
+      push(structureProjection.bullish, "bos");
+      push(structureProjection.bearish, "bos");
+    }
+    primitive.setPredictions(predictions);
+
     // Swing legs —— 相邻两个摆动点之间的连线
     const legs: SwingLeg[] = [];
     if (enabled.swingPoints && swingPoints.length > 1) {
@@ -1866,7 +1892,7 @@ export function TradingChart() {
       }
     }
     primitive.setLegs(legs);
-  }, [bosSignals, chochSignals, swingPoints, enabled.bos, enabled.choch, enabled.swingPoints]);
+  }, [bosSignals, chochSignals, structureProjection, swingPoints, enabled.bos, enabled.choch, enabled.swingPoints]);
 
   // Update Swing Points Markers (折线图模式) - 使用 detectAllPivots 标记所有波峰波谷
   useEffect(() => {

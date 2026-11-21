@@ -111,7 +111,7 @@ console.log("\n[2] 上升结构：收盘突破前高 → BOS bullish");
 }
 
 // ---------------------------------------------------------------------------
-console.log("\n[3] 上升结构中收盘跌破结构低 → CHoCH bearish（趋势翻转）");
+console.log("\n[3] 上升结构中跌破结构低 → CHoCH bearish（趋势翻转）");
 {
   const candles: Candle[] = [
     bar(0, 105, 106, 104, 105),
@@ -190,7 +190,7 @@ console.log("\n[4] CHoCH 后趋势翻转 → 随后的破低变成 BOS bearish")
 }
 
 // ---------------------------------------------------------------------------
-console.log("\n[5] 下降结构：收盘跌破前低 → BOS bearish");
+console.log("\n[5] 下降结构：跌破前低 → BOS bearish");
 {
   const candles: Candle[] = [
     bar(0, 110, 112, 108, 111), // swing high 112
@@ -210,22 +210,39 @@ console.log("\n[5] 下降结构：收盘跌破前低 → BOS bearish");
 }
 
 // ---------------------------------------------------------------------------
-console.log("\n[6] 影线破位但收盘收回 → 不算突破（sweep ≠ break）");
+console.log("\n[6] 只破影线、收盘没收回 → 不算突破，但该位仍是「下一个 BOS」（实线标记）");
 {
+  // 用户口径：突破看**实体（收盘价）**；影线插破只是扫荡。
+  // 于是「07-01 那个 LL 被影线破了」→ 不产生 BOS 事件，
+  // 但它仍然是当前最近的未破结构位 → 渲染层用**实线**标成「下一个 BOS」。
   const candles: Candle[] = [
     bar(0, 110, 112, 108, 111),
     bar(1, 108, 109, 105, 106),
-    bar(2, 104, 105, 100, 101),
-    bar(3, 101, 102, 99, 100),
-    bar(4, 100, 101, 95, 100), // 影线到 95，但收盘 100 → 未破
-    bar(5, 100, 101, 96, 100), // 影线到 96，收盘 100 → 未破
-    bar(6, 100, 101, 97, 100), // 影线到 97，收盘 100 → 未破
+    bar(2, 104, 105, 100, 101), // swing low 100（确认于 4）
+    bar(3, 101, 102, 100, 101), // 影线正好触及 100（相等，不算破）
+    bar(4, 100, 101, 96, 100), // 影线插到 96 < 100，但收盘 100 没破 → 扫荡
+    bar(5, 100, 101, 96, 99), // 收盘 99 < 100 → 这才是真正的突破
   ];
 
   const swings = [sp(0, "high", 112, undefined, true), sp(2, "low", 100, undefined, true)];
-  const { bos, choch } = detectStructure(candles, swings);
-  assert(bos.length === 0, `扫荡不产生 BOS（BOS = ${bos.length}，期望 0）`);
-  assert(choch.length === 0, `扫荡不产生 CHoCH（CHoCH = ${choch.length}，期望 0）`);
+
+  // 只跑到第 4 根（仅影线破）→ 无事件，但 100 仍是下方的预测位
+  const mid = detectStructure(candles.slice(0, 5), swings);
+  assert(mid.bos.length === 0 && mid.choch.length === 0, "仅影线破位不产生任何事件");
+  assert(
+    mid.projection.bearish?.level === 100,
+    `仅影线破位时该位仍是下方预测位 = ${mid.projection.bearish?.level}（期望 100）`
+  );
+  assert(mid.projection.bearish?.kind === "bos", `下方预测类型 = ${mid.projection.bearish?.kind}（期望 bos）`);
+
+  // 收盘真正破掉之后 → 报 BOS bearish，预测位随之消失
+  const { bos, choch, projection } = detectStructure(candles, swings);
+  assert(bos.length === 1, `BOS 数量 = ${bos.length}（期望 1）`);
+  assert(bos[0]?.type === "bearish", `BOS 方向 = ${bos[0]?.type}（期望 bearish）`);
+  assert(bos[0]?.level === 100, `BOS 结构位 = ${bos[0]?.level}（期望 100）`);
+  assert(bos[0]?.time === candles[5].time, "BOS 时间 = 收盘破位那根 K（第 5 根）");
+  assert(choch.length === 0, `CHoCH 数量 = ${choch.length}（期望 0）`);
+  assert(projection.bearish === null, "破掉之后该位不再出现在预测位里");
 }
 
 // ---------------------------------------------------------------------------
@@ -339,29 +356,43 @@ console.log("\n[10] 无前视：截断 K 线重跑，前面的信号必须完全
 }
 
 // ---------------------------------------------------------------------------
-console.log("\n[11] 一次收盘越过多个结构位 → 只报 1 条信号");
+console.log("\n[11] 一根 K 越过多个结构位 → 每个被越过的位都单独报（之前只报队尾，其余被静默丢弃）");
 {
+  // H1=110（HH 前的那个）、H2=108（LH，较低的高点）
+  // 两层都还没破，直到第 10 根一根大 K 影线冲到 113 → 108 与 110 同时被破
   const candles: Candle[] = [
     bar(0, 100, 102, 99, 101),
-    bar(1, 101, 103, 100, 102),
+    bar(1, 101, 104, 100, 103),
     bar(2, 103, 110, 102, 108), // swing high 110（确认于 4）
-    bar(3, 108, 109, 107, 108),
-    bar(4, 108, 109, 107, 108),
-    bar(5, 108, 110, 107, 109),
-    bar(6, 109, 110.5, 108, 109), // swing high 110.5（确认于 8）
-    bar(7, 109, 110, 108, 109),
-    bar(8, 109, 110, 108, 109), // H2 在此确认
-    bar(9, 110, 113, 109, 112), // 收盘 112 同时越过 110 与 110.5
-    bar(10, 112, 114, 111, 113),
+    bar(3, 108, 109, 103, 104),
+    bar(4, 104, 105, 100, 101), // H1 在此确认
+    bar(5, 101, 102, 99, 100),
+    bar(6, 100, 101, 98, 99),
+    bar(7, 99, 108, 99, 107), // swing high 108 = LH（确认于 9），未破 110
+    bar(8, 107, 107.5, 100, 101),
+    bar(9, 101, 102, 99, 100), // H2 在此确认
+    bar(10, 100, 113, 99, 112), // 影线 113 同时越过 108 与 110
+    bar(11, 112, 114, 111, 113),
   ];
   const swings = [
     sp(2, "high", 110, undefined, true),
-    sp(6, "high", 110.5, "HH"),
+    sp(7, "high", 108, "LH"),
   ];
-  const { bos } = detectStructure(candles, swings);
-  assert(bos.length === 1, `BOS 数量 = ${bos.length}（期望 1，同一根 K 只出一个结构事件）`);
-  assert(bos[0]?.level === 110.5, `BOS 结构位 = ${bos[0]?.level}（期望 110.5）`);
-  assert(bos[0]?.time === candles[9].time, "BOS 时间 = 突破那根 K");
+  const { bos, choch } = detectStructure(candles, swings);
+  assert(
+    bos.length + choch.length === 2,
+    `两个被越过的位都要报（BOS ${bos.length} + CHoCH ${choch.length}，期望 2）`
+  );
+  // 价格自下而上 → 先穿价位低的（108）
+  assert(choch.length === 1 && choch[0]?.level === 108, `第一个事件 = CHoCH @${choch[0]?.level}（期望 108，逆势破 LH）`);
+  assert(choch[0]?.type === "bullish", "第一个事件方向 = bullish");
+  assert(choch[0]?.previousTrend === "down", "CHoCH 记录了突破前的趋势 down");
+  assert(bos.length === 1 && bos[0]?.level === 110, `第二个事件 = BOS @${bos[0]?.level}（期望 110，顺势）`);
+  assert(bos[0]?.type === "bullish", "第二个事件方向 = bullish");
+  assert(
+    choch[0]?.time === candles[10].time && bos[0]?.time === candles[10].time,
+    "两条都在突破那根 K 报出"
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -431,6 +462,68 @@ console.log("\n[13] 下降结构里上破最近的低高点 → CHoCH bullish（
   assert(choch[0]?.type === "bullish", `CHoCH 方向 = ${choch[0]?.type}（期望 bullish）`);
   assert(choch[0]?.previousTrend === "down", "CHoCH 记录了突破前的趋势 down");
   assert(choch[0]?.level === 110, `CHoCH 结构位 = ${choch[0]?.level}（期望 110）`);
+}
+
+// ---------------------------------------------------------------------------
+console.log("\n[14] 预测下一个 BOS / CHoCH（上下各一个）");
+{
+  // 上升结构收尾：H3=120 已确认但没破（上方目标），L1=100 也没破（下方目标）
+  const candles: Candle[] = [
+    bar(0, 105, 106, 104, 105),
+    bar(1, 106, 108, 105, 107),
+    bar(2, 108, 110, 107, 109), // H1 110（确认于 4）
+    bar(3, 108, 109, 106, 107),
+    bar(4, 106, 107, 104, 105),
+    bar(5, 104, 105, 100, 101), // L1 100（确认于 7）
+    bar(6, 102, 104, 101, 103),
+    bar(7, 104, 106, 103, 105),
+    bar(8, 106, 109, 105, 108),
+    bar(9, 108, 112, 107, 111), // 影线 112 破 H1 → BOS bullish，trend=up
+    bar(10, 112, 114, 111, 113), // H2 114（确认于 12）
+    bar(11, 112, 113, 110, 111),
+    bar(12, 110, 112, 108, 109),
+    bar(13, 114, 118, 113, 117), // 影线 118 破 H2 → BOS bullish
+    bar(14, 116, 117, 112, 114),
+    bar(15, 114, 116, 111, 113),
+    bar(16, 113, 120, 112, 118), // H3 120（确认于 18）
+    bar(17, 118, 119, 114, 116),
+    bar(18, 116, 117, 113, 115), // H3 在此确认，之后没再破
+    bar(19, 115, 116, 112, 114),
+  ];
+  const swings = [
+    sp(2, "high", 110, undefined, true),
+    sp(5, "low", 100, undefined, true),
+    sp(10, "high", 114, "HH"),
+    sp(16, "high", 120, "HH"),
+  ];
+
+  const { projection } = detectStructure(candles, swings);
+  const lastClose = candles[candles.length - 1].close;
+
+  assert(projection.bullish !== null, "存在上方预测位");
+  assert(projection.bearish !== null, "存在下方预测位");
+  assert(projection.bullish?.level === 120, `上方预测位 = ${projection.bullish?.level}（期望 120，最近的未破高点）`);
+  assert(projection.bearish?.level === 100, `下方预测位 = ${projection.bearish?.level}（期望 100，最近的未破低点）`);
+  assert((projection.bullish?.level ?? 0) > lastClose, "上方预测位在现价之上");
+  assert((projection.bearish?.level ?? 0) < lastClose, "下方预测位在现价之下");
+  // 多头趋势：上方是顺势(BOS)，下方是逆势(CHoCH)
+  assert(projection.bullish?.kind === "bos", `上方预测类型 = ${projection.bullish?.kind}（期望 bos，顺势）`);
+  assert(projection.bearish?.kind === "choch", `下方预测类型 = ${projection.bearish?.kind}（期望 choch，逆势）`);
+  assert(projection.bullish?.direction === "bullish", "上方预测方向 = bullish");
+  assert(projection.bearish?.direction === "bearish", "下方预测方向 = bearish");
+  assert(projection.bullish?.swingPoint.index === 16, "上方预测绑定到 H3 摆动点");
+
+  // 触及预测位 → 引擎真的报出事件（渲染层据此把实线换成虚线）
+  const touched = [
+    ...candles,
+    bar(20, 115, 125, 114, 124), // 影线 125 > 120 → 破掉预测位
+  ];
+  const after = detectStructure(touched, swings);
+  const lastBos = after.bos[after.bos.length - 1];
+  assert(lastBos?.level === 120, `触及后报出 BOS 结构位 = ${lastBos?.level}（期望 120）`);
+  assert(lastBos?.time === touched[20].time, "触及后事件时间 = 破位那根 K");
+  assert(after.projection.bullish === null, "触及后上方没有更近的预测位了（该位已被破）");
+  assert(after.projection.bearish?.level === 100, "触及后下方预测位不变");
 }
 
 console.log(
