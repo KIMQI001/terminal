@@ -226,14 +226,18 @@ console.log("\n[6] 只破影线、收盘没收回 → 不算突破，但该位�
 
   const swings = [sp(0, "high", 112, undefined, true), sp(2, "low", 100, undefined, true)];
 
-  // 只跑到第 4 根（仅影线破）→ 无事件，但 100 仍是下方的预测位
+  // 只跑到第 4 根（仅影线破）→ 无事件，但 100 仍是下方的**门槛位**
   const mid = detectStructure(candles.slice(0, 5), swings);
   assert(mid.bos.length === 0 && mid.choch.length === 0, "仅影线破位不产生任何事件");
   assert(
-    mid.projection.bearish?.level === 100,
-    `仅影线破位时该位仍是下方预测位 = ${mid.projection.bearish?.level}（期望 100）`
+    mid.projection.bearish?.triggerLevel === 100,
+    `仅影线破位时该位仍是下方门槛 = ${mid.projection.bearish?.triggerLevel}（期望 100）`
   );
-  assert(mid.projection.bearish?.kind === "bos", `下方预测类型 = ${mid.projection.bearish?.kind}（期望 bos）`);
+  assert(
+    mid.projection.bearish?.level === 96,
+    `门槛下方的目标位 = ${mid.projection.bearish?.level}（期望 96，实时极值）`
+  );
+  assert(mid.projection.bearish?.kind === "bos", `下方目标类型 = ${mid.projection.bearish?.kind}（期望 bos）`);
 
   // 收盘真正破掉之后 → 报 BOS bearish，预测位随之消失
   const { bos, choch, projection } = detectStructure(candles, swings);
@@ -242,7 +246,7 @@ console.log("\n[6] 只破影线、收盘没收回 → 不算突破，但该位�
   assert(bos[0]?.level === 100, `BOS 结构位 = ${bos[0]?.level}（期望 100）`);
   assert(bos[0]?.time === candles[5].time, "BOS 时间 = 收盘破位那根 K（第 5 根）");
   assert(choch.length === 0, `CHoCH 数量 = ${choch.length}（期望 0）`);
-  assert(projection.bearish === null, "破掉之后该位不再出现在预测位里");
+  assert(projection.bearish === null, "破掉之后该位不再出现在门槛/目标里");
 }
 
 // ---------------------------------------------------------------------------
@@ -465,65 +469,128 @@ console.log("\n[13] 下降结构里上破最近的低高点 → CHoCH bullish（
 }
 
 // ---------------------------------------------------------------------------
-console.log("\n[14] 预测下一个 BOS / CHoCH（上下各一个）");
+console.log("\n[14] 预测下一个 BOS / CHoCH 的目标位（门槛 = 最近结构位，目标 = 外侧下一个）");
 {
-  // 上升结构收尾：H3=120 已确认但没破（上方目标），L1=100 也没破（下方目标）
+  // 上升结构收尾：
+  //   上方 H3=120（门槛） / H4=132（目标）
+  //   下方 L1=100（门槛） / L2=90（目标）
   const candles: Candle[] = [
     bar(0, 105, 106, 104, 105),
     bar(1, 106, 108, 105, 107),
     bar(2, 108, 110, 107, 109), // H1 110（确认于 4）
-    bar(3, 108, 109, 106, 107),
+    bar(3, 108, 109, 100, 107), // 低点 100 → L2 90 在此形成（确认于 5）
     bar(4, 106, 107, 104, 105),
     bar(5, 104, 105, 100, 101), // L1 100（确认于 7）
     bar(6, 102, 104, 101, 103),
     bar(7, 104, 106, 103, 105),
     bar(8, 106, 109, 105, 108),
-    bar(9, 108, 112, 107, 111), // 影线 112 破 H1 → BOS bullish，trend=up
+    bar(9, 108, 112, 107, 111), // 收盘 111 > 110 → BOS bullish，trend=up
     bar(10, 112, 114, 111, 113), // H2 114（确认于 12）
     bar(11, 112, 113, 110, 111),
     bar(12, 110, 112, 108, 109),
-    bar(13, 114, 118, 113, 117), // 影线 118 破 H2 → BOS bullish
+    bar(13, 114, 118, 113, 117), // 收盘 117 > 114 → BOS bullish
     bar(14, 116, 117, 112, 114),
     bar(15, 114, 116, 111, 113),
     bar(16, 113, 120, 112, 118), // H3 120（确认于 18）
     bar(17, 118, 119, 114, 116),
-    bar(18, 116, 117, 113, 115), // H3 在此确认，之后没再破
+    bar(18, 116, 132, 113, 118), // 长上影冲到 132、收盘 118（不破 120）→ H4 132（确认于 19）
     bar(19, 115, 116, 112, 114),
   ];
   const swings = [
+    sp(3, "low", 90),
     sp(2, "high", 110, undefined, true),
     sp(5, "low", 100, undefined, true),
     sp(10, "high", 114, "HH"),
     sp(16, "high", 120, "HH"),
+    sp(18, "high", 132, "HH", false, 1),
   ];
 
   const { projection } = detectStructure(candles, swings);
   const lastClose = candles[candles.length - 1].close;
 
-  assert(projection.bullish !== null, "存在上方预测位");
-  assert(projection.bearish !== null, "存在下方预测位");
-  assert(projection.bullish?.level === 120, `上方预测位 = ${projection.bullish?.level}（期望 120，最近的未破高点）`);
-  assert(projection.bearish?.level === 100, `下方预测位 = ${projection.bearish?.level}（期望 100，最近的未破低点）`);
-  assert((projection.bullish?.level ?? 0) > lastClose, "上方预测位在现价之上");
-  assert((projection.bearish?.level ?? 0) < lastClose, "下方预测位在现价之下");
+  assert(projection.bullish !== null, "存在上方目标");
+  assert(projection.bearish !== null, "存在下方目标");
+  // 上方：门槛 = 最近的未破高点 120，目标 = 外侧下一个 132
+  assert(projection.bullish?.triggerLevel === 120, `上方门槛 = ${projection.bullish?.triggerLevel}（期望 120）`);
+  assert(projection.bullish?.level === 132, `上方目标 = ${projection.bullish?.level}（期望 132）`);
+  // 下方：门槛 = 最近的未破低点 100，目标 = 外侧下一个 90
+  assert(projection.bearish?.triggerLevel === 100, `下方门槛 = ${projection.bearish?.triggerLevel}（期望 100）`);
+  assert(projection.bearish?.level === 90, `下方目标 = ${projection.bearish?.level}（期望 90）`);
+  assert((projection.bullish?.level ?? 0) > lastClose, "上方目标在现价之上");
+  assert((projection.bearish?.level ?? 0) < lastClose, "下方目标在现价之下");
   // 多头趋势：上方是顺势(BOS)，下方是逆势(CHoCH)
-  assert(projection.bullish?.kind === "bos", `上方预测类型 = ${projection.bullish?.kind}（期望 bos，顺势）`);
-  assert(projection.bearish?.kind === "choch", `下方预测类型 = ${projection.bearish?.kind}（期望 choch，逆势）`);
-  assert(projection.bullish?.direction === "bullish", "上方预测方向 = bullish");
-  assert(projection.bearish?.direction === "bearish", "下方预测方向 = bearish");
-  assert(projection.bullish?.swingPoint.index === 16, "上方预测绑定到 H3 摆动点");
+  assert(projection.bullish?.kind === "bos", `上方目标类型 = ${projection.bullish?.kind}（期望 bos，顺势）`);
+  assert(projection.bearish?.kind === "choch", `下方目标类型 = ${projection.bearish?.kind}（期望 choch，逆势）`);
+  assert(projection.bullish?.direction === "bullish", "上方目标方向 = bullish");
+  assert(projection.bearish?.direction === "bearish", "下方目标方向 = bearish");
+  assert(projection.bullish?.swingPoint.index === 18, "上方目标绑定到 H4 摆动点");
 
-  // 触及预测位 → 引擎真的报出事件（渲染层据此把实线换成虚线）
+  // 门槛被收盘越过 → 引擎真的报出事件（渲染层据此画出虚线事件线）
   const touched = [
     ...candles,
-    bar(20, 115, 125, 114, 124), // 影线 125 > 120 → 破掉预测位
+    bar(20, 115, 125, 114, 124), // 收盘 124 > 120 → 破掉门槛 120
   ];
   const after = detectStructure(touched, swings);
   const lastBos = after.bos[after.bos.length - 1];
   assert(lastBos?.level === 120, `触及后报出 BOS 结构位 = ${lastBos?.level}（期望 120）`);
   assert(lastBos?.time === touched[20].time, "触及后事件时间 = 破位那根 K");
-  assert(after.projection.bullish === null, "触及后上方没有更近的预测位了（该位已被破）");
-  assert(after.projection.bearish?.level === 100, "触及后下方预测位不变");
+  // 门槛破掉后它自己从候选里消失 → 上方只剩 132 一个位，没有更远的目标
+  assert(after.projection.bullish === null, "触及后上方没有更远的目标了（只剩门槛 132）");
+  assert(after.projection.bearish?.triggerLevel === 100, "触及后下方门槛不变");
+  assert(after.projection.bearish?.level === 90, "触及后下方目标不变");
+}
+
+// ---------------------------------------------------------------------------
+console.log("\n[15] 预测层实时：未确认的新低立刻成为目标位（不等 pivot 右侧确认）");
+{
+  // L1=100 是已确认的结构位；最后一根 K 插破到 95 但收盘没破 →
+  // 95 就是「LL 底下的目标」，实时反映，不用等 29 根 K 确认。
+  const candles: Candle[] = [
+    bar(0, 105, 106, 104, 105),
+    bar(1, 106, 108, 105, 107),
+    bar(2, 108, 110, 107, 109), // H1 110（确认于 4）
+    bar(3, 108, 109, 100, 107),
+    bar(4, 106, 107, 100, 105),
+    bar(5, 104, 105, 100, 101), // L1 100（确认于 7）
+    bar(6, 102, 104, 101, 103),
+    bar(7, 104, 106, 103, 105),
+    bar(8, 106, 109, 105, 108),
+    bar(9, 108, 112, 107, 111), // 收盘 111 > 110 → BOS bullish
+    bar(10, 112, 114, 111, 113),
+    bar(11, 112, 113, 110, 111),
+    bar(12, 110, 112, 108, 109),
+    bar(13, 114, 118, 113, 117), // 收盘 117 > 114 → BOS bullish
+    bar(14, 116, 117, 112, 114),
+    bar(15, 114, 116, 111, 113),
+    bar(16, 113, 120, 112, 118), // H2 120（确认于 18）
+    bar(17, 118, 119, 114, 116),
+    bar(18, 116, 117, 113, 115),
+    bar(19, 115, 116, 112, 114),
+    bar(20, 113, 114, 95, 101), // 插破到 95（收盘 101 没破 100）
+  ];
+  const swings = [
+    sp(2, "high", 110, undefined, true),
+    sp(5, "low", 100, undefined, true),
+    sp(16, "high", 120, "HH"),
+  ];
+
+  const r = detectStructure(candles, swings);
+  assert(r.projection.bearish?.triggerLevel === 100, `下方门槛 = ${r.projection.bearish?.triggerLevel}（期望 100）`);
+  assert(r.projection.bearish?.level === 95, `实时目标位 = ${r.projection.bearish?.level}（期望 95，未确认的新低）`);
+  // 实时极值**不参与事件判定** → 不能因为 95 就凭空多出 BOS/CHoCH
+  assert(r.bos.length === 1 && r.choch.length === 0, `事件数不受实时极值影响（BOS ${r.bos.length} / CHoCH ${r.choch.length}，期望 1 / 0）`);
+
+  // 再插破到 94（收盘 96 仍在 100 之上）→ 实时目标跟着下移
+  const moved = [...candles, bar(21, 101, 102, 94, 102)]; // 插破到 94，但收盘 102 仍在门槛 100 之上
+  const r2 = detectStructure(moved, swings);
+  assert(r2.projection.bearish?.triggerLevel === 100, `门槛不变 = ${r2.projection.bearish?.triggerLevel}（期望 100）`);
+  assert(r2.projection.bearish?.level === 94, `实时目标下移到 = ${r2.projection.bearish?.level}（期望 94）`);
+  assert(r2.bos.length === 1 && r2.choch.length === 0, "继续插破也不产生新事件（只有收盘才算突破）");
+
+  // 收盘真的跌破 → 门槛 100 与实时目标一起被破坏，下方只剩一个新的实时低点
+  const broke = [...candles, bar(21, 101, 102, 94, 102), bar(22, 95, 96, 92, 93)];
+  const r3 = detectStructure(broke, swings);
+  assert(r3.projection.bearish === null, `收盘跌破后门槛与目标一起消失（bearish = ${r3.projection.bearish === null ? "null" : r3.projection.bearish.level}）`);
 }
 
 console.log(

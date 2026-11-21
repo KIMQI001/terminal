@@ -51,12 +51,25 @@ import { BOS, CHoCH, StructureProjection, StructurePrediction } from "@/types/in
  *   · 最近的可比较 swing high 是 LH / 最近的可比较 swing low 是 LL → 空头
  * 两个都有时取时间上更晚的那个；都没有（无参照）→ 本次突破即「建立结构」，记为 BOS。
  *
- * **5) 预测下一个 BOS / CHoCH（上下各一个）**
- * 引擎跑完后，队列里剩下的就是「还没破的结构位」：
- *   · 上方最近的一个（activeHighs 里最低的）→ 破它会触发的事件
- *   · 下方最近的一个（activeLows 里最高的）→ 破它会触发的事件
+ * **5) 预测下一个 BOS / CHoCH 的**目标位**（上下各一个）**
+ *
+ * 结构位分成两层：
+ *   · **门槛位** = 离现价最近的那个未破结构位（下方最高 / 上方最低）
+ *     → 收盘价越过它，就会真的报出 BOS / CHoCH 事件（虚线事件线）
+ *   · **目标位** = 门槛位**外侧**的下一个结构位（下方第二高 / 上方第二低）
+ *     → 也就是「LL 底下的目标」「HH 上方的目标」，渲染层画成**实线**
  * 事件是 BOS 还是 CHoCH，取决于当前趋势：顺势=BOS，逆势=CHoCH。
- * 渲染层把这两条画成**实线**，价格触及后引擎会真的报出事件 → 线变回虚线。
+ * 目标位被收盘价越过 → 它从候选里消失 → 实线自动外推到更远的目标。
+ *
+ * **6) 预测层是实时的（实时极值）**
+ *
+ * 上面说的「结构位」都来自 pivot，需要右侧 length-1 根 K 确认才成立
+ * （1d 要等 29 天），直接用会有明显迟滞。
+ * 所以预测层额外维护**实时极值**：
+ *   · provisionalHigh / provisionalLow = 还没被收盘价突破的最近一个高/低点
+ *   · 它们可以是任意一根 K 的极值，不用等确认 → K 线一刷新，预测位就跟着动
+ * 实时极值**只参与预测**（算门槛 / 目标），**不参与 BOS/CHoCH 事件判定** ——
+ * 事件仍然只在 pivot 确认后触发，避免前视偏差、避免信号事后改口。
  */
 
 export type StructureTrend = "up" | "down";
@@ -138,12 +151,19 @@ export function detectStructure(
   const activeHighs: SwingPoint[] = [];
   const activeLows: SwingPoint[] = [];
 
+  // 实时极值（未确认）—— 只用于预测层，不参与事件判定
+  let provisionalHigh: SwingPoint | null = null;
+  let provisionalLow: SwingPoint | null = null;
+
   let si = 0;
 
   for (let i = 0; i < candles.length; i++) {
     // 1) 把此刻已确认的 swing 放进对应队列
     while (si < eligible.length && activationIndex(eligible[si]) <= i) {
       const sw = eligible[si];
+      // 注：这里**不要**把对应的实时极值清空 —— 清空的话下一根 K 会用
+      // 自己的 high/low 重建一个更低的实时极值（等于凭空造出一个新位）。
+      // 重复计入由下面的合并函数按 index 去重解决。
       if (sw.type === "high") activeHighs.push(sw);
       else activeLows.push(sw);
       si++;
@@ -229,42 +249,121 @@ export function detectStructure(
         }
       }
     }
+
+    // ── 实时极值（未确认）───────────────────────────────
+    // 「还没被收盘价突破的最近一个高点 / 低点」。
+    // 一旦收盘价越过了它，它就作废 —— 结构位被破坏就是被破坏了，价格回来也不复原。
+    if (provisionalHigh && bar.close > provisionalHigh.price) provisionalHigh = null;
+    if (!provisionalHigh || bar.high > provisionalHigh.price) {
+      provisionalHigh = { type: "high", price: bar.high, time: bar.time, index: i, confirmIndex: i };
+    }
+    if (provisionalLow && bar.close < provisionalLow.price) provisionalLow = null;
+    if (!provisionalLow || bar.low < provisionalLow.price) {
+      provisionalLow = { type: "low", price: bar.low, time: bar.time, index: i, confirmIndex: i };
+    }
   }
 
-  // 4) 预测下一个 BOS / CHoCH（上下各一个）
-  //    队列里剩下的都是「还没被收盘价破掉的结构位」：
-  //      · 上方最近的（activeHighs 里价位最低的）→ 价格收盘站上它会触发什么
-  //      · 下方最近的（activeLows 里价位最高的）→ 价格收盘跌破它会触发什么
+  // 4) 预测下一个 BOS / CHoCH 的**目标位**（上下各一个）
+  //    候选 = 已确认未破的结构位 + 实时极值（未确认），两者合起来才是「现在看得见的位」
+  //      · 门槛位 = 候选里离现价最近的那个（下方取最高价、上方取最低价）
+  //      · 目标位 = 门槛位**外侧**的下一个（下方取第二高、上方取第二低）
   //    定性沿用引擎的规则：顺势=BOS，逆势=CHoCH。
   //    注意：影线插破但收盘收回的位**仍然留在这里** → 依然被标成「下一个 BOS」实线。
   const effectiveTrend = trend ?? inferPriorBias(activeHighs, activeLows);
 
-  let bullish: StructurePrediction | null = null;
-  let bearish: StructurePrediction | null = null;
-
-  if (activeHighs.length > 0) {
-    const nearest = activeHighs.reduce((a, b) => (b.price < a.price ? b : a));
-    bullish = {
-      kind: effectiveTrend === "down" ? "choch" : "bos",
-      direction: "bullish",
-      level: nearest.price,
-      swingPoint: nearest,
-    };
-  }
-
-  if (activeLows.length > 0) {
-    const nearest = activeLows.reduce((a, b) => (b.price > a.price ? b : a));
-    bearish = {
-      kind: effectiveTrend === "up" ? "choch" : "bos",
-      direction: "bearish",
-      level: nearest.price,
-      swingPoint: nearest,
-    };
-  }
+  const bullish = pickTarget(activeHighs, provisionalHigh, "bullish", effectiveTrend);
+  const bearish = pickTarget(activeLows, provisionalLow, "bearish", effectiveTrend);
 
   return {
     bos: bosSignals,
     choch: chochSignals,
     projection: { bullish, bearish },
+  };
+}
+
+/**
+ * 选出一条目标预测
+ *
+ * · **门槛位 trigger** = 离现价最近的那个位（下方取最高、上方取最低）
+ *   候选 = 已确认未破的结构位 + 实时极值 → 所以门槛是实时的
+ * · **目标位 target** = 门槛位**外侧**的下一个**已确认结构位**
+ *   （外侧没有已确认结构位时，退回用实时极值兜底）
+ *
+ * 目标优先用已确认结构位，是因为它才是真正的「结构目标」；
+ * 未确认的插破点只用来更新门槛，不去抢目标的位。
+ */
+function pickTarget(
+  confirmed: SwingPoint[],
+  provisional: SwingPoint | null,
+  direction: "bullish" | "bearish",
+  trend: StructureTrend | null
+): StructurePrediction | null {
+  const all = mergeCandidates(confirmed, provisional);
+  if (all.length === 0) return null;
+
+  // 上方按价格升序（门槛 = 最低），下方按价格降序（门槛 = 最高）
+  const sorted =
+    direction === "bullish"
+      ? [...all].sort((a, b) => a.price - b.price)
+      : [...all].sort((a, b) => b.price - a.price);
+  const trigger = sorted[0];
+
+  // 门槛外侧最近的「已确认结构位」
+  const outerConfirmed = confirmed.filter((c) =>
+    direction === "bullish" ? c.price > trigger.price : c.price < trigger.price
+  );
+  const target =
+    outerConfirmed.length > 0
+      ? direction === "bullish"
+        ? outerConfirmed.reduce((a, b) => (b.price < a.price ? b : a))
+        : outerConfirmed.reduce((a, b) => (b.price > a.price ? b : a))
+      : sorted[1];
+
+  if (!target) return null;
+  return makeTarget(target, trigger, direction, trend);
+}
+
+/**
+ * 合并「已确认的结构位」与「实时极值」→ 候选位集合
+ *
+ * 同一个下标可能两边都有（实时极值后来被 pivot 确认了）→ 按 index 去重，
+ * 已确认的那份优先（它带 HH/LL 分类）。
+ */
+function mergeCandidates(confirmed: SwingPoint[], provisional: SwingPoint | null): SwingPoint[] {
+  if (!provisional) return [...confirmed];
+  const map = new Map<number, SwingPoint>();
+  map.set(provisional.index, provisional);
+  for (const c of confirmed) map.set(c.index, c);
+  return [...map.values()];
+}
+
+/**
+ * 组装一条目标预测
+ *
+ * @param target - 目标位（门槛外侧的下一个结构位）
+ * @param trigger - 门槛位（离现价最近的那个未破结构位）
+ * @param direction - 目标方向
+ * @param trend - 当前趋势（决定突破门槛时是 BOS 还是 CHoCH）
+ */
+function makeTarget(
+  target: SwingPoint,
+  trigger: SwingPoint,
+  direction: "bullish" | "bearish",
+  trend: StructureTrend | null
+): StructurePrediction {
+  const kind =
+    direction === "bullish"
+      ? trend === "down"
+        ? "choch"
+        : "bos"
+      : trend === "up"
+        ? "choch"
+        : "bos";
+  return {
+    kind,
+    direction,
+    level: target.price,
+    triggerLevel: trigger.price,
+    swingPoint: target,
   };
 }

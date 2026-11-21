@@ -5,9 +5,10 @@
  * - **Swing legs**：相邻两个摆动点之间的连线（涨=绿、跌=红）
  * - **BOS**：Break of Structure —— 顺势突破结构位（蓝色虚线=向上突破 / 红色虚线=向下突破）
  * - **CHoCH**：Change of Character —— 逆势突破结构位（绿色虚线=向上 / 紫色虚线=向下）
- * - **预测位**：还没发生的下一个 BOS / CHoCH —— **实线**，从结构位一路画到图表右缘。
- *   价格一旦**收盘**越过（只被影线插破不算），引擎就会真的报出这个事件 →
- *   这条线随之变回虚线，同时在更远的位置出现新的实线预测位。
+ * - **目标位**：下一个 BOS / CHoCH 的**目标价** —— **实线**（门槛位外侧的下一个结构位，
+ *   也就是「LL 底下的目标」「HH 上方的目标」），从该结构位一路画到图表右缘。
+ *   目标位被**收盘**越过 → 它从候选里消失 → 实线自动外推到更远的目标；
+ *   同时门槛位被越过时，引擎会真的报出 BOS / CHoCH → 虚线事件线。
  *
  * ## 为什么用 Primitive 而不是 SVG 覆盖层
  *
@@ -164,8 +165,8 @@ class StructurePaneRenderer implements ISeriesPrimitivePaneRenderer {
       ctx.globalAlpha = 1;
 
       // ── 预测位（实线，延伸到图表右缘）────────────────
-      // 还没发生的下一个 BOS / CHoCH：价格一旦收盘越过（只被影线插破不算），
-      // 引擎就会真的报出这个事件 → 这条线变回虚线，同时更远处出现新的实线预测位。
+      // 下一个 BOS / CHoCH 的目标价（门槛外侧的下一个结构位）。
+      // 目标价被收盘越过 → 它从候选里消失 → 这条实线自动外推到更远的目标。
       for (const p of predictions) {
         const y = priceToCoordinate(p.level);
         if (y === null) continue;
@@ -186,10 +187,10 @@ class StructurePaneRenderer implements ISeriesPrimitivePaneRenderer {
         ctx.lineTo(chartWidth, y);
         ctx.stroke();
 
-        // 右端标签：预测BOS / 预测CHoCH
+        // 右端标签：目标BOS / 目标CHoCH
         // 标签放在**线的上方**而不是压在线上 —— 上方目标的摆动点往往很靠右，
         // 线本身只有几十像素宽，标签压上去会把线整段盖掉。
-        const text = p.kind === "bos" ? "预测BOS" : "预测CHoCH";
+        const text = p.kind === "bos" ? "目标BOS" : "目标CHoCH";
         ctx.font = "11px sans-serif";
         const tw = ctx.measureText(text).width + 12;
         const th = 15;

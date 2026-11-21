@@ -676,7 +676,7 @@ export function TradingChart() {
       // 开关关闭时清空残留信号(最多保留 60 个 BOS / 20 个 CHoCH)
       setBOSSignals(enabled.bos ? bos.slice(-60) : []);
       setCHoCHSignals(enabled.choch ? choch.slice(-20) : []);
-      // 预测位（上下各一个）—— 渲染成实线，触及后引擎会报出真事件 → 变回虚线
+      // 预测目标位（上下各一个）—— 门槛外侧的下一个结构位，渲染成实线
       setStructureProjection(projection);
 
       // 计算并保存多周期趋势
@@ -1854,7 +1854,7 @@ export function TradingChart() {
     }
     primitive.setEvents(events);
 
-    // 预测位（实线）—— 还没发生的下一个 BOS / CHoCH，上下各一个
+    // 预测目标位（实线）—— 下一个 BOS / CHoCH 的目标价（门槛外侧的下一个结构位）
     const predictions: StructurePredictionEvent[] = [];
     if (structureProjection) {
       const push = (
